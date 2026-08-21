@@ -1,0 +1,9 @@
+# Spike artifacts — session cookies, screenshots. NEVER commit credentials/state.
+spike/.state/
+
+node_modules/
+.DS_Store
+
+# Xcode
+*.xcodeproj/xcuserdata/
+DerivedData/

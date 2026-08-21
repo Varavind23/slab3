@@ -1,0 +1,16 @@
+{
+  "name": "slab3-m0-spike",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "cardladder": "tsx cardladder/spike.ts",
+    "courtyard": "tsx courtyard/spike.ts"
+  },
+  "dependencies": {
+    "playwright": "^1.49.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}
