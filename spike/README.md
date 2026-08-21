@@ -33,11 +33,16 @@ Runs headed so you can watch for 2FA/captcha. Session cookies save to `.state/`
 npm run courtyard -- "charizard base set psa 9"
 ```
 
-**Verdict:**
-- [ ] Real browser passes bot wall? _____
-- [ ] Internal JSON API observed, usable without auth? _____
-- [ ] Listing/floor price readable per card+grade? _____
-- **GO / NO-GO:** _____
+**Verdict (run 2026-08-21):**
+- [x] Real browser passes bot wall? **YES — 200 (curl gets 403, browser passes)**
+- [x] Internal JSON API observed, usable without auth? **YES — api.courtyard.io
+      answers plain curl with browser-ish headers. Endpoints seen:
+      `/index/transactions?tx_type=sale` (recent sales w/ paymentAmount, USDC
+      6-decimals, chain=polygon), `/index/query/recent-pulls`, `/orderbook/config`.**
+- [ ] Listing/floor price readable per card+grade? **PARTIAL — sales feed confirmed;
+      card-identity → assetID mapping + listing/search endpoint still to trace
+      (browse a specific card page and watch `[api]` lines).**
+- **GO / NO-GO:** **GO — adapter can likely be plain HTTP, no Playwright.**
 
 ## 3. Physical slab scanning (needs iPhone + real PSA and CGC slabs)
 
