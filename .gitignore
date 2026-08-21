@@ -7,3 +7,4 @@ node_modules/
 # Xcode
 *.xcodeproj/xcuserdata/
 DerivedData/
+spike/.env

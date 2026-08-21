@@ -1,0 +1,19 @@
+name: ScanHarness
+options:
+  bundleIdPrefix: com.slab3
+  deploymentTarget:
+    iOS: "17.0"
+targets:
+  ScanHarness:
+    type: application
+    platform: iOS
+    sources: [ScanHarness]
+    settings:
+      base:
+        INFOPLIST_KEY_NSCameraUsageDescription: "Scans PSA/CGC cert barcodes on graded card slabs."
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        GENERATE_INFOPLIST_FILE: YES
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: "0.1"
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "5.9"

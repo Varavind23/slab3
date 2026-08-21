@@ -65,5 +65,5 @@ good light, bad light, and through case glare. Record the screen.
 Ask the friend: when you decide where to sell, which Card Ladder number do you
 actually use, and which Courtyard number? (avg / last sale / current floor / other)
 
-- Card Ladder metric: _____
-- Courtyard metric: _____
+- Card Ladder metric: **average sale** (confirmed 2026-08-21)
+- Courtyard metric: **recent sale** — from `api.courtyard.io/index/transactions?tx_type=sale` (confirmed 2026-08-21)
