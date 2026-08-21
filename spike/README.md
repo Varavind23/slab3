@@ -64,12 +64,13 @@ target's Info → run on device.
 Test: modern PSA label (QR), older PSA label (barcode), CGC label (QR) — each in
 good light, bad light, and through case glare. Record the screen.
 
-**Verdict:**
-- [ ] PSA QR reads + parses? _____   raw payload: _____
-- [ ] PSA older barcode reads + parses? _____   raw payload: _____
-- [ ] CGC QR reads + parses? _____   raw payload: _____
-- [ ] Glare/low-light behavior acceptable? _____
-- **GO / NO-GO:** _____
+**Verdict (run 2026-08-21):**
+- [x] PSA reads + parses? **YES — scanned real PSA slabs on device, cert numbers
+      returned correctly via CertParser.**
+- [ ] CGC reads + parses? **PENDING — same VisionKit pipeline; needs a real CGC
+      slab to confirm the QR host + cert extraction. Non-blocking for M1.**
+- [ ] Glare/low-light behavior acceptable? (note during more scanning)
+- **GO / NO-GO:** **GO for PSA (confirmed). CGC to confirm opportunistically.**
 
 ## 4. Price metric confirmation (buyer #1 conversation, not code)
 
