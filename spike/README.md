@@ -18,14 +18,25 @@ CL_EMAIL=you@example.com CL_PASSWORD=... npm run cardladder -- "1999 Pokemon Bas
 Runs headed so you can watch for 2FA/captcha. Session cookies save to `.state/`
 (gitignored); rerun to test persistence.
 
-**Verdict:**
-- [ ] Login scripted OK? _____
-- [ ] 2FA type (none / email / sms / totp): _____
-- [ ] Cookie session survives rerun? _____
-- [ ] Internal JSON API observed? (paste `[api]` URLs): _____
-- [ ] Price readable + WHICH metric is it (avg / last sale / index)? _____
-- [ ] Bot challenge encountered? _____
-- **GO / NO-GO:** _____
+**Verdict (run 2026-08-21):**
+- [x] Login scripted OK? **YES — Firebase email/password, landed on /dashboard.**
+- [x] 2FA type: **NONE** — straight to dashboard, no second factor prompted.
+- [x] Cookie session survives rerun? **YES — storageState reuse skips login entirely.**
+- [x] Internal JSON API observed? **Auth: `identitytoolkit.googleapis.com/v1/
+      accounts:signInWithPassword` (Firebase). Search/prices:
+      `search.cardladder.com/search`. Project: `cardladder-71d53`.**
+- [~] Price readable + metric? **Search API confirmed firing; exact avg-price field
+      in the response body deferred to M3 (needs the app's real search-box
+      interaction). Metric to display = AVERAGE SALE per buyer decision.**
+- [x] Bot challenge? **reCAPTCHA v3 (invisible) via `httpVerifyRecaptcha` cloud
+      function — auto-passed with a normal browser UA; NOT Turnstile (that 403 was
+      the marketing site's /login 404, a dead route). No manual challenge.**
+- **GO / NO-GO:** **GO — adapter authenticates via Firebase, reuses session, hits
+      `search.cardladder.com`. No 2FA, no hard captcha. Biggest M3 unknown is just
+      the exact JSON price-field name.**
+
+**Follow-up for M3 (T4/T5):** capture the `search.cardladder.com/search` request +
+response body while logged in to pin down the average-sale field name.
 
 ## 2. Courtyard (no account needed; curl already 403s — bot wall confirmed)
 

@@ -27,47 +27,57 @@ if (!EMAIL || !PASSWORD) {
 
 mkdirSync(STATE_DIR, { recursive: true });
 
+// Recon findings (2026-08-21): the real app is at app.cardladder.com (marketing
+// site www.cardladder.com/login 404s). Login form = input#email + input#password
+// + "Submit". Auth backend is FIREBASE (googleapis.com/identitytoolkit) — so the
+// production adapter can authenticate against Firebase directly and call the JSON
+// API with the ID token, no DOM scraping. This spike confirms login end-to-end
+// and captures the price endpoint the app calls for a searched card.
 const browser = await chromium.launch({ headless: false }); // headed: watch for 2FA/captcha
 const context = existsSync(STATE_FILE)
   ? await browser.newContext({ storageState: STATE_FILE })
-  : await browser.newContext();
+  : await browser.newContext({
+      userAgent:
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
+      viewport: { width: 1280, height: 900 },
+    });
 const page = await context.newPage();
 
-// Log every JSON response — if the SPA calls an internal API, we want its shape.
+// Log JSON traffic — Card Ladder API + Firebase auth. This is where prices live.
 page.on("response", async (res) => {
   const ct = res.headers()["content-type"] ?? "";
-  if (ct.includes("application/json") && res.url().includes("cardladder")) {
-    console.log(`[api] ${res.status()} ${res.url()}`);
+  const url = res.url();
+  if (ct.includes("json") && /cardladder|identitytoolkit|firebase/i.test(url)) {
+    console.log(`[api] ${res.status()} ${url.split("?")[0]}`);
   }
 });
 
-console.log("[1] Loading cardladder.com ...");
-await page.goto("https://www.cardladder.com", { waitUntil: "domcontentloaded" });
+console.log("[1] Loading app.cardladder.com/login ...");
+await page.goto("https://app.cardladder.com/login", { waitUntil: "domcontentloaded" });
+await page.waitForTimeout(6_000);
 
-const loggedIn = await page
-  .locator("text=/sign out|account|portfolio/i")
-  .first()
-  .isVisible()
-  .catch(() => false);
-
+const loggedIn = await page.locator("#email").count().then((n) => n === 0);
 if (!loggedIn) {
-  console.log("[2] Logging in (watch the window for 2FA/captcha — note what appears!)");
-  await page.getByRole("link", { name: /log ?in|sign ?in/i }).first().click();
-  await page.getByLabel(/email/i).fill(EMAIL);
-  await page.getByLabel(/password/i).fill(PASSWORD);
-  await page.getByRole("button", { name: /log ?in|sign ?in/i }).click();
-  // Give a human 60s to complete any 2FA challenge in the headed window.
-  await page.waitForTimeout(60_000);
+  console.log("[2] Logging in via Firebase email/password (watch window for 2FA/captcha)");
+  await page.fill("#email", EMAIL);
+  await page.fill("#password", PASSWORD);
+  await page.getByRole("button", { name: /^submit$/i }).first().click();
+  // Wait for either navigation away from /login or a 2FA/error to appear.
+  await page.waitForTimeout(15_000);
+  console.log(`[2] Post-login URL: ${page.url()}`);
   await context.storageState({ path: STATE_FILE });
-  console.log("[2] Session saved to .state/ — rerun to test cookie persistence.");
+  console.log("[2] Session saved to .state/cardladder.json — rerun to test persistence.");
 }
 
 console.log(`[3] Searching: ${QUERY}`);
-await page.getByRole("searchbox").or(page.getByPlaceholder(/search/i)).first().fill(QUERY);
-await page.keyboard.press("Enter");
-await page.waitForTimeout(5_000);
+try {
+  await page.getByPlaceholder(/search sales history/i).first().fill(QUERY);
+  await page.waitForTimeout(6_000); // watch [api] lines for the price/search call
+} catch {
+  console.log("[3] Search box not found — may not be logged in. Check screenshot.");
+}
 await page.screenshot({ path: STATE_DIR + "cardladder-search.png", fullPage: true });
-console.log("[3] Screenshot: .state/cardladder-search.png — record the price + which metric it is.");
+console.log("[3] Screenshot: .state/cardladder-search.png — record the AVERAGE price + its API URL.");
 
 console.log("\nGO/NO-GO CHECKLIST — fill in spike/README.md:");
 console.log("  [ ] Login scripted OK?           [ ] 2FA type (none/email/sms/totp)?");

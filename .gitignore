@@ -8,3 +8,5 @@ node_modules/
 *.xcodeproj/xcuserdata/
 DerivedData/
 spike/.env
+xcuserdata/
+*.xcworkspace/xcuserdata/
