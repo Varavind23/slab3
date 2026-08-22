@@ -9,18 +9,24 @@ struct CertScan: Identifiable {
     var id: String { "\(grader.rawValue):\(certNumber)" }
 }
 
-/// Parses raw barcode/QR payloads from PSA and CGC slab labels.
+/// Parses raw barcode/QR payloads from PSA and CGC slab labels, auto-detecting
+/// the grader — no manual toggle.
 ///
-///   payload ──► URL form?  ──► psacard.com/cert/{n}       → PSA
-///          │                   cgccards.com/certlookup/{n} → CGC
-///          └─► bare digits ──► PSA cert (Code 128/39 on older labels)
+///   payload ──► URL form?  ──► host psacard.com  → PSA
+///          │                   host cgc*.com      → CGC
+///          └─► bare digits ──► length 10 → CGC   (cert shown 4-3-3 on slab)
+///                              length 7-9 → PSA
 ///
-/// The M0 spike exists to validate these patterns against REAL slabs —
-/// add every payload the harness shows to the fixture list below.
+/// Grader-by-length is the magic: verified against real slabs (2026-08-22) —
+/// PSA certs are 8 digits (49385027, 82031277), CGC card certs are 10 digits
+/// (6055074171, 4274842001). Both encode as bare-number Code128 barcodes, so
+/// length is the only on-device signal that tells them apart. The barcode is
+/// the reliable target for both (the CGC QR is just a Turnstile-walled URL).
 enum CertParser {
     static func parse(_ payload: String) -> CertScan? {
         let trimmed = payload.trimmingCharacters(in: .whitespacesAndNewlines)
 
+        // QR / URL form: classify by host, pull the numeric path component.
         if let url = URL(string: trimmed), let host = url.host?.lowercased() {
             let digits = url.pathComponents.reversed().first {
                 !$0.isEmpty && $0.allSatisfy(\.isNumber)
@@ -34,10 +40,15 @@ enum CertParser {
             return nil
         }
 
-        // Bare numeric payload: older PSA labels carry the cert number directly.
-        if trimmed.count >= 7, trimmed.count <= 10, trimmed.allSatisfy(\.isNumber) {
+        // Bare numeric barcode (Code128). Grader by cert-number length.
+        guard !trimmed.isEmpty, trimmed.allSatisfy(\.isNumber) else { return nil }
+        switch trimmed.count {
+        case 10:
+            return CertScan(grader: .cgc, certNumber: trimmed, raw: trimmed)
+        case 7...9:
             return CertScan(grader: .psa, certNumber: trimmed, raw: trimmed)
+        default:
+            return nil
         }
-        return nil
     }
 }
