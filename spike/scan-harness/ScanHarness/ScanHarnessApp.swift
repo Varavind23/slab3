@@ -21,8 +21,9 @@ struct ScanHarnessApp: App {
 
 struct RawScan: Identifiable {
     let raw: String
+    let symbology: String
     let parsed: CertScan?
-    var id: String { raw }
+    var id: String { symbology + ":" + raw }
 }
 
 struct ScannerScreen: View {
@@ -30,14 +31,19 @@ struct ScannerScreen: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ScannerView { payload in
-                guard !scans.contains(where: { $0.raw == payload }) else { return }
-                scans.insert(RawScan(raw: payload, parsed: CertParser.parse(payload)), at: 0)
+            ScannerView { payload, symbology in
+                guard !scans.contains(where: { $0.raw == payload && $0.symbology == symbology }) else { return }
+                scans.insert(RawScan(raw: payload, symbology: symbology, parsed: CertParser.parse(payload)), at: 0)
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
             }
             List(scans) { scan in
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
+                        // Symbology tag: QR vs a 1D barcode (Code128 etc.).
+                        Text(scan.symbology).font(.caption2).bold()
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(scan.symbology == "QR" ? Color.blue.opacity(0.2) : Color.green.opacity(0.25))
+                            .clipShape(Capsule())
                         if let p = scan.parsed {
                             Text(p.grader.rawValue.uppercased()).bold()
                             Text(p.certNumber).monospaced()
@@ -48,7 +54,6 @@ struct ScannerScreen: View {
                         Button("Copy") { UIPasteboard.general.string = scan.raw }
                             .font(.caption).buttonStyle(.bordered)
                     }
-                    // FULL raw payload, wrapped — this is what we need for CGC.
                     Text(scan.raw)
                         .font(.system(.caption2, design: .monospaced))
                         .foregroundStyle(.secondary)
