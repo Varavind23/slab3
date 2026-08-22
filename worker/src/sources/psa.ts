@@ -18,7 +18,7 @@ import type { JsonTransport } from "./transport.js";
 import { TransportError } from "./transport.js";
 
 export interface CertData {
-  grader: "psa";
+  grader: "psa" | "cgc";
   certNumber: string;
   name?: string; // Subject
   set?: string; // Brand

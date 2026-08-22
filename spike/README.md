@@ -92,3 +92,24 @@ actually use, and which Courtyard number? (avg / last sale / current floor / oth
 
 - Card Ladder metric: **average sale** (confirmed 2026-08-21)
 - Courtyard metric: **recent sale** — from `api.courtyard.io/index/transactions?tx_type=sale` (confirmed 2026-08-21)
+
+## 5. CGC cert lookup (added 2026-08-22)
+
+- [x] Official CGC API? **NO — CGC has no public/partner developer API (confirmed).**
+- [x] Public cert page scrapeable headless? **NO — www.cgccards.com is AngularJS
+      behind Cloudflare Turnstile; the /certlookup/ path is interactive-challenge-
+      walled and does NOT auto-clear (unlike PSA's, which did). Bare + browser-
+      context both 403.**
+- Cert lookup runs on EVERY scan (high volume, latency-sensitive), so a human-
+  session cf_clearance bridge (like Card Ladder's) is a poor fit — the clearance
+  cookie expires mid-session.
+- **Options (decision pending):** (1) third-party CGC cert API (offload Cloudflare,
+  pay per lookup, vendor dependency); (2) human-session cf_clearance bridge with
+  auto re-auth prompts (fragile for per-scan); (3) manual/confirm entry fallback
+  (D10 degraded mode — always works, less magical); (4) check the CGC slab QR
+  payload — if it encodes card data, no lookup needed (FREE to check with a real
+  slab).
+- Adapter shell built (worker/src/sources/cgc.ts): implements CertLookup, reports
+  the Turnstile wall as a distinct state, never fabricates data. parseCgcCertPage
+  is the seam the chosen source fills.
+
