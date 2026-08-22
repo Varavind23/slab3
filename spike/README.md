@@ -31,12 +31,25 @@ Runs headed so you can watch for 2FA/captcha. Session cookies save to `.state/`
 - [x] Bot challenge? **reCAPTCHA v3 (invisible) via `httpVerifyRecaptcha` cloud
       function — auto-passed with a normal browser UA; NOT Turnstile (that 403 was
       the marketing site's /login 404, a dead route). No manual challenge.**
-- **GO / NO-GO:** **GO — adapter authenticates via Firebase, reuses session, hits
-      `search.cardladder.com`. No 2FA, no hard captcha. Biggest M3 unknown is just
-      the exact JSON price-field name.**
+- **GO / NO-GO (REVISED 2026-08-21 after deeper testing):** **CONDITIONAL — headless
+      scraping is NOT viable.** After sustained automated access, Cloudflare escalated
+      to an INTERACTIVE Turnstile "verify you are human" challenge on `app.cardladder.com`,
+      and `search.cardladder.com` (the data host) returns Cloudflare "Just a moment..."
+      too. Both hosts are Cloudflare-protected. The one-time login success in the
+      earlier spike was before escalation. Fully-headless Card Ladder automation gets
+      walled by interactive human-verification.**
 
-**Follow-up for M3 (T4/T5):** capture the `search.cardladder.com/search` request +
-response body while logged in to pin down the average-sale field name.
+**Card Ladder is viable ONLY via one of:**
+  1. **Official API / data-partner access** (the Assignment — friend's relationship).
+     Now the strongly-preferred path, not optional.
+  2. **Human-in-the-loop session**: user logs in themselves in a REAL browser (solves
+     any challenge as a human), we import those cookies and ride the session until
+     Cloudflare invalidates it. Their own account, human-verified — but fragile,
+     needs periodic re-auth, and headless API calls may still re-challenge.
+
+Automating the login/scrape headlessly is what trips Cloudflare. This validates the
+plan's #1 risk and Codex's warning to spike Card Ladder before heavy build. Courtyard
+(separate infra) is unaffected — its recent-sale API works via browser context.
 
 ## 2. Courtyard (no account needed; curl already 403s — bot wall confirmed)
 
