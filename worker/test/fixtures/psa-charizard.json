@@ -1,0 +1,20 @@
+{
+  "PSACert": {
+    "CertNumber": "49385027",
+    "SpecID": 123456,
+    "SpecNumber": "1999 POKEMON GAME 4",
+    "LabelType": "Standard",
+    "Year": "1999",
+    "Brand": "POKEMON GAME",
+    "Category": "TCG Cards",
+    "CardNumber": "4",
+    "Subject": "CHARIZARD-HOLO",
+    "Variety": "",
+    "CardGrade": "9",
+    "GradeDescription": "MINT 9",
+    "TotalPopulation": 12345,
+    "PopulationHigher": 6789
+  },
+  "IsValidRequest": true,
+  "ServerMessage": "Request successful"
+}
