@@ -61,3 +61,31 @@ describe("CourtyardSource.lookup", () => {
     expect(r).toMatchObject({ kind: "error", error: "not_found" });
   });
 });
+
+import { usdToCents } from "../src/sources/courtyard.js";
+const assetFixture = JSON.parse(
+  readFileSync(new URL("./fixtures/courtyard-asset.json", import.meta.url), "utf8"),
+);
+
+describe("usdToCents", () => {
+  it("converts a USD decimal to integer cents", () => {
+    expect(usdToCents(355)).toBe(35500);
+    expect(usdToCents(278.16)).toBe(27816);
+    expect(usdToCents(undefined)).toBeNull();
+  });
+});
+
+describe("CourtyardSource.extrasForAsset (real asset fixture)", () => {
+  const src2 = new CourtyardSource(new FixtureTransport([{ match: "index/asset/", body: assetFixture }]));
+  it("parses fmv, lowest ask, and highest bid from a real asset", async () => {
+    const r = await src2.extrasForAsset("07246724");
+    expect("fmvCents" in r).toBe(true);
+    if ("fmvCents" in r) {
+      // real fixture: fmv 328.8, ask (listing) 355, bid (offer) 278.16
+      expect(r.askCents).toBe(35500);
+      expect(r.bidCents).toBe(27816);
+      expect(r.fmvCents).toBe(32880);
+      expect(r.fmvConfidence).toBe("high");
+    }
+  });
+});
