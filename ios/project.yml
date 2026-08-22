@@ -1,0 +1,32 @@
+name: Slab3
+options:
+  bundleIdPrefix: com.slab3
+  deploymentTarget:
+    iOS: "17.0"
+targets:
+  Slab3:
+    type: application
+    platform: iOS
+    sources: [Slab3]
+    settings:
+      base:
+        DEVELOPMENT_TEAM: T2Z5X8HK8U
+        CODE_SIGN_STYLE: Automatic
+        PRODUCT_BUNDLE_IDENTIFIER: com.slab3.app
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: 1
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "5.9"
+        INFOPLIST_KEY_NSCameraUsageDescription: "Scan PSA and CGC cert barcodes on graded card slabs."
+        INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
+        GENERATE_INFOPLIST_FILE: "YES"
+  Slab3Tests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [Tests]
+    dependencies:
+      - target: Slab3
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: "YES"
+        SWIFT_VERSION: "5.9"
