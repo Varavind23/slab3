@@ -24,20 +24,30 @@ struct CardDetailScreen: View {
                     .keyboardType(.numberPad)
             }
 
-            Section("Price") {
-                LabeledContent("Manual price") {
+            Section("Prices") {
+                PricePair(
+                    courtyardCents: card.courtyardPriceCents,
+                    cardLadderCents: card.cardLadderPriceCents,
+                    loading: card.pricesLoading
+                )
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.vertical, 4)
+                LabeledContent("Manual override") {
                     TextField("$", value: dollars, format: .currency(code: "USD"))
                         .multilineTextAlignment(.trailing)
                         .keyboardType(.decimalPad)
                 }
-                Text("Card Ladder (avg) and Courtyard (recent) prices connect here next.")
-                    .font(.caption).foregroundStyle(.secondary)
+                if card.cardLadderPriceCents == nil {
+                    Text("Card Ladder connects once API access lands.")
+                        .font(.caption).foregroundStyle(Palette.textSecondary)
+                }
             }
 
             Section {
-                Button("Save details") {
+                Button("Save and price") {
                     card.lookupStatus = .resolved
                     card.refreshCardKey()
+                    Task { await PriceService.refresh(card, in: context) }
                 }
             }
         }

@@ -66,6 +66,9 @@ struct ScanScreen: View {
         lastScanned.insert(card, at: 0)
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         flash("\(scan.grader.rawValue.uppercased()) · \(scan.certNumber)")
+        // Fire the Courtyard price lookup — fills the price (and auto-identifies
+        // the card if it's vaulted on Courtyard) without blocking the scan loop.
+        Task { await PriceService.refresh(card, in: context) }
     }
 
     private func flash(_ text: String) {
