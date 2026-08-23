@@ -15,9 +15,11 @@ struct AuthScreen: View {
     var body: some View {
         VStack(spacing: 20) {
             Spacer()
-            Image(systemName: "barcode.viewfinder").font(.system(size: 52)).foregroundStyle(.tint)
-            Text("Slab3").font(.largeTitle.bold())
-            Text("Scan. Price. Sell.").foregroundStyle(.secondary)
+            // Wordmark only — grayscale, no icon color (design.md §1, §4).
+            Text("Slabs")
+                .font(.system(size: 40, weight: .bold, design: .rounded))
+                .foregroundStyle(Palette.textPrimary)
+            Text("Scan. Price. Sell.").foregroundStyle(Palette.textSecondary)
 
             VStack(spacing: 12) {
                 TextField("Email", text: $email)
@@ -32,27 +34,39 @@ struct AuthScreen: View {
             .padding(.horizontal)
 
             if let err = auth.errorMessage {
-                Text(err).font(.callout).foregroundStyle(.red).multilineTextAlignment(.center).padding(.horizontal)
+                // Errors state what happened, muted — not alarm-red (design.md §3).
+                Text(err).font(.callout).foregroundStyle(Palette.textSecondary)
+                    .multilineTextAlignment(.center).padding(.horizontal)
             }
 
+            // Primary action: grayscale, distinguished by contrast not color.
             Button {
                 Task { await submit() }
             } label: {
-                if working { ProgressView() }
-                else { Text(mode == .signIn ? "Log in" : "Create account").bold() }
+                Group {
+                    if working { ProgressView().tint(Palette.bg) }
+                    else { Text(mode == .signIn ? "Log in" : "Create account").fontWeight(.semibold) }
+                }
+                .frame(maxWidth: .infinity).padding(.vertical, 12)
+                .background(Palette.textPrimary, in: RoundedRectangle(cornerRadius: 12))
+                .foregroundStyle(Palette.bg)
             }
-            .buttonStyle(.borderedProminent)
+            .padding(.horizontal)
             .disabled(working || email.isEmpty || password.isEmpty)
+            .opacity(working || email.isEmpty || password.isEmpty ? 0.5 : 1)
 
             Button(mode == .signIn ? "Need an account? Sign up" : "Have an account? Log in") {
                 mode = mode == .signIn ? .signUp : .signIn
                 auth.errorMessage = nil
             }
             .font(.callout)
+            .tint(Palette.textSecondary)
 
             Spacer()
         }
         .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Palette.bg)
     }
 
     private func submit() async {
