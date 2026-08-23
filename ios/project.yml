@@ -24,6 +24,7 @@ targets:
         CURRENT_PROJECT_VERSION: 1
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_VERSION: "5.9"
+        INFOPLIST_KEY_CFBundleDisplayName: "Slabs"
         INFOPLIST_KEY_NSCameraUsageDescription: "Scan PSA and CGC cert barcodes on graded card slabs."
         INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
         GENERATE_INFOPLIST_FILE: "YES"

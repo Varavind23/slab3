@@ -77,14 +77,16 @@ struct ScanScreen: View {
     }
 }
 
+/// Grayscale grader chip (design.md §1: structural elements are grayscale — no
+/// color to signal identity; contrast and the label do the job).
 struct GraderChip: View {
     let grader: Grader
     var body: some View {
         Text(grader.rawValue.uppercased())
-            .font(.caption2.bold())
+            .font(.caption2.weight(.semibold))
             .padding(.horizontal, 7).padding(.vertical, 3)
-            .background(grader == .psa ? Color.red.opacity(0.15) : Color.blue.opacity(0.15))
-            .foregroundStyle(grader == .psa ? .red : .blue)
+            .foregroundStyle(Palette.textSecondary)
+            .background(Palette.surface2)
             .clipShape(Capsule())
     }
 }

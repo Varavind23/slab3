@@ -32,6 +32,14 @@ final class Card {
     var manualPriceCents: Int?
     var notes: String?
 
+    // Market prices (cents). Filled by the worker lookups; nil until fetched.
+    var courtyardPriceCents: Int?
+    var cardLadderPriceCents: Int?
+    var pricesLoading: Bool = false
+
+    // A card belongs to at most one folder; nil = "Unsorted" (design.md §5).
+    var folder: Folder?
+
     var grader: Grader { Grader(rawValue: graderRaw) ?? .psa }
     var lookupStatus: LookupStatus {
         get { LookupStatus(rawValue: lookupStatusRaw) ?? .pending }
