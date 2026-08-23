@@ -63,10 +63,20 @@ npm run courtyard -- "charizard base set psa 9"
       answers plain curl with browser-ish headers. Endpoints seen:
       `/index/transactions?tx_type=sale` (recent sales w/ paymentAmount, USDC
       6-decimals, chain=polygon), `/index/query/recent-pulls`, `/orderbook/config`.**
-- [ ] Listing/floor price readable per card+grade? **PARTIAL — sales feed confirmed;
-      card-identity → assetID mapping + listing/search endpoint still to trace
-      (browse a specific card page and watch `[api]` lines).**
-- **GO / NO-GO:** **GO — adapter can likely be plain HTTP, no Playwright.**
+- [x] Listing/floor price readable per card+grade? **YES — SOLVED via Algolia.**
+- **GO / NO-GO:** **DONE (2026-08-22).** Courtyard search is Algolia on algolia.net
+      (NOT behind Cloudflare), public search key `3b3ed...`, app `Y8TL3M06QA`,
+      index `marketplace_prod_recently_listed`. Query it DIRECTLY — no browser, no
+      bot wall. Records carry card metadata + cert + estimatedValueUsd (confidence)
+      + current listing + lastSaleDate. Adapter live-verified: Charizard Base Set
+      PSA 10 → $537, Pikachu PSA 9 → $761. See worker/src/sources/courtyard-algolia.ts.
+
+**Card Ladder vs Courtyard (why one worked and the other can't):** Courtyard's app
+calls Algolia directly (client-side public key) → bypassable. Card Ladder proxies
+ALL search through its own `search.cardladder.com` backend, which is Cloudflare-
+Turnstile-walled like the rest of its stack — there is NO direct third-party search
+service to hit. Confirmed 2026-08-22. So Card Ladder remains: official API (friend's
+ask) or human-obtained session only. No headless bypass exists.
 
 ## 3. Physical slab scanning (needs iPhone + real PSA and CGC slabs)
 
