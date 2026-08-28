@@ -94,7 +94,7 @@ enum PriceService {
                 if card.grade == nil { card.grade = match.grade }
                 card.setIdentity(
                     name: match.name, title: match.title, set: match.set,
-                    year: match.year, from: .courtyard
+                    year: match.year, cardNumber: match.cardNumber, from: .courtyard
                 )
                 await applyCourtyardImage(match, to: card)
             } else if card.lookupStatus == .pending {
@@ -168,9 +168,11 @@ enum PriceService {
             if let identity { await applyCardLadderIdentity(identity, to: card) }
             return .ok
 
-        case .notFound:
+        case .notFound(let identity):
             applyCardLadder(.notListed, to: card)
             card.cardLadderConfidence = 0
+            // No comps, but Card Ladder may still know exactly what this is.
+            if let identity { await applyCardLadderIdentity(identity, to: card) }
             return .notListed
 
         case .unavailable:

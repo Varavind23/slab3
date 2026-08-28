@@ -121,4 +121,32 @@ struct IdentityChainTests {
         #expect(card.thumbnailData == Data("camera".utf8))
         #expect(card.imageSource == .camera, "a failed download must not claim the slot")
     }
+
+    // MARK: Status
+
+    /// The bug this pins, seen on device: PSA is walled, so it stamped
+    /// `.unavailable`; Card Ladder then successfully named the card — but the row
+    /// still read "PSA couldn't be reached", because promotion to `.resolved` was
+    /// gated on `.pending`. The status describes the CARD, not the last source
+    /// that happened to fail.
+    @Test func aFailedSourceDoesNotBlockResolutionByAnother() {
+        let card = makeCard()
+        card.lookupStatus = .unavailable          // PSA 403'd
+        card.setIdentity(name: "Stephen Curry", from: .cardLadder)
+        #expect(card.lookupStatus == .resolved)
+    }
+
+    @Test func aNotFoundCardStillResolvesIfAnotherSourceKnowsIt() {
+        let card = makeCard()
+        card.lookupStatus = .notFound
+        card.setIdentity(title: "2022 Topps Chrome F1 #6 Lewis Hamilton", from: .cardLadder)
+        #expect(card.lookupStatus == .resolved)
+    }
+
+    @Test func identityThatNamesNothingLeavesTheStatusAlone() {
+        let card = makeCard()
+        card.lookupStatus = .unavailable
+        card.setIdentity(set: "Panini Donruss", year: 2022, from: .courtyard)
+        #expect(card.lookupStatus == .unavailable, "a set alone is not an identification")
+    }
 }

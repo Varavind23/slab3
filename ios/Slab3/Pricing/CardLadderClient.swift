@@ -57,7 +57,10 @@ struct CardLadderClient {
     /// Outcome of a price lookup, so the caller can update the local connection flag.
     enum PriceOutcome: Equatable {
         case ok(Int, Identity?) // average-sale cents + what CL knows about the card
-        case notFound     // Card Ladder has no comps for this card
+        /// No price — but Card Ladder may still KNOW the card. A missing comp is
+        /// not a missing card, and while PSA is walled this is often the only
+        /// thing that can name a slab at all.
+        case notFound(Identity?)
         case notConnected // user hasn't connected (or connection was cleared)
         case authExpired  // stored credentials no longer work — reconnect
         case unavailable  // rate limited / source error — transient
@@ -75,8 +78,8 @@ struct CardLadderClient {
                 options: .init(body: Body(cert: cert, grader: grader.rawValue, cardKey: cardKey, force: force))
             )
             switch reply.status {
-            case "ok": return reply.priceCents.map { .ok($0, reply.identity) } ?? .notFound
-            case "not_found": return .notFound
+            case "ok": return reply.priceCents.map { .ok($0, reply.identity) } ?? .notFound(reply.identity)
+            case "not_found": return .notFound(reply.identity)
             case "not_connected": return .notConnected
             case "auth_expired": return .authExpired
             default: return .unavailable // rate_limited / source_error

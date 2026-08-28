@@ -23,6 +23,7 @@ export {
   estimate,
   lookupAverageSale,
   parseResolve,
+  cardImage,
   parseEstimate,
   usdToCents,
   AVERAGE_SALE_WINDOW,

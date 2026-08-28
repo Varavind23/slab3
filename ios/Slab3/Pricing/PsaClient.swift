@@ -104,7 +104,11 @@ enum PsaIdentityService {
         case .notFound:
             card.lookupStatus = .notFound
         case .unavailable:
-            break // Keep the captured row in a retryable pending state.
+            // Say so. This used to `break`, so a blocked or down source was
+            // indistinguishable from one still loading — which is exactly how a
+            // PSA-side change went unnoticed until someone asked why no card
+            // ever got a name.
+            if card.lookupStatus == .pending { card.lookupStatus = .unavailable }
         }
     }
 }

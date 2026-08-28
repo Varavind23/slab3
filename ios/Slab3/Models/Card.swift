@@ -51,8 +51,15 @@ enum IdentitySource: String, Codable, Comparable {
 enum LookupStatus: String, Codable {
     case pending // scanned, not yet looked up
     case resolved // card data present
-    case needsConfirm // lookup unavailable (e.g. CGC) — user confirms from slab
+    case needsConfirm // no source can answer (e.g. CGC) — user confirms from slab
     case notFound // valid format, no data at the grader
+    /// The grader COULDN'T BE REACHED — a different fact from "no such cert",
+    /// and the app used to collapse the two by silently doing nothing, leaving
+    /// the row spinning on `pending` forever with no explanation. Prices already
+    /// draw this distinction (`notListed` vs `unreachable`); identity now does
+    /// too, because "PSA is blocking us" is something the user must be told
+    /// rather than left to infer from a card that never fills in.
+    case unavailable
 }
 
 /// Per-source price state. Split out from "the price is nil" because those are
@@ -239,7 +246,12 @@ final class Card {
         if source > identitySource { identitySource = source }
         // name feeds the key, so any change to it has to be reflected.
         refreshCardKey()
-        if self.name != nil, lookupStatus == .pending { lookupStatus = .resolved }
+        // Identified is identified, whatever else failed on the way. This used to
+        // promote only from `.pending`, which meant a PSA failure stamping
+        // `.unavailable` permanently locked the card out of `.resolved` — so a
+        // card Card Ladder had *successfully* named still displayed "PSA couldn't
+        // be reached". The status describes the card, not the last source tried.
+        if name != nil || title != nil { lookupStatus = .resolved }
     }
 
     /// Apply one source's picture. Same rule, with the camera capture as the

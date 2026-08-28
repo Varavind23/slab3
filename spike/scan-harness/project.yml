@@ -23,7 +23,7 @@ targets:
       - path: ../../ios/Slab3/Models/Grader.swift
     settings:
       base:
-        DEVELOPMENT_TEAM: T2Z5X8HK8U
+        DEVELOPMENT_TEAM: 7BMY83MWA8
         CODE_SIGN_STYLE: Automatic
         PRODUCT_BUNDLE_IDENTIFIER: com.slab3.ScanHarness
         INFOPLIST_KEY_NSCameraUsageDescription: "Scans PSA/CGC cert barcodes on graded card slabs."

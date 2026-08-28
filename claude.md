@@ -93,8 +93,12 @@ before touching any adapter**; don't re-litigate an access path it already ruled
   their OWN paid CL account (`cardladder-connect`); prices are fetched server-side
   (`cardladder-price`, cache-first, per-user daily budget) and shown only to
   connected users. `search.cardladder.com` is never used.
-- **PSA:** official API token exists but the account isn't approved (403/429), so
-  the live path is the cert-page scrape (`psa-scrape.ts`) via browser transport.
+- **PSA: both paths are CLOSED as of 2026-08-28 — see `spike/README.md` §4a.** The
+  official API is still unapproved (403), and the cert page now returns 403 with a
+  Cloudflare interstitial even to Cloudflare's own Browser Rendering, so the scrape
+  yields nothing. The code below is correct and ready for the moment either
+  reopens; until then PSA contributes no identity and the chain falls back to Card
+  Ladder. Do not "fix" the parser — it is not what is broken.
   Both emit the same `CertData`, so the pipeline is source-agnostic; swap back when
   approved. In production the scrape runs in the deployed Cloudflare Worker
   (`worker/src/index.ts`, `slab3-psa-cert`): one route, `POST /lookup`, guarded by a

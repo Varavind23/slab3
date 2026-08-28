@@ -147,6 +147,38 @@ actually use, and which Courtyard number? (avg / last sale / current floor / oth
 - Card Ladder metric: **average sale** (confirmed 2026-08-21)
 - Courtyard metric: **recent sale** — from `api.courtyard.io/index/transactions?tx_type=sale` (confirmed 2026-08-21)
 
+## 4a. PSA cert scrape is DEAD — wall tightened (2026-08-28)
+
+**Both PSA paths are now closed. This is a regression on their side, not ours.**
+
+- [x] Official API? **STILL NO.** `GET /publicapi/cert/GetByCertNumber/{n}` with the
+      stored token returns `403 {"Message":"Access to this API is limited to
+      approved customers."}`. Unchanged since 2026-08-21 — the account was never
+      approved.
+- [x] Cert-page scrape? **NO — newly blocked.** `https://www.psacard.com/cert/{n}`
+      now returns **403 with a Cloudflare interstitial** (`<h1>www.psacard.com`,
+      ~27 KB, zero `<dt>` elements) instead of the cert. Confirmed twice:
+      local headless Chromium, AND the deployed Worker using Cloudflare's own
+      Browser Rendering binding, which logged for two separate real certs:
+      `PSA navigation rejected { certNumber: '96679812', status: 403 }`
+      `PSA navigation rejected { certNumber: '154334127', status: 403 }`
+
+**This overturns §5's parenthetical** ("unlike PSA's, which did [auto-clear]"),
+which was true on 2026-08-22. PSA's wall no longer auto-clears for a headless
+context — it now behaves like CGC's.
+
+Effect on the app: `psa-cert` returns `source_error` for every PSA cert, so PSA
+contributes no name, no title and no picture. It went unnoticed because the
+client swallowed the failure (`catch -> .unavailable`, then a bare `break`),
+leaving rows spinning on "Identifying" forever. `LookupStatus.unavailable` now
+surfaces it — "couldn't be reached" and "no such cert" are different facts, the
+same rule prices already follow.
+
+**Options (decision pending):** (1) pursue PSA API approval — the only durable
+fix, and the account already has a token waiting; (2) a stealthier transport,
+i.e. an arms race we have already declined for CGC; (3) lean on the chain —
+Card Ladder resolves PSA certs exactly (see below) and covers CGC too.
+
 ## 4b. Card imagery — where a picture actually comes from (added 2026-08-28)
 
 Asked because scanned rows had an empty picture window. The assumption was that
@@ -159,12 +191,20 @@ PSA's cert page shows the card; it does not.
       reference anywhere. PSA serves scans only for certs WITH SecureScan imagery,
       a minority. A test pins the absence. **PSA cannot be the image source.**
       Its `<h1>` does carry the assembled title, which the `<dt>/<dd>` list doesn't.
-- [x] Card Ladder? **YES.** `httpbuildcollectioncard` returns `image`, a Firebase
-      Storage download URL ending `?alt=media` with **no token** — publicly
-      fetchable, no proxy needed. It also returns `label`/`player`/`set`/`number`.
-      Covers CGC, which nothing else does. Rides the existing price call.
-      (Careful: the same payload's `imageUrl` field is a *sale comp* photo of a
-      different slab. Take `image`.)
+- [x] Card Ladder? **YES — and it is now the only working source for names.**
+      `httpbuildcollectioncard` resolves a cert to `label`/`player`/`set`/`year`/
+      `number`/`grade` plus a picture. Verified live against two real PSA certs
+      2026-08-28: 96679812 -> "2022 Panini Donruss Optic Splash! #10 Stephen
+      Curry Holo", 154334127 -> "2022 Topps Chrome Formula 1 Sapphire Edition #6
+      Lewis Hamilton Green". Covers CGC, which nothing else does. Rides the
+      existing price call — never fetch it separately, that burns the budget.
+      **Gotcha: the image fields VARY by response, so go through `cardImage()`.**
+      Collection-context payloads (the saved fixture) carry `image` = a Firebase
+      `/o/cards%2F` render, while `imageUrl` there is a `/o/sales%2F` SALE COMP —
+      a different slab's listing photo, which must never be shown as this card.
+      Live cert lookups have **no `image` key at all** and put a CloudFront
+      `/cert/<id>/...jpg` scan in `imageUrl` (~1 MB, public, no auth — downscale
+      before storing).
 - [x] Courtyard? **YES, partial coverage.** Algolia hits carry a cert-keyed render
       (`.../graded-cards-renders/PSA%2098881872/nft_image.jpg`) plus a ~90-byte
       `lqipBase64` preview. Only for cards vaulted on Courtyard.

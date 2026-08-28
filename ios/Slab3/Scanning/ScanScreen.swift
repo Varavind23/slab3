@@ -201,9 +201,15 @@ struct ScanScreen: View {
         show(.captured(card: card))
         // Identity and price work run off the scan loop — the camera immediately
         // accepts the next slab while this row fills itself in.
+        //
+        // Card Ladder and Courtyard go FIRST. PSA is walled (spike/README.md §4a)
+        // and fails slowly — up to 15s on its API plus 50s on the scraper — so
+        // asking it first meant every row sat nameless for the length of a
+        // timeout before the sources that can actually answer were even tried.
+        // PSA still runs, and still outranks the others if it ever comes back.
         Task {
-            await PsaIdentityService.enrich(card)
             await PriceService.refresh(card, in: context)
+            await PsaIdentityService.enrich(card)
         }
     }
 
@@ -224,12 +230,14 @@ struct ScanScreen: View {
         recentCardIDs.insert(card.localId, at: 0)
     }
 
+    /// Tap-to-retry on an unresolved row. No longer PSA-only: Card Ladder
+    /// resolves CGC certs too, so a CGC card is now worth retrying.
     private func retry(_ card: Card) {
-        guard card.grader == .psa, card.lookupStatus != .resolved else { return }
+        guard card.lookupStatus != .resolved else { return }
         card.lookupStatus = .pending
         Task {
+            await PriceService.refresh(card, in: context, force: true)
             await PsaIdentityService.enrich(card)
-            await PriceService.refresh(card, in: context)
         }
     }
 
@@ -277,6 +285,7 @@ private struct RecentScanRow: View {
         case .pending: return "Identifying · \(card.grader.rawValue.uppercased()) #\(card.certNumber)"
         case .resolved: return [card.set, "#\(card.certNumber)"].compactMap { $0 }.joined(separator: " · ")
         case .notFound: return "\(card.grader.rawValue.uppercased()) cert not found · Tap to retry"
+        case .unavailable: return "\(card.grader.rawValue.uppercased()) couldn\'t be reached · Tap to retry"
         case .needsConfirm: return "Details pending · Tap to retry"
         }
     }
@@ -284,7 +293,7 @@ private struct RecentScanRow: View {
     private var statusColor: Color {
         switch card.lookupStatus {
         case .resolved: return Caliper.confHigh
-        case .notFound, .needsConfirm: return Caliper.confMid
+        case .notFound, .needsConfirm, .unavailable: return Caliper.confMid
         case .pending: return Caliper.cyan
         }
     }

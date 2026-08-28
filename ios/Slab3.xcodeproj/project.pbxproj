@@ -25,6 +25,7 @@
 		51F651B90F2AA7F5B870F616 /* ScanController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEFE7B251A77514FD26E1F4F /* ScanController.swift */; };
 		58EF3A0285E8D7D6F30E724F /* Card.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71C21BEC4746B70E38C0F3BE /* Card.swift */; };
 		6256D2117C7DF931D94D0095 /* CardLadderClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A691D4B5EEE0D804781EE4C /* CardLadderClient.swift */; };
+		63652B6FF9C774FA3DC5B60D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 9B72E4F9B0CD5841954ABFB0 /* Assets.xcassets */; };
 		69D5222E752DF4CBECCA6490 /* CameraPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D0ED565BA10269D99CFEB33 /* CameraPreview.swift */; };
 		75BED109AA1EE89901CD6B73 /* AuthScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 658AFF391A3D5F375DA851D2 /* AuthScreen.swift */; };
 		775F74D54CE356F40E0429B7 /* CameraSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 484401D422E983A22E496B06 /* CameraSession.swift */; };
@@ -101,6 +102,7 @@
 		933BABB01A8C65F807AB1F10 /* PsaClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PsaClient.swift; sourceTree = "<group>"; };
 		97CCFD7E101B4239277207A0 /* PriceRefresher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PriceRefresher.swift; sourceTree = "<group>"; };
 		98A3E0E69BB2070CBB599462 /* PriceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PriceService.swift; sourceTree = "<group>"; };
+		9B72E4F9B0CD5841954ABFB0 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		9EFE27B739F31EE230328B20 /* PriceWriteback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PriceWriteback.swift; sourceTree = "<group>"; };
 		9F3BEAA0D73A7F4FD4F274D9 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		AA5184E5BA5F561D2570BEED /* CardDetailScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardDetailScreen.swift; sourceTree = "<group>"; };
@@ -254,6 +256,14 @@
 			path = Backend;
 			sourceTree = "<group>";
 		};
+		9CC80D6CBD3A56571E89EFA6 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				9B72E4F9B0CD5841954ABFB0 /* Assets.xcassets */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
 		A17CB0F7D7ABC5B1C26043B3 /* Slab3 */ = {
 			isa = PBXGroup;
 			children = (
@@ -265,6 +275,7 @@
 				0801CCE76556CD63DCA04E4D /* Inventory */,
 				8E3CA27BAC46C4C74F284133 /* Models */,
 				3482BE1D9F05ADEF622B2758 /* Pricing */,
+				9CC80D6CBD3A56571E89EFA6 /* Resources */,
 				78DD3A8886066EAB8A8EE28B /* Scanning */,
 				05E27D3CF27F508D2F748726 /* Screens */,
 				89F2B27BFEEB8CC5F318CBF7 /* Shared */,
@@ -308,6 +319,7 @@
 			buildConfigurationList = 8C2539390B3F39FE3D901746 /* Build configuration list for PBXNativeTarget "Slab3" */;
 			buildPhases = (
 				8A94C66B0CBD72DC102C86C7 /* Sources */,
+				1ABBC8FE9B42DBF277D041A4 /* Resources */,
 				1E74C515D6FE6D91DD84F084 /* Frameworks */,
 			);
 			buildRules = (
@@ -332,7 +344,7 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					B81A80B94FB7DAD94EEAB6FF = {
-						DevelopmentTeam = T2Z5X8HK8U;
+						DevelopmentTeam = 7BMY83MWA8;
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -359,6 +371,17 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		1ABBC8FE9B42DBF277D041A4 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				63652B6FF9C774FA3DC5B60D /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		403228DCBB4AA77EE31B4528 /* Sources */ = {
@@ -443,7 +466,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.slab3.Slab3Tests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.varunaravind.Slab3Tests;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.9;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -514,9 +537,10 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = T2Z5X8HK8U;
+				DEVELOPMENT_TEAM = 7BMY83MWA8;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Slabs;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Scan PSA and CGC cert barcodes on graded card slabs.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
@@ -525,7 +549,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1;
-				PRODUCT_BUNDLE_IDENTIFIER = com.slab3.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.varunaravind.slabs;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.9;
 				TARGETED_DEVICE_FAMILY = 1;
@@ -539,9 +563,10 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = T2Z5X8HK8U;
+				DEVELOPMENT_TEAM = 7BMY83MWA8;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Slabs;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Scan PSA and CGC cert barcodes on graded card slabs.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
@@ -550,7 +575,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1;
-				PRODUCT_BUNDLE_IDENTIFIER = com.slab3.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.varunaravind.slabs;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.9;
 				TARGETED_DEVICE_FAMILY = 1;
@@ -567,7 +592,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.slab3.Slab3Tests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.varunaravind.Slab3Tests;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.9;
 				TARGETED_DEVICE_FAMILY = "1,2";

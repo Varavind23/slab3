@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { CardLadderSource, parseEstimate, parseResolve, usdToCents } from "../src/sources/cardladder.js";
+import { CardLadderSource, cardImage, lookupAverageSale, parseEstimate, parseResolve, usdToCents } from "../src/sources/cardladder.js";
 
 // Fixtures captured LIVE from the real Card Ladder Firebase callables (2026-08-24).
 const load = (n: string) => JSON.parse(readFileSync(new URL(`./fixtures/${n}`, import.meta.url), "utf8"));
@@ -85,6 +85,32 @@ describe("CardLadderSource — verified Firebase callable contract", () => {
 });
 
 describe("Card Ladder pure parsing (the condition=grade gotcha)", () => {
+  // Regression: a resolved card with no recent comps used to come back as a bare
+  // not_found, throwing away the ONLY identity available while PSA is walled —
+  // which showed up in the app as "Details pending" on cards Card Ladder had
+  // named perfectly. Verified live against two real certs (2026-08-28).
+  it("keeps the identity when the card is known but has no comps", async () => {
+    const noComps = { result: { ...ESTIMATE.result, oneMonthData: { velocity: 0, averagePrice: 0 } } };
+    const fetchStub = stubFetch([
+      { match: "signInWithPassword", body: { idToken: "t", refreshToken: "r", expiresIn: "3600" } },
+      { match: "httpbuildcollectioncard", body: RESOLVE },
+      { match: "httpcardestimate", body: noComps },
+    ]);
+    const out = await lookupAverageSale("tok", "20360362", "psa", "oneMonthData", { fetch: fetchStub });
+    expect(out.kind).toBe("not_found");
+    expect((out as any).identity?.label).toBe("1986 Fleer #73 Kevin Mchale");
+    expect((out as any).identity?.player).toBe("Kevin McHale");
+  });
+
+  it("has no identity when the cert itself is unknown", async () => {
+    const fetchStub = stubFetch([
+      { match: "httpbuildcollectioncard", body: { result: null } },
+    ]);
+    const out = await lookupAverageSale("tok", "00000000", "psa", "oneMonthData", { fetch: fetchStub });
+    expect(out.kind).toBe("not_found");
+    expect((out as any).identity).toBeUndefined();
+  });
+
   it("parseResolve requires profileId + grade code", () => {
     expect(parseResolve(RESOLVE.result, "psa")).toMatchObject({ profileId: "psa-299594", grade: "g9" });
     expect(parseResolve({ profileId: "psa-1", grade: null }, "psa")).toBeNull();
@@ -103,10 +129,31 @@ describe("Card Ladder pure parsing (the condition=grade gotcha)", () => {
     });
   });
 
-  it("takes `image` (the card) and never `imageUrl` (a sale comp photo of a different slab)", () => {
+  // The resolve payload's image fields VARY by response, so these pin both
+  // shapes seen in the wild. Getting this wrong puts another slab's listing
+  // photo on the card — the image equivalent of showing someone else's price.
+  it("prefers the card render when the payload carries one", () => {
     const resolved = parseResolve(RESOLVE.result, "psa");
     expect(resolved?.imageUrl).toContain("/cards%2F");
     expect(resolved?.imageUrl).not.toContain("/sales%2F");
+  });
+
+  it("takes the CloudFront cert scan that live lookups actually return", () => {
+    // Live shape (verified 2026-08-28): no `image` key at all, and `imageUrl` is
+    // the cert scan rather than a comp.
+    expect(cardImage({ imageUrl: "https://d1htnxwo4o0jhw.cloudfront.net/cert/164281967/abc.jpg" }))
+      .toBe("https://d1htnxwo4o0jhw.cloudfront.net/cert/164281967/abc.jpg");
+  });
+
+  it("never takes a Firebase sales/ comp — that is a different slab's listing photo", () => {
+    expect(cardImage({
+      imageUrl: "https://firebasestorage.googleapis.com/v0/b/cardladder-71d53.appspot.com/o/sales%2Fpwcc-ebay-2679713?alt=media",
+    })).toBeUndefined();
+  });
+
+  it("has no picture rather than a wrong one", () => {
+    expect(cardImage({})).toBeUndefined();
+    expect(cardImage(null)).toBeUndefined();
   });
 
   it("parseEstimate reads the one-month average as the default metric", () => {

@@ -66,10 +66,17 @@ export interface ClCardIdentity {
   pop?: number;
   category?: string;
   variation?: string;
-  /** Card Ladder's canonical render of this card. A Firebase Storage download
-   *  URL ending in `?alt=media` with NO token, so the app fetches it directly —
-   *  no proxying through an Edge Function (verified against the fixture
-   *  2026-08-28). This is the only cert-keyed image source that covers CGC. */
+  /** Card Ladder's picture of this card. Public — no auth, no proxying needed.
+   *  The only cert-keyed image source that covers CGC.
+   *
+   *  The payload shape VARIES, which is why this goes through `cardImage()`:
+   *    * `image` — a Firebase `/o/cards%2F...?alt=media` render (seen on
+   *      collection-context responses, e.g. the saved fixture);
+   *    * `imageUrl` — usually a CloudFront `/cert/<id>/...jpg` scan, which is
+   *      what live lookups actually return (verified 2026-08-28), but on the
+   *      fixture it is a Firebase `/o/sales%2F...` SALE COMP — a photo of a
+   *      different slab's listing, which must never become this card's picture.
+   *  Roughly 1 MB, so callers downscale before storing. */
   imageUrl?: string;
 }
 
@@ -193,10 +200,23 @@ export function parseResolve(result: any, grader: ClGrader): ClCardIdentity | nu
     pop: typeof result.pop === "number" ? result.pop : undefined,
     category: result.category ?? undefined,
     variation: result.variation || undefined,
-    // `image` is the card render; `imageUrl` on the same payload is a SALE comp
-    // photo (a pwcc/ebay listing shot), which is a different card's picture.
-    imageUrl: result.image ?? undefined,
+    imageUrl: cardImage(result),
   };
+}
+
+/** PURE: pick the picture OF THIS CARD out of a resolve payload, or nothing.
+ *
+ *  Takes the card render when present, else the cert scan, and rejects Firebase
+ *  `sales/` URLs outright: those are photos of somebody else's listing, and
+ *  putting one on this row would be the image equivalent of showing a price
+ *  that isn't this card's. Exported so the varying shapes are pinned by tests. */
+export function cardImage(result: any): string | undefined {
+  for (const candidate of [result?.image, result?.imageUrl]) {
+    if (typeof candidate !== "string" || !candidate) continue;
+    if (/\/o\/sales%2F/i.test(candidate)) continue; // another slab's listing photo
+    return candidate;
+  }
+  return undefined;
 }
 
 /** card identity → windowed average-sale estimate. `condition` MUST be the grade
@@ -241,7 +261,11 @@ export function usdToCents(usd: unknown): number | null {
 
 export type ClLookup =
   | { kind: "ok"; priceCents: number; profileId: string; asOf: string; identity: ClCardIdentity }
-  | { kind: "not_found" }
+  /** No price. `identity` is present when Card Ladder KNOWS the card but has no
+   *  recent comps — a different fact from "no such cert", and the card can still
+   *  be named and pictured. Discarding it here is why resolved cards showed up
+   *  as "Details pending" (fixed 2026-08-28). */
+  | { kind: "not_found"; identity?: ClCardIdentity }
   | { kind: "error"; error: ClErrorKind; detail?: string };
 
 /** Resolve + estimate in one shot. Never throws — every failure becomes a typed
@@ -255,9 +279,12 @@ export async function lookupAverageSale(
 ): Promise<ClLookup> {
   try {
     const identity = await resolveCert(idToken, cert, grader, deps);
+    // Genuinely unknown cert: nothing to say about it.
     if (!identity) return { kind: "not_found" };
     const est = await estimate(idToken, identity, window, deps);
-    if (est.averageSaleCents === null) return { kind: "not_found" };
+    // Known card, no comps. Keep the identity — it is the only thing naming this
+    // card at all when PSA is walled, and a missing price is not a missing card.
+    if (est.averageSaleCents === null) return { kind: "not_found", identity };
     return { kind: "ok", priceCents: est.averageSaleCents, profileId: identity.profileId, asOf: est.asOf, identity };
   } catch (e) {
     if (e instanceof ClError) return { kind: "error", error: e.kind, detail: e.message };

@@ -88,7 +88,18 @@ Deno.serve(async (req) => {
         asOf: cached.as_of, cached: true, identity: identityOf(known),
       });
     }
-    if (cached.fetch_status === "not_found") return json({ status: "not_found", cached: true });
+    if (cached.fetch_status === "not_found") {
+      // A cached "no price" still has a name if we ever resolved one. Card Ladder
+      // is the only source naming cards while PSA is walled, so dropping it here
+      // would leave the row anonymous for the whole TTL.
+      const { data: known } = await db
+        .from("card_identity_map")
+        .select("label, player, card_set, card_year, card_number, image_url")
+        .eq("card_key", cardKey)
+        .eq("source", "cardladder")
+        .maybeSingle();
+      return json({ status: "not_found", cached: true, identity: identityOf(known) });
+    }
   }
 
   // 3) Per-user daily budget.
@@ -180,7 +191,31 @@ Deno.serve(async (req) => {
       fetch_status: "not_found",
       updated_at: nowIso,
     });
-    return json({ status: "not_found" });
+    // "No comps" is not "no card". When Card Ladder resolved the cert but has no
+    // recent sales, keep and return what it told us about the card.
+    if (result.identity) {
+      await db.from("card_identity_map").upsert({
+        card_key: cardKey,
+        source: "cardladder",
+        source_canonical_id: result.identity.profileId,
+        confidence: "exact",
+        label: result.identity.label ?? null,
+        player: result.identity.player ?? null,
+        card_set: result.identity.set ?? null,
+        card_year: result.identity.year ?? null,
+        card_number: result.identity.number ?? null,
+        image_url: result.identity.imageUrl ?? null,
+        updated_at: nowIso,
+      });
+    }
+    return json({
+      status: "not_found",
+      identity: result.identity && {
+        label: result.identity.label, player: result.identity.player,
+        set: result.identity.set, year: result.identity.year,
+        cardNumber: result.identity.number, imageUrl: result.identity.imageUrl,
+      },
+    });
   }
 
   // rate_limited / auth_expired / network → typed degraded state; don't poison cache.

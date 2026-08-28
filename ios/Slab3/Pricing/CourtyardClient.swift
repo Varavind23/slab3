@@ -24,6 +24,7 @@ struct CourtyardClient {
         let set: String?
         let year: Int?
         let grade: String?
+        let cardNumber: String?
         /// Courtyard's own render of the graded card, keyed by cert
         /// (.../graded-cards-renders/PSA%2098881872/nft_image.jpg), plus a
         /// ~90-byte inline preview that can be shown before the fetch lands.
@@ -87,14 +88,27 @@ struct CourtyardClient {
             priceCents: Int((usd * 100).rounded()),
             objectID: hit.objectID,
             confidence: confidence,
-            name: meta["Title/Subject"],
+            name: Self.shortName(in: meta),
             title: hit.title,
             set: meta["Set"],
             year: meta["Year"].flatMap { Int($0) },
             grade: hit.certification?.grade ?? meta["Grade"],
+            cardNumber: meta["Card Number"],
             imageUrl: hit.imageUrl.flatMap(URL.init(string:)),
             lqipBase64: hit.lqipBase64
         )
+    }
+
+    /// The card's short name out of Courtyard's metadata.
+    ///
+    /// The key is CATEGORY-dependent: Pokémon records use `Title/PKMN`, others
+    /// `Title/Subject`. This used to read only `"Title/Subject"` and fall back to
+    /// the listing headline, so for Pokémon — the app's main category — it always
+    /// took the long headline instead, which then fed `card_key` through `name`.
+    /// Matching the prefix is what actually finds it. Sorted for determinism;
+    /// real records carry exactly one `Title/` key.
+    static func shortName(in meta: [String: String]) -> String? {
+        meta.keys.sorted().first { $0.hasPrefix("Title/") }.flatMap { meta[$0] }
     }
 
     private static func usd(_ hit: Hit) -> Double? {
