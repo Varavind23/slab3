@@ -1,0 +1,27 @@
+/* Tight, instrument-like rhythm. Screen gutter is 18px; row panels sit on an 8px gap.
+   Corners are square or near it — 3px is the maximum radius in the system, reserved
+   for controls. Panels and rows are not rounded. */
+:root {
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 11px;
+  --space-6: 14px;
+  --space-7: 18px;
+  --space-8: 24px;
+
+  --gutter: 18px;
+  --row-gap: 8px;
+  --row-pad: 12px;
+
+  --radius-control: 3px;
+  --radius-panel: 0px;
+  --radius-phone: 36px;
+
+  --border-width: 1px;
+  --hit-min: 44px;
+
+  --thumb-w: 46px;
+  --thumb-h: 64px;
+}

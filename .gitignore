@@ -10,3 +10,7 @@ DerivedData/
 spike/.env
 xcuserdata/
 *.xcworkspace/xcuserdata/
+
+# Xcode build output
+ios/build/
+ios/build-device/

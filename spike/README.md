@@ -51,6 +51,24 @@ Automating the login/scrape headlessly is what trips Cloudflare. This validates 
 plan's #1 risk and Codex's warning to spike Card Ladder before heavy build. Courtyard
 (separate infra) is unaffected — its recent-sale API works via browser context.
 
+**REVISED AGAIN (2026-08-24) — SOLVED, DONE. The "no headless bypass" verdict was too
+pessimistic: Turnstile only guards the web SPA and `search.cardladder.com`. Card
+Ladder's real data plane is Firebase Cloud Functions on Google hosts
+(`us-central1-cardladder-71d53.cloudfunctions.net`) that are NOT behind Cloudflare and
+take a plain `Authorization: Bearer <Firebase ID token>`.** Verified live end-to-end:
+`accounts:signInWithPassword` (public key `AIzaSy…bkAHM`) → `httpbuildcollectioncard
+{cert,grader}` → `{profileId, grade:"g9"}` → `httpcardestimate {profileId,
+gradingCompany, condition:<grade>}` → `oneMonthData.averagePrice` = the average-sale
+metric (live sample: $116.92). **Gotcha:** `condition` MUST be the grade code (`g9`);
+`"PSA 9"`/`"9"` return all-zeros. `search.cardladder.com` stays Cloudflare-walled (403
+even with Bearer + browser UA) — we route around it. Firestore `:runQuery` on `cards`
+also works with the Bearer token (fallback). Shipped: bring-your-own-account —
+each user connects their OWN paid CL login; server (Supabase Edge Functions) stores it
+encrypted and does the lookups. See `supabase/functions/_shared/cardladder.ts` (the
+verified client, shared with `worker/`), `cardladder-{connect,price}`, and
+`worker/test/cardladder.test.ts`. The old `spike/cardladder/*.ts` (headed login +
+session capture) are obsolete — kept only as history.
+
 ## 2. Courtyard (no account needed; curl already 403s — bot wall confirmed)
 
 ```sh
@@ -95,6 +113,32 @@ good light, bad light, and through case glare. Record the screen.
 - [ ] Glare/low-light behavior acceptable? (note during more scanning)
 - **GO / NO-GO:** **GO for PSA (confirmed). CGC to confirm opportunistically.**
 
+### Scanner rebuilt on AVFoundation + Vision (2026-08-28)
+
+The VisionKit harness above proved the *reads*; it did not survive contact with
+volume scanning. `DataScannerViewController` vends pixels exactly one way,
+`capturePhoto()`, which reconfigures the running capture session — the preview
+froze ~0.5–1.5s per slab, and because that call was awaited before the next cert
+was admitted, it was also the only thing blocking the following slab. One cause,
+both complaints. There is no cheaper frame API on that class (no sample buffers,
+no exposed session), so the scanner now owns an `AVCaptureSession` and runs
+`VNDetectBarcodesRequest` on the video frames itself — the frame the barcode was
+found in is the photo. Nothing was lost: the app had already disabled every
+DataScanner affordance (guidance, highlighting, pinch-zoom).
+
+The harness is now instrumented for the questions a desk cannot answer — fps and
+detections/sec, each capture shown at both 46×64 and full width with its byte
+count, a suppression-window slider, and the guide rectangle drawn where Vision is
+actually looking. It builds the app's scanner **from source** rather than copying
+it: the old harness kept its own fork of `CertParser` that had drifted from the
+app's (different host matching, different cert extraction), which quietly made
+every verdict it produced a verdict about the harness.
+
+**Still to confirm on device:** Code128 reads on curved/glare-lit labels at
+natural distance, real slab-to-slab cadence, whether 2.5s is the right
+suppression window, whether the guide-rect crop frames the card or the label,
+thermals across a few hundred slabs, and PSA + CGC in the same stack.
+
 ## 4. Price metric confirmation (buyer #1 conversation, not code)
 
 Ask the friend: when you decide where to sell, which Card Ladder number do you
@@ -102,6 +146,31 @@ actually use, and which Courtyard number? (avg / last sale / current floor / oth
 
 - Card Ladder metric: **average sale** (confirmed 2026-08-21)
 - Courtyard metric: **recent sale** — from `api.courtyard.io/index/transactions?tx_type=sale` (confirmed 2026-08-21)
+
+## 4b. Card imagery — where a picture actually comes from (added 2026-08-28)
+
+Asked because scanned rows had an empty picture window. The assumption was that
+PSA's cert page shows the card; it does not.
+
+- [x] PSA cert page? **NO — not for most certs.** The saved real cert page
+      (`worker/test/fixtures/psa-cert-page.html`, cert 49385027) contains no image
+      of the card at all: the only `i.psacard.com` URLs are site chrome, `og:image`
+      is PSA's generic homepage card, and there is no `certimages`/SecureScan/CDN
+      reference anywhere. PSA serves scans only for certs WITH SecureScan imagery,
+      a minority. A test pins the absence. **PSA cannot be the image source.**
+      Its `<h1>` does carry the assembled title, which the `<dt>/<dd>` list doesn't.
+- [x] Card Ladder? **YES.** `httpbuildcollectioncard` returns `image`, a Firebase
+      Storage download URL ending `?alt=media` with **no token** — publicly
+      fetchable, no proxy needed. It also returns `label`/`player`/`set`/`number`.
+      Covers CGC, which nothing else does. Rides the existing price call.
+      (Careful: the same payload's `imageUrl` field is a *sale comp* photo of a
+      different slab. Take `image`.)
+- [x] Courtyard? **YES, partial coverage.** Algolia hits carry a cert-keyed render
+      (`.../graded-cards-renders/PSA%2098881872/nft_image.jpg`) plus a ~90-byte
+      `lqipBase64` preview. Only for cards vaulted on Courtyard.
+- **Verdict:** the camera capture is the floor (always present), upgraded to an
+  official render when one exists. Official images are used **only on an exact
+  cert match** — a fuzzy Courtyard hit is a different card.
 
 ## 5. CGC cert lookup (added 2026-08-22)
 

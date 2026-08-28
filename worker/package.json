@@ -4,15 +4,20 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "check": "tsc --noEmit -p tsconfig.cloudflare.json",
+    "deploy": "wrangler deploy"
   },
   "dependencies": {
+    "@cloudflare/puppeteer": "latest",
     "playwright": "^1.62.1",
     "undici": "^7.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",
+    "@cloudflare/workers-types": "latest",
     "typescript": "^5.6.0",
-    "vitest": "^2.1.0"
+    "vitest": "^2.1.0",
+    "wrangler": "latest"
   }
 }

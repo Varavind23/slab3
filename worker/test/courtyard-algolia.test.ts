@@ -48,4 +48,13 @@ describe("CourtyardAlgoliaSource.lookup (real Algolia fixture)", () => {
     const r = await new CourtyardAlgoliaSource(down).lookup({ cardKey: "x", grader: "psa", name: "Charizard" });
     expect(r).toMatchObject({ kind: "error", error: "network" });
   });
+
+  it("the record carries a cert-keyed card render (the app's image source)", () => {
+    // Guards the iOS mirror: if Courtyard drops these, the app silently loses
+    // its only Courtyard picture and falls back to the camera capture.
+    const hit = fixture.hits[0];
+    expect(hit.imageUrl).toContain("graded-cards-renders");
+    expect(hit.imageUrl).toContain(hit.certification.number);
+    expect(typeof hit.lqipBase64).toBe("string");
+  });
 });

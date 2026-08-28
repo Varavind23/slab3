@@ -28,6 +28,14 @@ interface AlgoliaHit {
   latestListing?: { price?: { amount?: { usd?: number } } };
   certification?: { agency?: string; number?: string; grade?: string };
   metadata?: Record<string, string>;
+  // Courtyard's own render of the graded card, cert-keyed
+  // (.../graded-cards-renders/PSA%2098881872/nft_image.jpg), plus a ~90-byte
+  // inline preview. This adapter implements PriceSource, which is a PRICE
+  // contract, so it doesn't surface them — the iOS mirror
+  // (ios/Slab3/Pricing/CourtyardClient.swift) consumes them for the card's
+  // picture. Declared here so the two stay honest about the record shape.
+  imageUrl?: string;
+  lqipBase64?: string;
 }
 interface AlgoliaResult {
   hits: AlgoliaHit[];

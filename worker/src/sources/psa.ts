@@ -24,6 +24,9 @@ export interface CertData {
   set?: string; // Brand
   year?: number;
   grade?: string; // CardGrade / GradeDescription
+  title?: string; // assembled display title from the cert page <h1>
+  cardNumber?: string; // "Card Number" label — the number printed on the card
+  imageUrl?: string; // SecureScan front image when PSA has one
   raw: unknown;
 }
 

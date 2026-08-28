@@ -1,71 +1,260 @@
 import SwiftUI
 import SwiftData
 
-/// One card's detail. For v1 foundation this shows identity + lets the sourcer
-/// confirm/enter card data (the CGC degraded path) and a manual price. Live
-/// cert lookup and Card Ladder/Courtyard prices wire in here next.
+/// One card in full. The row is deliberately dense; this is where the sourcer
+/// corrects identity, sees why a price is missing, and files the card.
+///
+/// Both sources get a line stating what the last fetch actually
+/// returned — "not listed" and "couldn't be reached" are different facts, and the
+/// row can only ever show an em dash for both.
 struct CardDetailScreen: View {
     @Bindable var card: Card
+    @Bindable var app: AppState
     @Environment(\.modelContext) private var context
+    @Environment(\.dismiss) private var dismiss
+    @Query(sort: \Folder.createdAt, order: .reverse) private var groups: [Folder]
+
+    @AppStorage(PriceService.connectedKey) private var cardLadderConnected = false
+    @State private var showConnect = false
 
     var body: some View {
-        Form {
-            Section("Identity") {
-                LabeledContent("Grader", value: card.grader.rawValue.uppercased())
-                LabeledContent("Cert", value: card.certNumber)
-                LabeledContent("Status", value: card.lookupStatus.rawValue)
+        VStack(spacing: 0) {
+            ScreenHeader(
+                context: "#\(card.certNumber)",
+                title: card.displayTitle,
+                source: $app.activeSource
+            ) {
+                Button("Done") { dismiss() }
+                    .font(.mono(10, .medium))
+                    .foregroundStyle(Caliper.textSecondary)
             }
 
-            Section("Card details") {
-                TextField("Name / subject", text: bind(\.name))
-                TextField("Set", text: bind(\.set))
-                TextField("Grade", text: bind(\.grade))
-                TextField("Year", value: $card.year, format: .number)
-                    .keyboardType(.numberPad)
-            }
+            ScrollView {
+                VStack(spacing: Caliper.rowGap) {
+                    slabPanel
+                    pricePanel
+                    identityPanel
+                    groupPanel
+                    notesPanel
 
-            Section("Prices") {
-                PricePair(
-                    courtyardCents: card.courtyardPriceCents,
-                    cardLadderCents: card.cardLadderPriceCents,
-                    loading: card.pricesLoading
-                )
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.vertical, 4)
-                LabeledContent("Manual override") {
-                    TextField("$", value: dollars, format: .currency(code: "USD"))
-                        .multilineTextAlignment(.trailing)
-                        .keyboardType(.decimalPad)
+                    CaliperButton(title: "Refresh prices now", variant: .accent, icon: "arrow.clockwise", fullWidth: true,
+                                  disabled: card.pricesLoading) {
+                        // One card, so bypassing the 24h Card Ladder cache costs a
+                        // single request from the daily budget — cheap here,
+                        // ruinous in bulk (see PriceRefresher).
+                        Task { await PriceService.refresh(card, in: context, force: true) }
+                    }
+                    CaliperButton(title: "Delete card", variant: .danger, fullWidth: true) {
+                        context.delete(card)
+                        dismiss()
+                    }
                 }
-                if card.cardLadderPriceCents == nil {
-                    Text("Card Ladder connects once API access lands.")
-                        .font(.caption).foregroundStyle(Palette.textSecondary)
-                }
-            }
-
-            Section {
-                Button("Save and price") {
-                    card.lookupStatus = .resolved
-                    card.refreshCardKey()
-                    Task { await PriceService.refresh(card, in: context) }
-                }
+                .padding(.horizontal, Caliper.gutter)
+                .padding(.bottom, Caliper.space8)
             }
         }
-        .navigationTitle(card.displayTitle)
-        .navigationBarTitleDisplayMode(.inline)
+        .background(Caliper.bg)
+        .sheet(isPresented: $showConnect) { CardLadderConnectView() }
     }
 
-    /// Bind an optional String field to a non-optional TextField.
+    /// The card, big enough to actually check against the slab in your hand.
+    ///
+    /// The caption is not decoration: the picture may be the user's own camera
+    /// grab or an official render from PSA, Card Ladder or Courtyard, and a
+    /// reseller needs to know which before they put it in a listing. `imageUrl`
+    /// is loaded when present because the stored copy is capped at ~1024 px,
+    /// with the cached bytes standing in while it loads.
+    private var slabPanel: some View {
+        VStack(alignment: .leading, spacing: Caliper.space3) {
+            ZStack {
+                if let url = card.imageUrl.flatMap(URL.init(string:)) {
+                    AsyncImage(url: url) { image in
+                        image.resizable().scaledToFit()
+                    } placeholder: {
+                        cachedImage ?? AnyView(SlabPlaceholder(card: card, scale: 2))
+                    }
+                } else if let cachedImage {
+                    cachedImage
+                } else {
+                    SlabPlaceholder(card: card, scale: 2)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .aspectRatio(0.72, contentMode: .fit)
+            .clipped()
+            .overlay(Rectangle().strokeBorder(Caliper.lineStrong, lineWidth: Caliper.borderWidth))
+
+            Text(card.imageSource.imageCaption)
+                .caliperMeta(Caliper.textTertiary)
+        }
+    }
+
+    private var cachedImage: AnyView? {
+        guard let data = card.thumbnailData, let image = UIImage(data: data) else { return nil }
+        return AnyView(Image(uiImage: image).resizable().scaledToFit())
+    }
+
+    // MARK: Prices
+
+    private var pricePanel: some View {
+        VStack(spacing: 0) {
+            ForEach(PriceSource.allCases) { source in
+                HStack(alignment: .firstTextBaseline, spacing: Caliper.space5) {
+                    Circle().fill(source.hue).frame(width: 6, height: 6)
+                    Text(source.accessibilityName).font(.calBody).foregroundStyle(Caliper.textPrimary)
+                    Spacer(minLength: Caliper.space4)
+                    ConfidenceMeter(value: card.confidences[source])
+                    Text(caliperMoney(cents: card.prices[source]))
+                        .font(.price)
+                        .foregroundStyle(card.prices[source] == nil ? Caliper.textTertiary : source.hue)
+                        .frame(width: 76, alignment: .trailing)
+                }
+                .padding(Caliper.rowPad)
+
+                if let note = note(for: source) {
+                    HStack {
+                        Text(note).caliperMeta(Caliper.textTertiary)
+                        Spacer(minLength: 0)
+                        if source == .cl && !cardLadderConnected {
+                            Button("Connect") { showConnect = true }
+                                .font(.mono(9, .medium))
+                                .foregroundStyle(Caliper.cyan)
+                        }
+                    }
+                    .padding(.horizontal, Caliper.rowPad)
+                    .padding(.bottom, Caliper.rowPad)
+                }
+                if source != PriceSource.allCases.last { Hairline() }
+            }
+        }
+        .caliperPanel()
+    }
+
+    /// One quiet line per source saying WHICH kind of missing this is.
+    private func note(for source: PriceSource) -> String? {
+        let (status, cents) = switch source {
+        case .cl: (card.cardLadderStatus, card.cardLadderPriceCents)
+        case .cy: (card.courtyardStatus, card.courtyardPriceCents)
+        }
+        switch status {
+        case .ok, .unknown: return nil
+        case .notListed: return "Not listed on \(source.accessibilityName) right now."
+        case .notConnected: return "Connect your own Card Ladder account to see this price."
+        case .unavailable:
+            return cents == nil
+                ? "\(source.accessibilityName) couldn't be reached. Try again."
+                : "Couldn't be re-checked — this is the last price we saw."
+        }
+    }
+
+    // MARK: Identity
+
+    private var identityPanel: some View {
+        VStack(spacing: 0) {
+            field("Name", bind(\.name), placeholder: "Card name")
+            Hairline()
+            field("Set", bind(\.set), placeholder: "Set")
+            Hairline()
+            field("Grade", bind(\.grade), placeholder: card.grader.rawValue.uppercased())
+            Hairline()
+            HStack {
+                Text("Year").caliperLabel()
+                Spacer()
+                TextField("Year", value: $card.year, format: .number)
+                    .font(.price)
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(.trailing)
+                    .foregroundStyle(Caliper.textPrimary)
+            }
+            .padding(Caliper.rowPad)
+            Hairline()
+            HStack {
+                Text("Manual price").caliperLabel()
+                Spacer()
+                TextField("—", value: dollars, format: .number.precision(.fractionLength(0)))
+                    .font(.price)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .foregroundStyle(Caliper.textPrimary)
+            }
+            .padding(Caliper.rowPad)
+        }
+        .caliperPanel()
+    }
+
+    private func field(_ label: String, _ text: Binding<String>, placeholder: String) -> some View {
+        HStack(spacing: Caliper.space5) {
+            Text(label).caliperLabel()
+            Spacer(minLength: Caliper.space4)
+            TextField(placeholder, text: text)
+                .font(.calBody)
+                .multilineTextAlignment(.trailing)
+                .foregroundStyle(Caliper.textPrimary)
+                .onSubmit { card.refreshCardKey() }
+        }
+        .padding(Caliper.rowPad)
+    }
+
+    // MARK: Group
+
+    private var groupPanel: some View {
+        VStack(spacing: 0) {
+            SectionLabelInline(text: "Group")
+            ForEach(groups) { group in
+                SheetRow(
+                    label: group.name,
+                    active: card.folder?.localId == group.localId,
+                    leading: { Circle().fill(group.hue).frame(width: 8, height: 8) }
+                ) {
+                    card.folder = card.folder?.localId == group.localId ? nil : group
+                }
+            }
+            if groups.isEmpty {
+                Text("No groups yet. Select cards on Inventory to make one.")
+                    .caliperMeta()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(Caliper.rowPad)
+            }
+        }
+        .caliperPanel()
+    }
+
+    private var notesPanel: some View {
+        VStack(alignment: .leading, spacing: Caliper.space4) {
+            Text("Notes").caliperLabel()
+            TextField("—", text: bind(\.notes), axis: .vertical)
+                .font(.calBody)
+                .foregroundStyle(Caliper.textPrimary)
+                .lineLimit(2...5)
+        }
+        .padding(Caliper.rowPad)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .caliperPanel()
+    }
+
     private func bind(_ keyPath: ReferenceWritableKeyPath<Card, String?>) -> Binding<String> {
         Binding(get: { card[keyPath: keyPath] ?? "" },
                 set: { card[keyPath: keyPath] = $0.isEmpty ? nil : $0 })
     }
 
-    /// Manual price in dollars, backed by the integer-cents field.
+    /// Manual price in whole dollars, backed by the integer-cents field.
     private var dollars: Binding<Double?> {
         Binding(
             get: { card.manualPriceCents.map { Double($0) / 100 } },
             set: { card.manualPriceCents = $0.map { Int(($0 * 100).rounded()) } }
         )
+    }
+}
+
+/// A section label that sits inside a panel rather than above one.
+struct SectionLabelInline: View {
+    let text: String
+    var body: some View {
+        Text(text)
+            .caliperLabel(Caliper.textTertiary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Caliper.rowPad)
+            .padding(.top, Caliper.rowPad)
+            .padding(.bottom, Caliper.space3)
     }
 }

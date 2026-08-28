@@ -7,19 +7,62 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0FEB89E2A308125E4CE99C0A /* CertParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A7A6DFDC157B045A0C1B374 /* CertParser.swift */; };
+		2228BA75A8701B732FAA1C8B /* Grader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C847E66E5533301BFE1D284 /* Grader.swift */; };
+		298954041E199404AE37DDCA /* CameraPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20A5857C3E74D63146B54F0E /* CameraPreview.swift */; };
+		4A522CE5776F657B3DE971E4 /* HarnessShims.swift in Sources */ = {isa = PBXBuildFile; fileRef = 862887ED384AB6C7B4DDA05E /* HarnessShims.swift */; };
+		4BF596B5819AC48E307EA165 /* SlabFrameCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 830F2BC5C26D1EAB0682DF66 /* SlabFrameCapture.swift */; };
 		558C1C197B974CD5F22A0584 /* ScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E28C7C0EFED23045744E09C6 /* ScannerView.swift */; };
+		5BE905086C0382037D8F62D2 /* ScanGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D5D26AA02E9409AB27D7AF1 /* ScanGeometry.swift */; };
 		A8E30CB8FD37DE7AEDF242DD /* ScanHarnessApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EF490BB156783A4435B5BE3 /* ScanHarnessApp.swift */; };
-		FCACCB5B315BA881E50DBED1 /* CertParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F7EB36B29153752729C602A /* CertParser.swift */; };
+		BAD37391FCDE5461EB2D564F /* ScanController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 994B881F8134C7A77B0B5B3C /* ScanController.swift */; };
+		C73A3AB31FFDF5FD632D21E5 /* RecentCertWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0668757C47AFFE8208F72F4D /* RecentCertWindow.swift */; };
+		D7FA113F818F8D3D04591785 /* CameraSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91E841E04E0333E25F899B32 /* CameraSession.swift */; };
+		EE46FD2DCA8333E583C77385 /* BarcodeDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC3BB7CB3382551D9542F58C /* BarcodeDetector.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		0668757C47AFFE8208F72F4D /* RecentCertWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentCertWindow.swift; sourceTree = "<group>"; };
+		20A5857C3E74D63146B54F0E /* CameraPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraPreview.swift; sourceTree = "<group>"; };
+		3D5D26AA02E9409AB27D7AF1 /* ScanGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanGeometry.swift; sourceTree = "<group>"; };
 		3EF490BB156783A4435B5BE3 /* ScanHarnessApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanHarnessApp.swift; sourceTree = "<group>"; };
-		6D0951CA4F5794D02EB65174 /* ScanHarness.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ScanHarness.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		7F7EB36B29153752729C602A /* CertParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CertParser.swift; sourceTree = "<group>"; };
+		5C847E66E5533301BFE1D284 /* Grader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Grader.swift; sourceTree = "<group>"; };
+		6D0951CA4F5794D02EB65174 /* ScanHarness.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ScanHarness.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		830F2BC5C26D1EAB0682DF66 /* SlabFrameCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SlabFrameCapture.swift; sourceTree = "<group>"; };
+		862887ED384AB6C7B4DDA05E /* HarnessShims.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HarnessShims.swift; sourceTree = "<group>"; };
+		8A7A6DFDC157B045A0C1B374 /* CertParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CertParser.swift; sourceTree = "<group>"; };
+		91E841E04E0333E25F899B32 /* CameraSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraSession.swift; sourceTree = "<group>"; };
+		994B881F8134C7A77B0B5B3C /* ScanController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanController.swift; sourceTree = "<group>"; };
+		AC3BB7CB3382551D9542F58C /* BarcodeDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarcodeDetector.swift; sourceTree = "<group>"; };
 		E28C7C0EFED23045744E09C6 /* ScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
+		154659444361AFEAB2FCD37F /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				5C847E66E5533301BFE1D284 /* Grader.swift */,
+			);
+			name = Models;
+			path = ../../ios/Slab3/Models;
+			sourceTree = "<group>";
+		};
+		387F3D4CE043F10D466B09B8 /* Scanning */ = {
+			isa = PBXGroup;
+			children = (
+				AC3BB7CB3382551D9542F58C /* BarcodeDetector.swift */,
+				20A5857C3E74D63146B54F0E /* CameraPreview.swift */,
+				91E841E04E0333E25F899B32 /* CameraSession.swift */,
+				8A7A6DFDC157B045A0C1B374 /* CertParser.swift */,
+				0668757C47AFFE8208F72F4D /* RecentCertWindow.swift */,
+				994B881F8134C7A77B0B5B3C /* ScanController.swift */,
+				3D5D26AA02E9409AB27D7AF1 /* ScanGeometry.swift */,
+				830F2BC5C26D1EAB0682DF66 /* SlabFrameCapture.swift */,
+			);
+			name = Scanning;
+			path = ../../ios/Slab3/Scanning;
+			sourceTree = "<group>";
+		};
 		6A4BF25F418ACD3FD05CD5F1 /* Products */ = {
 			isa = PBXGroup;
 			children = (
@@ -31,7 +74,7 @@
 		6AF850124899792BDD7DFAA1 /* ScanHarness */ = {
 			isa = PBXGroup;
 			children = (
-				7F7EB36B29153752729C602A /* CertParser.swift */,
+				862887ED384AB6C7B4DDA05E /* HarnessShims.swift */,
 				3EF490BB156783A4435B5BE3 /* ScanHarnessApp.swift */,
 				E28C7C0EFED23045744E09C6 /* ScannerView.swift */,
 			);
@@ -41,7 +84,9 @@
 		E3793CE066AC368A0C3220A7 = {
 			isa = PBXGroup;
 			children = (
+				154659444361AFEAB2FCD37F /* Models */,
 				6AF850124899792BDD7DFAA1 /* ScanHarness */,
+				387F3D4CE043F10D466B09B8 /* Scanning */,
 				6A4BF25F418ACD3FD05CD5F1 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -75,6 +120,9 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
+					20A33448B8D6BFF85AF19291 = {
+						ProvisioningStyle = Automatic;
+					};
 				};
 			};
 			buildConfigurationList = D569A759CD5E398C81D37B29 /* Build configuration list for PBXProject "ScanHarness" */;
@@ -101,9 +149,18 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				FCACCB5B315BA881E50DBED1 /* CertParser.swift in Sources */,
+				EE46FD2DCA8333E583C77385 /* BarcodeDetector.swift in Sources */,
+				298954041E199404AE37DDCA /* CameraPreview.swift in Sources */,
+				D7FA113F818F8D3D04591785 /* CameraSession.swift in Sources */,
+				0FEB89E2A308125E4CE99C0A /* CertParser.swift in Sources */,
+				2228BA75A8701B732FAA1C8B /* Grader.swift in Sources */,
+				4A522CE5776F657B3DE971E4 /* HarnessShims.swift in Sources */,
+				C73A3AB31FFDF5FD632D21E5 /* RecentCertWindow.swift in Sources */,
+				BAD37391FCDE5461EB2D564F /* ScanController.swift in Sources */,
+				5BE905086C0382037D8F62D2 /* ScanGeometry.swift in Sources */,
 				A8E30CB8FD37DE7AEDF242DD /* ScanHarnessApp.swift in Sources */,
 				558C1C197B974CD5F22A0584 /* ScannerView.swift in Sources */,
+				4BF596B5819AC48E307EA165 /* SlabFrameCapture.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -115,10 +172,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 7BMY83MWA8;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Scans PSA/CGC cert barcodes on graded card slabs.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -199,10 +259,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 7BMY83MWA8;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Scans PSA/CGC cert barcodes on graded card slabs.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",

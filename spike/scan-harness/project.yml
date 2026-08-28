@@ -7,7 +7,20 @@ targets:
   ScanHarness:
     type: application
     platform: iOS
-    sources: [ScanHarness]
+    sources:
+      - ScanHarness
+      # The app's scanner, built from source — never copied. A previous harness
+      # kept its own fork of CertParser, which drifted, so its on-device verdicts
+      # were about the harness rather than the app. See HarnessShims.swift.
+      - path: ../../ios/Slab3/Scanning/CertParser.swift
+      - path: ../../ios/Slab3/Scanning/ScanController.swift
+      - path: ../../ios/Slab3/Scanning/CameraSession.swift
+      - path: ../../ios/Slab3/Scanning/CameraPreview.swift
+      - path: ../../ios/Slab3/Scanning/BarcodeDetector.swift
+      - path: ../../ios/Slab3/Scanning/SlabFrameCapture.swift
+      - path: ../../ios/Slab3/Scanning/RecentCertWindow.swift
+      - path: ../../ios/Slab3/Scanning/ScanGeometry.swift
+      - path: ../../ios/Slab3/Models/Grader.swift
     settings:
       base:
         DEVELOPMENT_TEAM: T2Z5X8HK8U
@@ -15,6 +28,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.slab3.ScanHarness
         INFOPLIST_KEY_NSCameraUsageDescription: "Scans PSA/CGC cert barcodes on graded card slabs."
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
         GENERATE_INFOPLIST_FILE: YES
         CURRENT_PROJECT_VERSION: 1
         MARKETING_VERSION: "0.1"

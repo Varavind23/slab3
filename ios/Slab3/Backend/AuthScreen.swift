@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// Email/password sign-in and sign-up. Deliberately minimal — the four launch
-/// users are known, so this is a gate, not a growth surface.
+/// users are known, so this is a gate, not a growth surface. Caliper's one cyan
+/// primary action per screen is the submit button; nothing else here is cyan.
 struct AuthScreen: View {
     let auth: AuthManager
 
@@ -13,60 +14,61 @@ struct AuthScreen: View {
     enum Mode { case signIn, signUp }
 
     var body: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: Caliper.space7) {
             Spacer()
-            // Wordmark only — grayscale, no icon color (design.md §1, §4).
+            // Wordmark only — no icon, no illustration.
             Text("Slabs")
-                .font(.system(size: 40, weight: .bold, design: .rounded))
-                .foregroundStyle(Palette.textPrimary)
-            Text("Scan. Price. Sell.").foregroundStyle(Palette.textSecondary)
+                .font(.sans(34, .bold))
+                .tracking(-1)
+                .foregroundStyle(Caliper.textPrimary)
+            Text("Scan. Price. Sell.").caliperLabel()
 
-            VStack(spacing: 12) {
+            // Each field gets its own hairline box — one box around the stack was
+            // the bug the first screenshot caught.
+            VStack(spacing: Caliper.space4) {
                 TextField("Email", text: $email)
                     .textContentType(.emailAddress)
                     .keyboardType(.emailAddress)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+                    .modifier(FieldBox())
                 SecureField("Password", text: $password)
                     .textContentType(mode == .signUp ? .newPassword : .password)
+                    .modifier(FieldBox())
             }
-            .textFieldStyle(.roundedBorder)
-            .padding(.horizontal)
+            .font(.calBody)
+            .foregroundStyle(Caliper.textPrimary)
+            .padding(.horizontal, Caliper.gutter)
 
             if let err = auth.errorMessage {
-                // Errors state what happened, muted — not alarm-red (design.md §3).
-                Text(err).font(.callout).foregroundStyle(Palette.textSecondary)
-                    .multilineTextAlignment(.center).padding(.horizontal)
+                // Errors state what happened, without apology or alarm.
+                Text(err).caliperMeta(Caliper.confLow)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, Caliper.gutter)
             }
 
-            // Primary action: grayscale, distinguished by contrast not color.
-            Button {
+            CaliperButton(
+                title: working ? "…" : (mode == .signIn ? "Log in" : "Create account"),
+                variant: .primary,
+                fullWidth: true,
+                disabled: working || email.isEmpty || password.isEmpty
+            ) {
                 Task { await submit() }
-            } label: {
-                Group {
-                    if working { ProgressView().tint(Palette.bg) }
-                    else { Text(mode == .signIn ? "Log in" : "Create account").fontWeight(.semibold) }
-                }
-                .frame(maxWidth: .infinity).padding(.vertical, 12)
-                .background(Palette.textPrimary, in: RoundedRectangle(cornerRadius: 12))
-                .foregroundStyle(Palette.bg)
             }
-            .padding(.horizontal)
-            .disabled(working || email.isEmpty || password.isEmpty)
-            .opacity(working || email.isEmpty || password.isEmpty ? 0.5 : 1)
+            .padding(.horizontal, Caliper.gutter)
 
             Button(mode == .signIn ? "Need an account? Sign up" : "Have an account? Log in") {
                 mode = mode == .signIn ? .signUp : .signIn
                 auth.errorMessage = nil
             }
-            .font(.callout)
-            .tint(Palette.textSecondary)
+            .font(.calBody)
+            .foregroundStyle(Caliper.textSecondary)
 
             Spacer()
         }
-        .padding()
+        .padding(.vertical, Caliper.space8)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Palette.bg)
+        .background(Caliper.bg.ignoresSafeArea())
     }
 
     private func submit() async {

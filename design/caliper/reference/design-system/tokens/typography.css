@@ -1,0 +1,31 @@
+/* Numbers are the product. Every figure is mono and tabular so columns of prices,
+   certs and confidence align down a scrolling list. Titles are deliberately small —
+   the oversized-title convention is not used here; the money is the biggest thing
+   on screen, not the word "Inventory". */
+:root {
+  --font-sans: "Space Grotesk", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  /* the one hero figure per screen */
+  --type-figure: 700 31px/1 var(--font-sans);
+  --type-figure-sm: 700 17px/1 var(--font-sans);
+
+  /* titles */
+  --type-title: 600 23px/1.1 var(--font-sans);
+  --type-heading: 600 16px/1.2 var(--font-sans);
+
+  /* body */
+  --type-body: 500 13px/1.35 var(--font-sans);
+  --type-body-sm: 500 12px/1.35 var(--font-sans);
+
+  /* mono registers — the workhorses */
+  --type-price: 500 11px/1 var(--font-mono);
+  --type-meta: 500 9px/1 var(--font-mono);
+  --type-label: 500 10px/1 var(--font-mono);
+  --type-code: 400 9px/1.85 var(--font-mono);
+
+  /* every mono label is uppercase with generous tracking */
+  --tracking-label: 0.13em;
+  --tracking-meta: 0.05em;
+  --numeric: tabular-nums lining-nums; /* @kind other */
+}

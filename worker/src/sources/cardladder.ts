@@ -1,62 +1,76 @@
-// Card Ladder price source (plan: T4). Metric = AVERAGE SALE (buyer decision).
+// Card Ladder PriceSource adapter (plan: T4). Metric = AVERAGE SALE (buyer decision).
 //
-// Access model (M0 spike, revised 2026-08-22): app + search.cardladder.com are
-// both behind Cloudflare Turnstile — headless automation gets walled. v1 bridges
-// via a HUMAN-OBTAINED session (user logs in themselves, we ride the cookies)
-// while official API access is pursued in parallel. Auth is Firebase; the search
-// host is search.cardladder.com.
-//
-// This adapter is the seam. The one thing still needed is the search request +
-// response contract, captured by spike/cardladder/capture-session.ts once the
-// user runs it (human-in-the-loop). parseAverageSale() is where that shape gets
-// wired; until the fixture exists it returns null → lookup() degrades to
-// not_found rather than guessing. Error mapping (challenge → reconnect prompt)
-// is implemented and tested now.
+// The real client logic lives in the cross-runtime shared module
+// (supabase/functions/_shared/cardladder.ts) — the SAME code the production Supabase
+// Edge Function runs. This file adapts it to the worker's PriceSource contract and
+// is where the vitest suite exercises the verified Firebase + Cloud Functions
+// contract. We NO LONGER touch search.cardladder.com (Cloudflare-walled); the data
+// comes from Firebase callables on Google hosts with a Bearer ID token.
 
-import type { CardIdentity, Lookup, PriceSource } from "./types.js";
-import { notFound, networkError } from "./types.js";
-import { type JsonTransport, TransportError } from "./transport.js";
+import type { CardIdentity, Lookup, PriceSource, SourceError } from "./types.js";
+import {
+  lookupAverageSale,
+  type ClErrorKind,
+  type FetchLike,
+} from "../../../supabase/functions/_shared/cardladder";
 
-/** Parse the average-sale price (cents) out of a Card Ladder search response.
- *  SEAM: fill in against worker/test/fixtures/cardladder-search.json once the
- *  human-session capture records the real shape. Returns null when the average
- *  field is absent/unknown. */
-export function parseAverageSale(_response: unknown): number | null {
-  // TODO(contract): map the captured search response → average-sale cents.
-  // Kept null-returning (not guessed) so we never surface a wrong price.
-  return null;
-}
+// Re-export the pure contract pieces so tests (and any worker caller) share one source.
+export {
+  signIn,
+  refresh,
+  isExpired,
+  resolveCert,
+  estimate,
+  lookupAverageSale,
+  parseResolve,
+  parseEstimate,
+  usdToCents,
+  AVERAGE_SALE_WINDOW,
+} from "../../../supabase/functions/_shared/cardladder";
+
+const ERROR_MAP: Record<ClErrorKind, SourceError["error"]> = {
+  invalid_credentials: "auth_expired",
+  auth_expired: "auth_expired",
+  rate_limited: "rate_limited",
+  not_found: "not_found",
+  network: "network",
+};
 
 export class CardLadderSource implements PriceSource {
   readonly name = "cardladder" as const;
   readonly metric = "average_sale" as const;
 
-  /** transport must be a SESSION-AUTHENTICATED browser transport (rides the
-   *  human-obtained Card Ladder cookies). */
-  constructor(private readonly transport: JsonTransport) {}
+  /** idTokenProvider yields a valid Firebase ID token for the user's OWN Card Ladder
+   *  account (the Edge Function supplies one after refresh/sign-in). fetchImpl is
+   *  injectable so tests run offline against captured fixtures. */
+  constructor(
+    private readonly idTokenProvider: () => Promise<string>,
+    private readonly fetchImpl?: FetchLike,
+  ) {}
 
   async lookup(identity: CardIdentity): Promise<Lookup> {
-    let raw: unknown;
+    let idToken: string;
     try {
-      const q = encodeURIComponent(
-        [identity.name, identity.set, identity.grade].filter(Boolean).join(" "),
-      );
-      raw = await this.transport.getJson(`https://search.cardladder.com/search?q=${q}`);
-    } catch (e) {
-      if (e instanceof TransportError && (e.status === 403 || e.status === 401)) {
-        // Cloudflare challenge or expired session → user must reconnect.
-        return { kind: "error", error: "auth_expired", detail: "Card Ladder session invalid — reconnect your account" };
-      }
-      if (e instanceof TransportError && e.status === 429) {
-        return { kind: "error", error: "rate_limited", detail: "Card Ladder rate limited" };
-      }
-      return networkError(e instanceof Error ? e.message : "unknown");
+      idToken = await this.idTokenProvider();
+    } catch {
+      return { kind: "error", error: "auth_expired", detail: "Card Ladder not connected — reconnect your account" };
     }
 
-    const cents = parseAverageSale(raw);
-    if (cents === null) {
-      return notFound("no Card Ladder average-sale match (or contract not yet wired)");
+    const r = await lookupAverageSale(idToken, identity.certNumber ?? "", identity.grader, undefined, {
+      fetch: this.fetchImpl,
+    });
+    if (r.kind === "ok") {
+      // cert-matched via httpbuildcollectioncard → exact identity.
+      return {
+        kind: "ok",
+        priceCents: r.priceCents,
+        metric: this.metric,
+        asOf: r.asOf,
+        sourceCanonicalId: r.profileId,
+        confidence: "exact",
+      };
     }
-    return { kind: "ok", priceCents: cents, metric: this.metric, asOf: new Date().toISOString(), confidence: "probable" };
+    if (r.kind === "not_found") return { kind: "error", error: "not_found" };
+    return { kind: "error", error: ERROR_MAP[r.error], detail: r.detail };
   }
 }

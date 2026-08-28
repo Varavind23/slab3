@@ -29,6 +29,21 @@ struct CertParserTests {
         #expect(r?.grader == .cgc)
     }
 
+    @Test func queryBasedQrUrlsExtractCert() {
+        #expect(CertParser.parse("https://www.psacard.com/cert?certNumber=49385027")?.certNumber == "49385027")
+        #expect(CertParser.parse("https://www.cgccards.com/certlookup/?cert=6055074171")?.grader == .cgc)
+    }
+
+    @Test func lookalikeDomainsAreRejected() {
+        #expect(CertParser.parse("https://fakepsacard.com/cert/49385027") == nil)
+        #expect(CertParser.parse("https://cgccards.com.example.test/cert/6055074171") == nil)
+    }
+
+    @Test func urlCertMustMatchGradersLength() {
+        #expect(CertParser.parse("https://www.psacard.com/cert/123456") == nil)
+        #expect(CertParser.parse("https://www.cgccards.com/certlookup/49385027") == nil)
+    }
+
     @Test func rejectsGarbageAndWrongLengths() {
         #expect(CertParser.parse("") == nil)
         #expect(CertParser.parse("abc123") == nil)
@@ -39,4 +54,5 @@ struct CertParserTests {
     @Test func trimsWhitespace() {
         #expect(CertParser.parse("  49385027 \n")?.certNumber == "49385027")
     }
+
 }

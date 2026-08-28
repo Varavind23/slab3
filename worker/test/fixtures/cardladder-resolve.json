@@ -1,0 +1,30 @@
+{
+  "result": {
+    "cert": "20360362",
+    "profileId": "psa-299594",
+    "grader": "psa",
+    "grade": "g9",
+    "label": "1986 Fleer #73 Kevin Mchale",
+    "hasAutographGrade": false,
+    "autographGrade": null,
+    "hasQualifier": false,
+    "qualifierType": null,
+    "year": "1986",
+    "set": "Fleer",
+    "number": "73",
+    "player": "Kevin McHale",
+    "variation": "",
+    "pop": 1292,
+    "category": "Basketball",
+    "cardId": "ZrGfW7rQUkEclfZDFJg0",
+    "playerIndexId": "Kevin McHale",
+    "image": "https://firebasestorage.googleapis.com/v0/b/cardladder-71d53.appspot.com/o/cards%2FZrGfW7rQUkEclfZDFJg0?alt=media",
+    "condition": "PSA 9",
+    "currentValue": 118.95095074034137,
+    "marketValue": 120,
+    "guideValue": 118.95095074034137,
+    "datePurchased": "2021-04-18T07:00:00.000Z",
+    "investment": 108.5,
+    "imageUrl": "https://firebasestorage.googleapis.com/v0/b/cardladder-71d53.appspot.com/o/sales%2Fpwcc-ebay-2679713?alt=media"
+  }
+}

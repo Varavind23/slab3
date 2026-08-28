@@ -1,0 +1,46 @@
+/* Caliper color. Near-black ground, hairline structure, and cyan as the scanner and
+   the one committed action per screen.
+   Three price sources appear on every single row, so they get a cool trio that stays
+   quiet side by side: CL cyan, CY lime, JP violet. Confidence deliberately sits outside
+   that trio on red/amber/green, so a meter never reads as a source.
+   Dark-native by design: a cyan-on-black scanner does not invert gracefully. */
+:root {
+  /* ground */
+  --bg: #06090C;
+  --surface: #0D1318;
+  --surface-2: #141C22;
+  --line: #1A242C;
+  --line-strong: #26333C;
+
+  /* ink */
+  --text-primary: #E8F1F4;
+  --text-secondary: #74858F;
+  --text-tertiary: #4A585F;
+  --text-on-cyan: #04191A;
+
+  /* interface accent — scanner, active state, primary action */
+  --cyan: #35E0E8;
+  --cyan-dim: #0E3A42;
+
+  /* price sources */
+  --src-cl: #35E0E8;
+  --src-cy: #9BE85C;
+  --src-jp: #C98BFF;
+
+  /* confidence — never used for a source */
+  --conf-high: #62D69A;
+  --conf-mid: #E5B65C;
+  --conf-low: #E0685E;
+
+  /* money + destructive */
+  --payout: #62D69A;
+  --danger: #E0685E;
+
+  /* group tag hues — arbitrary buyer names need arbitrary but muted identifiers */
+  --group-1: #C98BFF;
+  --group-2: #9BE85C;
+  --group-3: #35E0E8;
+  --group-4: #E5B65C;
+  --group-5: #FF8FD0;
+  --group-6: #7FA6FF;
+}

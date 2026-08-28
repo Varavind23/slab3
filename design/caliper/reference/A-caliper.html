@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Direction A — Caliper</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;-webkit-font-smoothing:antialiased}
+:root{--bg:#06090C;--surf:#0D1318;--surf2:#141C22;--line:#1A242C;--line2:#26333C;--ink:#E8F1F4;--dim:#74858F;--cy:#35E0E8;--cl:#35E0E8;--cyy:#9BE85C;--jp:#C98BFF;--good:#62D69A;--mid:#E5B65C;--bad:#E0685E;--mono:"JetBrains Mono",monospace;--sans:"Space Grotesk",sans-serif}
+body{background:#090C10;font-family:var(--sans);color:var(--ink);padding:42px 36px;display:flex;flex-direction:column;gap:24px;align-items:center;min-height:100vh}
+.hdr{width:1700px;display:flex;align-items:baseline;gap:15px;border-bottom:1px solid var(--line);padding-bottom:13px}
+.hdr h1{font-size:19px;font-weight:600;letter-spacing:-.2px}
+.hdr .id{font:500 11px/1 var(--mono);color:var(--cy);border:1px solid var(--cy);padding:5px 8px;border-radius:3px}
+.hdr p{font-size:13px;color:var(--dim);margin-left:auto;max-width:800px;text-align:right;line-height:1.5}
+.row{display:flex;gap:28px}
+.ph{width:393px;height:830px;background:var(--bg);border:1px solid var(--line);border-radius:36px;overflow:hidden;display:flex;flex-direction:column;position:relative}
+.sb{height:44px;flex:0 0 auto;display:flex;align-items:flex-end;justify-content:space-between;padding:0 24px 4px;font:500 11px/1 var(--mono);color:var(--dim)}
+.cap{width:393px;font:500 11px/1 var(--mono);color:var(--dim);letter-spacing:.12em;text-align:center;text-transform:uppercase;margin-top:11px}
+/* header pattern */
+.head{flex:0 0 auto;padding:8px 18px 14px}
+.ctx{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.ctx .t{font:500 10px/1 var(--mono);letter-spacing:.13em;color:var(--dim);text-transform:uppercase}
+.tog{margin-left:auto;display:flex;border:1px solid var(--line2);border-radius:3px;overflow:hidden}
+.tog b{font:500 10px/1 var(--mono);letter-spacing:.1em;padding:6px 9px;color:var(--dim);font-weight:500;border-right:1px solid var(--line2)}
+.tog b:last-child{border-right:0}
+.tog b.on{background:var(--cy);color:#04191A}
+.pen{margin-left:9px;width:26px;height:26px;border:1px solid var(--line2);border-radius:3px;display:grid;place-items:center;font-size:12px;color:var(--dim)}
+.ttl{display:flex;align-items:center;gap:12px}
+.ttl h2{font-size:23px;font-weight:600;letter-spacing:-.5px}
+.ttl .act{margin-left:auto;font:500 11px/1 var(--mono);letter-spacing:.1em;color:var(--cy);text-transform:uppercase}
+.tabs{flex:0 0 auto;display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--line);background:var(--bg)}
+.tabs div{padding:10px 0 12px;text-align:center;font:500 9px/1.7 var(--mono);letter-spacing:.1em;color:var(--dim);text-transform:uppercase}
+.tabs div.on{color:var(--cy)}
+.tabs div .g{display:block;font-size:15px;line-height:1;margin-bottom:5px;font-family:var(--sans)}
+.home{height:18px;display:grid;place-items:center;flex:0 0 auto}
+.home i{width:118px;height:4px;border-radius:2px;background:#212B32;display:block}
+/* SCAN */
+.vp{margin:0 18px;aspect-ratio:4/5;position:relative;background:linear-gradient(180deg,#0A1013,#070A0C);border:1px solid var(--line2);overflow:hidden}
+.vp .gr{position:absolute;inset:0;background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);background-size:36px 36px;opacity:.55}
+.vp b{position:absolute;width:24px;height:24px;border:2px solid var(--cy)}
+.vp b:nth-of-type(1){top:16px;left:16px;border-right:0;border-bottom:0}
+.vp b:nth-of-type(2){top:16px;right:16px;border-left:0;border-bottom:0}
+.vp b:nth-of-type(3){bottom:16px;left:16px;border-right:0;border-top:0}
+.vp b:nth-of-type(4){bottom:16px;right:16px;border-left:0;border-top:0}
+.vp .sl{position:absolute;left:16px;right:16px;top:47%;height:2px;background:var(--cy);box-shadow:0 0 16px 3px rgba(53,224,232,.55)}
+.vp .tap{position:absolute;inset:0;display:grid;place-items:center;text-align:center}
+.vp .tap span{font-size:16px;font-weight:600;letter-spacing:-.2px}
+.vp .tap em{display:block;font:500 9px/1 var(--mono);letter-spacing:.14em;color:var(--dim);margin-top:8px;font-style:normal}
+.ctl{padding:18px;display:flex;flex-direction:column;gap:16px}
+.zr{display:flex;align-items:center;gap:12px}
+.zr .k{font:500 9px/1 var(--mono);letter-spacing:.13em;color:var(--dim);width:38px}
+.track{flex:1;height:2px;background:var(--line2);position:relative}
+.track i{position:absolute;left:0;top:0;bottom:0;width:36%;background:var(--cy)}
+.track u{position:absolute;left:36%;top:-6px;width:14px;height:14px;margin-left:-7px;background:var(--cy);border-radius:2px;box-shadow:0 0 14px rgba(53,224,232,.6)}
+.zr .v{font:700 13px/1 var(--sans);font-variant-numeric:tabular-nums;width:42px;text-align:right}
+.trow{display:flex;align-items:center;justify-content:space-between;border-top:1px solid var(--line);padding-top:15px}
+.trow .k{font:500 10px/1 var(--mono);letter-spacing:.12em;color:var(--dim)}
+.sw{width:44px;height:22px;border-radius:2px;background:var(--surf2);border:1px solid var(--line2);position:relative}
+.sw i{position:absolute;top:2px;left:2px;width:17px;height:16px;background:var(--dim)}
+.sw.on{background:rgba(53,224,232,.15);border-color:var(--cy)}
+.sw.on i{left:auto;right:2px;background:var(--cy)}
+/* INVENTORY */
+.sum{margin:0 18px 14px;border:1px solid var(--line2);background:var(--surf)}
+.sum .a{padding:14px 16px 12px;border-bottom:1px solid var(--line)}
+.sum .a .k{font:500 9px/1 var(--mono);letter-spacing:.14em;color:var(--dim);margin-bottom:8px}
+.sum .a .v{font-size:31px;font-weight:700;letter-spacing:-1.2px;font-variant-numeric:tabular-nums}
+.sum .b{display:flex;align-items:baseline;padding:11px 16px;gap:10px}
+.sum .b .k{font:500 9px/1 var(--mono);letter-spacing:.14em;color:var(--dim)}
+.sum .b .v{font-size:17px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--good)}
+.sum .b .m{margin-left:auto;font:500 10px/1 var(--mono);color:var(--dim);letter-spacing:.06em}
+.fbar{margin:0 18px 12px;display:flex;gap:8px}
+.pill{flex:1;border:1px solid var(--line2);background:var(--surf);padding:10px 12px;display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500}
+.pill .ch{margin-left:auto;color:var(--dim);font-size:11px}
+.srch{margin:0 18px 12px;display:flex;gap:8px}
+.srch .f{flex:1;border:1px solid var(--line2);background:var(--surf);padding:9px 12px;font:500 11px/1.4 var(--mono);color:var(--dim);letter-spacing:.02em}
+.srch .s{border:1px solid var(--line2);background:var(--surf);padding:9px 11px;font:500 10px/1.4 var(--mono);color:var(--ink);letter-spacing:.08em}
+.list{flex:1;min-height:0;overflow:hidden;border-top:1px solid var(--line)}
+.cr{display:flex;gap:11px;padding:11px 18px;border-bottom:1px solid var(--line)}
+.thumb{width:42px;height:58px;flex:0 0 auto;border:1px solid var(--line2);background:repeating-linear-gradient(135deg,#131B21 0 5px,#0F171C 5px 10px);display:grid;place-items:center;font:500 7px/1 var(--mono);color:#3E4C55;letter-spacing:.1em}
+.cb{flex:1;min-width:0}
+.l1{display:flex;align-items:baseline;gap:8px}
+.nm{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
+.px{font:500 11px/1 var(--mono);font-variant-numeric:tabular-nums;flex:0 0 auto;letter-spacing:-.02em}
+.px u{text-decoration:none;font-size:8px;letter-spacing:.08em;margin-left:2px;opacity:.75}
+.pcl{color:var(--cl)}.pcy{color:var(--cyy)}.pjp{color:var(--jp)}.pnone{color:#4A585F}
+.l2{display:flex;align-items:center;gap:8px;margin-top:6px}
+.meta{font:500 9px/1 var(--mono);color:var(--dim);letter-spacing:.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.conf{margin-left:auto;display:flex;gap:2px;flex:0 0 auto}
+.conf i{width:7px;height:4px;background:var(--line2)}
+.conf.hi i:nth-child(-n+5){background:var(--good)}
+.conf.md i:nth-child(-n+3){background:var(--mid)}
+.conf.lo i:nth-child(-n+1){background:var(--bad)}
+.l3{display:flex;align-items:center;gap:8px;margin-top:6px}
+.cert{font:500 9px/1 var(--mono);color:#5A6870;letter-spacing:.06em}
+.gchip{margin-left:auto;display:inline-flex;align-items:center;gap:5px;font:500 9px/1 var(--mono);color:var(--dim);border:1px solid var(--line2);padding:3px 6px;letter-spacing:.06em}
+.gchip i{width:6px;height:6px;border-radius:50%;display:block}
+.gd{font:500 9px/1 var(--mono);letter-spacing:.08em;color:var(--ink);background:var(--surf2);border:1px solid var(--line2);padding:3px 6px;flex:0 0 auto}
+/* SELECTION */
+.sel .cr{padding-left:14px}
+.circ{width:19px;height:19px;flex:0 0 auto;border:1px solid var(--line2);border-radius:50%;margin-top:19px}
+.circ.on{background:var(--cy);border-color:var(--cy);color:#04191A;display:grid;place-items:center;font-size:11px;font-weight:700}
+.cr.on{background:rgba(53,224,232,.055)}
+.abar{flex:0 0 auto;border-top:1px solid var(--cy);background:var(--surf)}
+.abar .r{display:flex;justify-content:space-between;padding:11px 18px;border-bottom:1px solid var(--line);font:500 10px/1 var(--mono);letter-spacing:.12em;color:var(--dim)}
+.abar .r b{color:var(--ink);font-family:var(--sans);font-size:14px;font-weight:700;font-variant-numeric:tabular-nums}
+.abar .g{display:grid;grid-template-columns:repeat(4,1fr)}
+.abar .g div{padding:12px 0;text-align:center;font:500 9px/1.8 var(--mono);letter-spacing:.1em;color:var(--dim);border-right:1px solid var(--line)}
+.abar .g div:last-child{border-right:0;color:var(--bad)}
+.abar .g div span{display:block;font-size:15px;font-family:var(--sans);margin-bottom:4px;color:var(--ink)}
+.abar .g div:last-child span{color:var(--bad)}
+/* EXPORT */
+.code{margin:0 18px 14px;border:1px solid var(--line2);background:#080C0F}
+.code .tb{display:flex;align-items:center;gap:8px;padding:8px 11px;border-bottom:1px solid var(--line);background:var(--surf)}
+.code .tb i{width:7px;height:7px;border-radius:50%;background:var(--line2);display:block}
+.code .tb span{font:500 9px/1 var(--mono);color:var(--dim);letter-spacing:.04em;margin-left:4px}
+.code pre{padding:11px;font:400 9px/1.85 var(--mono);color:#8C9CA5;white-space:pre;overflow:hidden}
+.code pre b{font-weight:500}
+.cols{padding:0 18px 14px}
+.cols .k{font:500 9px/1 var(--mono);letter-spacing:.14em;color:var(--dim);margin-bottom:10px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chips span{font:500 10px/1 var(--mono);letter-spacing:.04em;padding:6px 8px;border:1px solid var(--line2);color:var(--dim);display:inline-flex;gap:5px;align-items:center}
+.chips span.on{background:var(--surf2);color:var(--ink);border-color:var(--line2)}
+.chips span.on u{text-decoration:none;font-size:8px;background:var(--cy);color:#04191A;padding:2px 4px}
+.chips span.cyo{border-color:var(--cyy);color:var(--cyy)}
+.chips span.cyo u{background:var(--cyy);color:#0B1604}
+.foot{flex:0 0 auto;padding:14px 18px;border-top:1px solid var(--line);background:var(--surf)}
+.foot .s{font:500 10px/1 var(--mono);letter-spacing:.1em;color:var(--dim);margin-bottom:11px;display:flex;justify-content:space-between}
+.foot .s b{color:var(--ink);font-weight:500}
+.foot .go{background:var(--cy);color:#04191A;padding:13px;text-align:center;font-weight:600;font-size:14px}
+</style></head><body>
+<div class="hdr"><span class="id">A</span><h1>Caliper</h1><p>Cool through precision. Hairline rules, square corners, mono for every number — a measuring instrument, not a dashboard. Cyan is the scanner and the one committed action; the three price sources get their own cool trio (cyan / lime / violet) and confidence keeps red-amber-green so it never competes with them.</p></div>
+
+<div class="row">
+<!-- SCAN -->
+<div>
+<div class="ph">
+  <div class="sb"><span>9:41</span><span>▮▮▮</span></div>
+  <div class="head">
+    <div class="ctx"><span class="t">Today · 24 scans</span><span class="tog"><b class="on">CL</b><b>CY</b><b>JP</b></span><span class="pen">✎</span></div>
+    <div class="ttl"><h2>Scan</h2></div>
+  </div>
+  <div class="vp"><div class="gr"></div><b></b><b></b><b></b><b></b><div class="sl"></div><div class="tap"><div><span>Tap to scan</span><em>PSA QR · CGC BARCODE</em></div></div></div>
+  <div class="ctl">
+    <div class="zr"><span class="k">ZOOM</span><span class="track"><i></i><u></u></span><span class="v">2.0×</span></div>
+    <div class="trow"><span class="k">TORCH</span><span class="sw on"><i></i></span></div>
+    <div class="trow"><span class="k">LAST</span><span style="font:500 10px/1 var(--mono);color:var(--dim)">#84920117 · <span style="color:var(--cy)">PSA 10</span></span></div>
+  </div>
+  <div style="flex:1"></div>
+  <div class="tabs"><div class="on"><span class="g">▣</span>Scan</div><div><span class="g">▤</span>Cards</div><div><span class="g">↗</span>Export</div><div><span class="g">⚙</span>Settings</div></div>
+  <div class="home"><i></i></div>
+</div>
+<div class="cap">Scan</div>
+</div>
+
+<!-- INVENTORY -->
+<div>
+<div class="ph">
+  <div class="sb"><span>9:41</span><span>▮▮▮</span></div>
+  <div class="head">
+    <div class="ctx"><span class="t">255 cards</span><span class="tog"><b>CL</b><b class="on">CY</b><b>JP</b></span></div>
+    <div class="ttl"><h2>Inventory</h2><span class="act">Select</span></div>
+  </div>
+  <div class="sum">
+    <div class="a"><div class="k">ESTIMATED TOTAL</div><div class="v">$121,600</div></div>
+    <div class="b"><span class="k">EST. PAYOUT</span><span class="v">$15,348</span><span class="m">145 of 255 matched</span></div>
+  </div>
+  <div class="fbar"><div class="pill">⧩ All cards<span class="ch">▾</span></div></div>
+  <div class="srch"><div class="f">Search 255 cards</div><div class="s">RECENT ↓</div></div>
+  <div class="list">
+    <div class="cr"><div class="thumb">SLAB</div><div class="cb">
+      <div class="l1"><span class="nm">Japanese Rulers of the Heavens Rayquaza</span><span class="px pcy">$5,071<u>CY</u></span></div>
+      <div class="l2"><span class="meta">$4,177 CL · — JP · 2006 Pokemon · #4</span><span class="conf hi"><i></i><i></i><i></i><i></i><i></i></span></div>
+      <div class="l3"><span class="cert">#84920117</span><span class="gchip"><i style="background:var(--jp)"></i>pete</span><span class="gd">PSA 10</span></div>
+    </div></div>
+    <div class="cr"><div class="thumb">SLAB</div><div class="cb">
+      <div class="l1"><span class="nm">Pop Series 4 #17 Deoxys Ex</span><span class="px pcy">$12,275<u>CY</u></span></div>
+      <div class="l2"><span class="meta">$11,940 CL · ¥1.74M JP · 2003 Pokemon · #17</span><span class="conf hi"><i></i><i></i><i></i><i></i><i></i></span></div>
+      <div class="l3"><span class="cert">#71028834</span><span class="gchip"><i style="background:var(--cyy)"></i>justin 18</span><span class="gd">PSA 9</span></div>
+    </div></div>
+    <div class="cr"><div class="thumb">SLAB</div><div class="cb">
+      <div class="l1"><span class="nm">Ex Dragon Frontiers 91 Dragonite</span><span class="px pnone">—<u>CY</u></span></div>
+      <div class="l2"><span class="meta">$310 CL · — JP · 2006 Pokemon · #91</span><span class="conf lo"><i></i><i></i><i></i><i></i><i></i></span></div>
+      <div class="l3"><span class="cert">#62211903</span><span class="gd">PSA 8</span></div>
+    </div></div>
+    <div class="cr"><div class="thumb">SLAB</div><div class="cb">
+      <div class="l1"><span class="nm">One Piece OP-01 Shanks Parallel</span><span class="px pcy">$1,840<u>CY</u></span></div>
+      <div class="l2"><span class="meta">$1,905 CL · ¥264K JP · 2023 One Piece</span><span class="conf md"><i></i><i></i><i></i><i></i><i></i></span></div>
+      <div class="l3"><span class="cert">#90114427</span><span class="gchip"><i style="background:var(--cl)"></i>jose 7/20</span><span class="gd">PSA 10</span></div>
+    </div></div>
+    <div class="cr"><div class="thumb">SLAB</div><div class="cb">
+      <div class="l1"><span class="nm">Japanese Neo Destiny Shining Charizard</span><span class="px pcy">$9,420<u>CY</u></span></div>
+      <div class="l2"><span class="meta">$8,880 CL · ¥1.31M JP · 2002 Pokemon</span><span class="conf hi"><i></i><i></i><i></i><i></i><i></i></span></div>
+      <div class="l3"><span class="cert">#55903118</span><span class="gd">PSA 9</span></div>
+    </div></div>
+  </div>
+  <div class="tabs"><div><span class="g">▣</span>Scan</div><div class="on"><span class="g">▤</span>Cards</div><div><span class="g">↗</span>Export</div><div><span class="g">⚙</span>Settings</div></div>
+  <div class="home"><i></i></div>
+</div>
+<div class="cap">Inventory</div>
+</div>
+
+<!-- SELECTION -->
+<div>
+<div class="ph sel">
+  <div class="sb"><span>9:41</span><span>▮▮▮</span></div>
+  <div class="head">
+    <div class="ctx"><span class="t" style="color:var(--cy)">3 of 255 selected</span><span class="tog"><b>CL</b><b class="on">CY</b><b>JP</b></span></div>
+    <div class="ttl"><h2>Select cards</h2><span class="act">Select all</span><span class="act" style="color:var(--dim);margin-left:14px">Cancel</span></div>
+  </div>
+  <div class="fbar"><div class="pill" style="border-color:var(--jp)"><i style="width:8px;height:8px;border-radius:50%;background:var(--jp);display:block"></i>pete<span class="ch" style="color:var(--ink)">×</span></div></div>
+  <div class="srch"><div class="f">Search 4 cards</div><div class="s">RECENT ↓</div></div>
+  <div class="list">
+    <div class="cr on"><span class="circ on">✓</span><div class="thumb">SLAB</div><div class="cb">
+      <div class="l1"><span class="nm">Japanese Rulers of the Heavens Rayquaza</span><span class="px pcy">$5,071<u>CY</u></span></div>
+      <div class="l2"><span class="meta">$4,177 CL · — JP · 2006 · #4</span><span class="conf hi"><i></i><i></i><i></i><i></i><i></i></span></div>
+      <div class="l3"><span class="cert">#84920117</span><span class="gchip"><i style="background:var(--jp)"></i>pete</span><span class="gd">PSA 10</span></div>
+    </div></div>
+    <div class="cr on"><span class="circ on">✓</span><div class="thumb">SLAB</div><div class="cb">
+      <div class="l1"><span class="nm">Ex Dragon Frontiers 91 Dragonite</span><span class="px pnone">—<u>CY</u></span></div>
+      <div class="l2"><span class="meta">$310 CL · — JP · 2006 · #91</span><span class="conf lo"><i></i><i></i><i></i><i></i><i></i></span></div>
+      <div class="l3"><span class="cert">#62211903</span><span class="gchip"><i style="background:var(--jp)"></i>pete</span><span class="gd">PSA 8</span></div>
+    </div></div>
+    <div class="cr on"><span class="circ on">✓</span><div class="thumb">SLAB</div><div class="cb">
+      <div class="l1"><span class="nm">One Piece OP-01 Shanks Parallel</span><span class="px pcy">$106<u>CY</u></span></div>
+      <div class="l2"><span class="meta">$98 CL · ¥14K JP · 2023 One Piece</span><span class="conf md"><i></i><i></i><i></i><i></i><i></i></span></div>
+      <div class="l3"><span class="cert">#90114427</span><span class="gchip"><i style="background:var(--jp)"></i>pete</span><span class="gd">PSA 10</span></div>
+    </div></div>
+    <div class="cr"><span class="circ"></span><div class="thumb">SLAB</div><div class="cb">
+      <div class="l1"><span class="nm">Japanese Neo Destiny Shining Charizard</span><span class="px pcy">$9,420<u>CY</u></span></div>
+      <div class="l2"><span class="meta">$8,880 CL · ¥1.31M JP · 2002</span><span class="conf hi"><i></i><i></i><i></i><i></i><i></i></span></div>
+      <div class="l3"><span class="cert">#55903118</span><span class="gchip"><i style="background:var(--jp)"></i>pete</span><span class="gd">PSA 9</span></div>
+    </div></div>
+  </div>
+  <div class="abar">
+    <div class="r"><span>3 SELECTED</span><b>$5,487</b></div>
+    <div class="g"><div><span>▣</span>Group</div><div><span>▢</span>Remove</div><div><span>↗</span>Export</div><div><span>✕</span>Delete</div></div>
+  </div>
+  <div class="tabs"><div><span class="g">▣</span>Scan</div><div class="on"><span class="g">▤</span>Cards</div><div><span class="g">↗</span>Export</div><div><span class="g">⚙</span>Settings</div></div>
+  <div class="home"><i></i></div>
+</div>
+<div class="cap">Selection mode</div>
+</div>
+
+<!-- EXPORT -->
+<div>
+<div class="ph">
+  <div class="sb"><span>9:41</span><span>▮▮▮</span></div>
+  <div class="head">
+    <div class="ctx"><span class="t">inventory.csv · 4 rows</span><span class="tog"><b>CL</b><b class="on">CY</b><b>JP</b></span></div>
+    <div class="ttl"><h2>Export</h2></div>
+  </div>
+  <div class="fbar"><div class="pill" style="border-color:var(--jp)"><i style="width:8px;height:8px;border-radius:50%;background:var(--jp);display:block"></i>pete<span class="ch" style="color:var(--ink)">×</span></div></div>
+  <div class="code">
+    <div class="tb"><i></i><i></i><i></i><span>inventory_pete_2026-08-19.csv</span></div>
+<pre><b style="color:#E8F1F4">cert,name,grade,grader,</b><b style="color:#9BE85C">cy_price,cy_conf</b>
+84920117,Japanese Rulers of…,10,PSA,5071,5
+62211903,Ex Dragon Frontiers…,8,PSA,,1
+90114427,One Piece OP-01 Sha…,10,PSA,106,3
+55903118,Japanese Neo Destin…,9,PSA,9420,5</pre>
+  </div>
+  <div class="cols">
+    <div class="k">INCLUDE COLUMNS</div>
+    <div class="chips">
+      <span class="on"><u>1</u>Cert</span><span class="on"><u>2</u>Name</span><span class="on"><u>3</u>Grade</span><span class="on"><u>4</u>Grader</span>
+      <span class="on cyo"><u>5</u>CY Price</span><span class="on cyo"><u>6</u>CY Conf</span>
+      <span>Year</span><span>Card #</span><span>CL Price</span><span>CL Conf</span><span>JP Price ¥</span><span>JP Price $</span><span>Outlet</span><span>Payout %</span><span>Payout provider</span><span>Payout $</span><span>Scanned at</span><span>Refreshed at</span>
+    </div>
+  </div>
+  <div style="flex:1"></div>
+  <div class="foot">
+    <div class="s"><span>4 CARDS</span><b>$6,419</b></div>
+    <div class="go">↗  Share CSV</div>
+  </div>
+  <div class="tabs"><div><span class="g">▣</span>Scan</div><div><span class="g">▤</span>Cards</div><div class="on"><span class="g">↗</span>Export</div><div><span class="g">⚙</span>Settings</div></div>
+  <div class="home"><i></i></div>
+</div>
+<div class="cap">Export</div>
+</div>
+</div>
+</body></html>

@@ -1,0 +1,6 @@
+{
+  "error": {
+    "status": "RESOURCE_EXHAUSTED",
+    "message": "Daily request limit reached"
+  }
+}

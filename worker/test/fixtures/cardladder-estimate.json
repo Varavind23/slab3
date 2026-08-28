@@ -1,0 +1,31 @@
+{
+  "result": {
+    "estimatedValue": 120,
+    "lastSaleDate": "2026-08-19T13:55:14.000Z",
+    "confidence": 5,
+    "grader": "psa",
+    "index": "Kevin McHale",
+    "indexId": "Kevin McHale",
+    "description": "1986 Fleer #73 Kevin Mchale",
+    "grade": "g9",
+    "twoWeekData": {
+      "velocity": 2,
+      "averagePrice": 125
+    },
+    "oneMonthData": {
+      "velocity": 6,
+      "averagePrice": 116.92
+    },
+    "oneQuarterData": {
+      "velocity": 20,
+      "averagePrice": 115.76
+    },
+    "oneYearData": {
+      "velocity": 70,
+      "averagePrice": 99.4
+    },
+    "lastSalePrice": 120,
+    "isPlayerIndex": true,
+    "indexPercentChange": 0
+  }
+}

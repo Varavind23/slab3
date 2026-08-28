@@ -27,6 +27,7 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: "Slabs"
         INFOPLIST_KEY_NSCameraUsageDescription: "Scan PSA and CGC cert barcodes on graded card slabs."
         INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
         GENERATE_INFOPLIST_FILE: "YES"
   Slab3Tests:
     type: bundle.unit-test

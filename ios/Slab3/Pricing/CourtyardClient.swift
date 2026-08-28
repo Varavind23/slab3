@@ -17,41 +17,88 @@ struct CourtyardClient {
         let confidence: Confidence
         // Metadata for auto-fill (present when Courtyard has the card).
         let name: String?
+        /// Courtyard's listing headline, e.g. "2021 Celebrations - Classic
+        /// Collection #4 Charizard - Base Set Holo (PSA 10 GEM MINT)". Display
+        /// only — `name` is the short one that feeds card_key.
+        let title: String?
         let set: String?
         let year: Int?
         let grade: String?
+        /// Courtyard's own render of the graded card, keyed by cert
+        /// (.../graded-cards-renders/PSA%2098881872/nft_image.jpg), plus a
+        /// ~90-byte inline preview that can be shown before the fetch lands.
+        let imageUrl: URL?
+        let lqipBase64: String?
     }
     enum Confidence { case exact, probable, fuzzy }
 
-    /// Look up a card's Courtyard price. Uses name+set when known, else the cert
-    /// number (finds the exact slab if it's vaulted on Courtyard).
-    func lookup(grader: Grader, certNumber: String, name: String?, set: String?, grade: String?) async -> Match? {
-        let queryText = [name, set].compactMap { $0 }.joined(separator: " ").trimmingCharacters(in: .whitespaces)
-        let query = queryText.isEmpty ? certNumber : queryText
-        guard let result = try? await search(query: query, grader: grader) else { return nil }
-        guard !result.hits.isEmpty else { return nil }
+    /// Why a lookup produced no price. `notListed` (the search worked, Courtyard
+    /// has nothing for this card) and `failed` (offline, Algolia error, bad
+    /// response) used to both come back as `nil`, so the caller cleared a good
+    /// price whenever the network hiccuped. They are separate answers now.
+    enum Outcome {
+        case match(Match)
+        case notListed
+        case failed
+    }
+
+    /// Look up a card's Courtyard price. Tries the strongest query we have
+    /// (name + set) and falls back to the cert number, because the index is
+    /// `recently_listed`: a card that matched by name last week can drop out of
+    /// it, while the exact vaulted slab still resolves by cert.
+    func lookup(grader: Grader, certNumber: String, name: String?, set: String?, grade: String?) async -> Outcome {
+        let named = [name, set].compactMap { $0 }.joined(separator: " ").trimmingCharacters(in: .whitespaces)
+        // Deduped, in priority order: identity first, cert as the fallback.
+        let queries = named.isEmpty ? [certNumber] : [named, certNumber]
+
+        var sawFailure = false
+        for query in queries {
+            do {
+                let result = try await search(query: query, grader: grader)
+                if let match = bestMatch(in: result.hits, certNumber: certNumber, grade: grade) {
+                    return .match(match)
+                }
+            } catch {
+                sawFailure = true
+            }
+        }
+        // Every query that ran came back empty → Courtyard genuinely has nothing.
+        // If any of them errored, we don't actually know that.
+        return sawFailure ? .failed : .notListed
+    }
+
+    /// Pick the best hit that actually carries a price. Ranking a priceless hit
+    /// first used to sink the whole lookup even when a good hit sat behind it.
+    private func bestMatch(in hits: [Hit], certNumber: String, grade: String?) -> Match? {
+        let priced = hits.filter { Self.usd($0) != nil }
+        guard !priced.isEmpty else { return nil }
 
         let gnum = Self.gradeNumber(grade)
-        let byCert = result.hits.first { $0.certification?.number == certNumber }
-        let byGrade = gnum == nil ? nil : result.hits.first {
+        let byCert = priced.first { $0.certification?.number == certNumber }
+        let byGrade = gnum == nil ? nil : priced.first {
             Self.gradeNumber($0.certification?.grade ?? $0.metadata?.values["Grade"]) == gnum
         }
-        let hit = byCert ?? byGrade ?? result.hits[0]
+        let hit = byCert ?? byGrade ?? priced[0]
         let confidence: Confidence = byCert != nil ? .exact : byGrade != nil ? .probable : .fuzzy
-
-        let usd = hit.estimatedValueUsd ?? hit.latestListing?.price?.amount?.usd
-        guard let usd else { return nil }
+        guard let usd = Self.usd(hit) else { return nil }
 
         let meta = hit.metadata?.values ?? [:]
         return Match(
             priceCents: Int((usd * 100).rounded()),
             objectID: hit.objectID,
             confidence: confidence,
-            name: meta["Title/Subject"] ?? hit.title,
+            name: meta["Title/Subject"],
+            title: hit.title,
             set: meta["Set"],
             year: meta["Year"].flatMap { Int($0) },
-            grade: hit.certification?.grade ?? meta["Grade"]
+            grade: hit.certification?.grade ?? meta["Grade"],
+            imageUrl: hit.imageUrl.flatMap(URL.init(string:)),
+            lqipBase64: hit.lqipBase64
         )
+    }
+
+    private static func usd(_ hit: Hit) -> Double? {
+        hit.estimatedValueUsd ?? hit.latestListing?.price?.amount?.usd
     }
 
     // MARK: Algolia request
@@ -68,7 +115,13 @@ struct CourtyardClient {
             "facetFilters": [["metadata.Grader:\(grader.rawValue.uppercased())"]],
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, _) = try await URLSession.shared.data(for: req)
+        req.timeoutInterval = 12
+        let (data, response) = try await URLSession.shared.data(for: req)
+        // A 4xx/5xx from Algolia is a failure, not "no results" — decoding it
+        // would otherwise throw and read the same as an empty index.
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            throw URLError(.badServerResponse)
+        }
         return try JSONDecoder().decode(AlgoliaResult.self, from: data)
     }
 
@@ -95,6 +148,8 @@ private struct AlgoliaResult: Decodable {
 private struct Hit: Decodable {
     let objectID: String
     let title: String?
+    let imageUrl: String?
+    let lqipBase64: String?
     let estimatedValueUsd: Double?
     let certification: Cert?
     let metadata: LenientStringDict?
