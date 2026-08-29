@@ -37,7 +37,11 @@ xcodebuild -project ios/Slab3.xcodeproj -scheme Slab3 \
 # single test: add -only-testing:Slab3Tests/CardKeyTests/matchesSqlNormalization
 # ios/Tests uses Swift Testing (@Test/#expect), NOT XCTest — match it.
 # suites: CardKey, CertParser, CourtyardClient, CSVExport, PriceWriteback,
-#         IdentityChain, ImageDownscale, RecentCertWindow, RecentSales
+#         IdentityChain, ImageDownscale, RecentCertWindow, RecentSales,
+#         DetailScreenRender  (renders panels to PNG — layout bugs shipped green
+#                              three times because nothing asserted on layout)
+# ios/project.yml also defines SlabsDev, a side-by-side test build (separate
+# bundle id) so a TestFlight build and a dev build coexist on one device.
 
 # supabase
 supabase db reset      # apply migrations locally
@@ -94,6 +98,21 @@ before touching any adapter**; don't re-litigate an access path it already ruled
   endpoint their own app uses is found — see `spike/README.md` §2. Comps come
   from `/index/asset/{id}/price-history` (unauthenticated; the CARD's sales split
   by grade, with population), not the on-chain ledger.
+  **Active work — the scanner rebuild.** Courtyard's app prices cards it does NOT
+  vault, so the marketplace indices are the wrong product, not a mistuned query.
+  `spike/courtyard-plan.md` is the plan of record; read it *and* `spike/README.md`
+  §2 before touching any Courtyard code. Four things it already settles, so don't
+  redo them: the whole courtyard.io web API was enumerated (172 endpoints from the
+  bundle's generated client) and has **no cert-lookup and no price-by-card-identity
+  route** — every pricing endpoint is per-vaulted-asset; the source is the **mobile
+  app**, and the agreed way in is an **Android APK teardown** of `io.courtyard.app`
+  (`spike/courtyard/capture-app.py` is the mitmproxy addon for the phone-proxy route
+  the owner **declined** — don't run it); account-connect is **not** to be built
+  speculatively, because Courtyard auth is Privy (email-OTP / wallet), so the Card
+  Ladder store-email+password pattern may not port; and the acceptance bar is live,
+  not a fixture — **cert 96679812 must read $50.80 at confidence 2**, what their own
+  app shows for that slab. Whatever the new source is, it feeds the same `identify()`
+  bar; a new source is not a licence to loosen it.
 - **Card Ladder: live (server-side, bring-your-own-account).** The web SPA and
   `search.cardladder.com` are Turnstile-walled, but the real data plane is Firebase
   Cloud Functions on Google hosts (not behind Cloudflare) that take a plain Bearer
@@ -278,7 +297,7 @@ until the binaries are added to the target and registered under `UIAppFonts`.
 
 ## Where the prose evidence lives
 
-Four docs carry decisions that are not recoverable from the code; read the relevant
+Five docs carry decisions that are not recoverable from the code; read the relevant
 one before changing that area:
 
 | Doc | Holds |
@@ -287,6 +306,7 @@ one before changing that area:
 | `design/caliper/README.md` | Design source of truth; `reference/component-rules.md` + `prop-contracts.md` are the per-component rules. |
 | `supabase/functions/README.md` | Edge Function setup (`CL_ENC_KEY` generation, secrets) + curl smoke tests. |
 | `TODOS.md` | Deferred scope with rationale and the decision id that deferred it. |
+| `spike/courtyard-plan.md` | The Courtyard scanner-API rebuild: why Algolia is a dead end, the phased plan, and what must not be redone. |
 
 `design.md` is now only a record of what Caliper overturned, with retired v1 as an
 appendix — not current guidance.
