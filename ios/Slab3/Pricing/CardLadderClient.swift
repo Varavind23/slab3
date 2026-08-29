@@ -17,6 +17,25 @@ struct CardLadderClient {
         case unreachable
     }
 
+    /// Is THIS user connected, according to the server?
+    ///
+    /// The credentials live server-side keyed to the auth user, so the server is
+    /// the authority — a local flag is only ever a cache of this. Returns nil if
+    /// we could not ask, which must NOT be read as "disconnected": that
+    /// conflation is what made a reinstall look like a lost subscription.
+    /// Costs no Card Ladder request.
+    func isConnected() async -> Bool? {
+        struct Reply: Decodable { let ok: Bool; let connected: Bool? }
+        do {
+            let reply: Reply = try await Backend.client.functions.invoke(
+                "cardladder-connect", options: .init(method: .get)
+            )
+            return reply.ok ? (reply.connected ?? false) : nil
+        } catch {
+            return nil
+        }
+    }
+
     /// Validate + store the user's Card Ladder credentials server-side.
     func connect(email: String, password: String) async -> ConnectResult {
         struct Body: Encodable { let email: String; let password: String }

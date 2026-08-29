@@ -38,6 +38,10 @@ struct RootView: View {
             AuthScreen(auth: auth)
         case .signedIn:
             MainShell(auth: auth)
+                // The server holds the Card Ladder credentials, so it decides
+                // whether this user is connected — not a flag in this install's
+                // UserDefaults, which a reinstall wipes.
+                .task { await PriceService.syncConnectionState() }
         }
     }
 }

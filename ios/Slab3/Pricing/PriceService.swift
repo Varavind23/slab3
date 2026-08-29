@@ -77,10 +77,6 @@ enum PriceService {
 
         case .match(let match):
             applyCourtyard(.price(match.priceCents), to: card)
-            // Confidence 0–5 derived from HOW the match was made, not guessed:
-            // an exact cert hit is the strongest evidence Courtyard can give us,
-            // a grade+name hit is circumstantial, a fuzzy hit is barely evidence.
-            // README.md open question 2 asks the client for the real scale.
             // On an exact cert match, prefer COURTYARD's own 1-5 confidence in
             // its value — that is the number its app shows next to the price, and
             // it says something we cannot know ourselves. Otherwise fall back to
@@ -203,6 +199,20 @@ enum PriceService {
             UserDefaults.standard.set(false, forKey: connectedKey)
             return .notConnected
         }
+    }
+
+    /// Reconcile the local connection flag with the server, which is the
+    /// authority. Called once after auth.
+    ///
+    /// Without this the flag is write-only local state: reinstall the app (or run
+    /// a second build with its own container) and Card Ladder reads as
+    /// disconnected forever, because `refreshCardLadder` short-circuits on the
+    /// flag before it ever asks the server. An unreachable server leaves the flag
+    /// ALONE — "couldn't ask" is not "not connected", the same distinction
+    /// prices draw between unavailable and notListed.
+    static func syncConnectionState() async {
+        guard let connected = await cardLadder.isConnected() else { return }
+        UserDefaults.standard.set(connected, forKey: connectedKey)
     }
 
     // MARK: Sales (comps)

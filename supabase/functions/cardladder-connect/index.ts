@@ -11,10 +11,28 @@ import { encodeCreds, type SessionState } from "../_shared/session.ts";
 import { admin, callerId, encKey, json } from "../_shared/http.ts";
 
 Deno.serve(async (req) => {
-  if (req.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405);
-
   const userId = await callerId(req);
   if (!userId) return json({ ok: false, error: "unauthorized" }, 401);
+
+  // GET = "is THIS user connected?" — the server is the authority, because the
+  // credentials live here (per auth user), not on the device.
+  //
+  // Added 2026-08-29: the app tracked connection in a local UserDefaults flag, so
+  // a reinstall (or a second build with its own container) reported "not
+  // connected" and short-circuited BEFORE ever calling the server — the user's
+  // Card Ladder prices silently vanished until they retyped credentials the
+  // server already had. Costs no Card Ladder request: it only asks whether a
+  // credentials row exists.
+  if (req.method === "GET") {
+    const { data } = await admin()
+      .from("cardladder_credentials")
+      .select("user_id")
+      .eq("user_id", userId)
+      .maybeSingle();
+    return json({ ok: true, connected: !!data });
+  }
+
+  if (req.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405);
 
   let email: string, password: string;
   try {

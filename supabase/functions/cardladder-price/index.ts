@@ -73,11 +73,19 @@ Deno.serve(async (req) => {
     ? { data: null }
     : await db
         .from("price_cache")
-        .select("price_cents, as_of, fetch_status, updated_at, last_sale_cents, last_sale_at, source_confidence")
+        .select("price_cents, as_of, fetch_status, updated_at, metric, last_sale_cents, last_sale_at, source_confidence")
         .eq("card_key", cardKey)
         .eq("source", "cardladder")
         .maybeSingle();
-  if (cached && Date.now() - new Date(cached.updated_at).getTime() < CACHE_TTL_MS) {
+  // A row cached under a DIFFERENT metric is not this metric's answer, however
+  // fresh it is. Without this the 2026-08-29 switch was invisible: every card
+  // kept replaying its `average_sale` row for the full 24h TTL, relabelled as
+  // cl_value — and a card whose average window was empty (cached `not_found`,
+  // e.g. cert 96679812) kept reporting no Card Ladder price at all, which is
+  // precisely the bug the metric change existed to fix. Comparing the metric
+  // makes any future change self-healing instead of needing a manual purge.
+  const usable = cached && cached.metric === METRIC;
+  if (usable && Date.now() - new Date(cached.updated_at).getTime() < CACHE_TTL_MS) {
     if (cached.fetch_status === "ok" && cached.price_cents != null) {
       // Serve the stored identity too, or a cached price leaves the row anonymous.
       const { data: known } = await db
