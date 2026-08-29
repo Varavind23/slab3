@@ -35,6 +35,38 @@ targets:
         # app is exempt. Without this key TestFlight withholds every build behind
         # an export-compliance prompt.
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: "NO"
+  # Side-by-side test build. Same sources as Slab3, different bundle id — so it
+  # installs ALONGSIDE the TestFlight copy instead of replacing it, with its own
+  # SwiftData store. That is the point: scan the same slab in both and compare,
+  # without a rescan in one disturbing the other's inventory.
+  #
+  # It talks to the SAME live Supabase as the shipped app (same anon key, same
+  # RLS), so what it shows is what real users will see — only the app on the home
+  # screen is separate, not the backend.
+  SlabsDev:
+    type: application
+    platform: iOS
+    sources: [Slab3]
+    dependencies:
+      - package: Supabase
+        product: Supabase
+    settings:
+      base:
+        DEVELOPMENT_TEAM: 7BMY83MWA8
+        CODE_SIGN_STYLE: Automatic
+        PRODUCT_BUNDLE_IDENTIFIER: com.varunaravind.slabs.dev
+        MARKETING_VERSION: "0.2"
+        CURRENT_PROJECT_VERSION: 2
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "5.9"
+        INFOPLIST_KEY_CFBundleDisplayName: "Slabs Dev"
+        INFOPLIST_KEY_NSCameraUsageDescription: "Scan PSA and CGC cert barcodes on graded card slabs."
+        INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        GENERATE_INFOPLIST_FILE: "YES"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: "NO"
+
   Slab3Tests:
     type: bundle.unit-test
     platform: iOS
