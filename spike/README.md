@@ -205,6 +205,53 @@ pack purchase, `paymentToken: "stripe"` — not a comp for the card). So an empt
 Courtyard comps list is the normal case and is never treated as an error. Card
 Ladder is the real comps source; Courtyard's is a bonus when the slab has traded.
 
+### Courtyard identification is a DEAD END via Algolia — 2026-08-29 (evening)
+
+Found by testing V2 on a real slab: cert 96679812 (2022 Optic Splash! #10 Curry,
+PSA 10) showed **$18 at confidence 1/5** in Slabs, while Courtyard's own app,
+scanning the same slab, showed **$50.80 at confidence 2**. We were pricing a
+DIFFERENT Curry. Three separate findings, all verified:
+
+- **Cert is neither facetable nor searchable.** `facetFilters`, `filters` and
+  `restrictSearchableAttributes: ["certification.number"]` all return `nbHits: 0`.
+  A bare cert query is worse than useless: typo-tolerance returns near-miss cert
+  numbers belonging to unrelated cards (query `41066652` → `4065652010`,
+  `47076652`, ...). **That near-miss behaviour is how a wrong card gets priced.**
+- **The indices are recent-activity feeds, not a catalog.** Assets churn out of
+  `recently_listed`/`recently_sold`. The Charizard EX (cert 41066652) was present
+  in the morning and unfindable by evening — its ledger shows a `burn`, i.e.
+  redeemed out of the vault. So even a perfect query can't find a card that has
+  aged out.
+- **Query text cannot rescue it.** For a card known to be indexed, none of
+  `"Charizard EX"` (2623 hits), `"Charizard EX <set>"` (24), `"2014 <set> XY17
+  Charizard EX"` (10) surfaced the target within 40 hits.
+
+**Consequence, and what shipped:** the price now requires the hit to actually
+identify the card — cert exact, or year + card number + grade all agreeing.
+Everything looser returns `not_found` and the UI shows an em dash. This blanks
+Courtyard for most scanned cards, which is the honest outcome: a price belonging
+to another card is a fabricated price for this one, and the em dash is what we
+owe the user. The old grade-only and top-hit tiers are gone.
+
+**What Courtyard's app is actually doing (NOT yet found).** It priced a slab that
+is not in the marketplace index at all, so its scanner is backed by a pricing
+MODEL over card identity + grade, not by vault inventory. Endpoint unknown:
+`/index/attributes` answers `{"":{}}` to every parameter guess, and
+`/index/asset/{id}/estimate` is per-vaulted-asset (404s for most). Almost
+certainly in the mobile app, plausibly behind an account. **Finding it needs a
+real spike — proxy-capture the Courtyard iOS app while using its scanner.** That
+is the only path to parity with what the user sees in their app.
+
+**One genuine win, though:** `GET /index/asset/{assetID}/price-history` —
+unauthenticated, and far better than the on-chain ledger it replaced. It returns
+the CARD's full sale record split BY GRADE with population:
+`{assetId, priceHistory:[{title, grader, grade, population, sales:[{date, price}]}]}`
+(e.g. the XY17 Charizard: PSA 9 → 65 sales, pop 438; PSA 10 → 31 sales). Because
+it describes the card rather than the slab, ANY vaulted asset of that card answers
+for all of them. Comps now come from here, gated behind the same identification
+bar as the price. The `/transactions` ledger approach is retired: ~20% coverage
+and one sale per slab.
+
 ## 3. Physical slab scanning (needs iPhone + real PSA and CGC slabs)
 
 Xcode → New iOS App **ScanHarness** (SwiftUI, iOS 17) → replace generated files

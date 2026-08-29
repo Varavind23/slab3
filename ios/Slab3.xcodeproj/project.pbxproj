@@ -24,6 +24,7 @@
 		1C7AB3B7F34078B8D1330146 /* MainShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54C6B299E227460F46893B62 /* MainShell.swift */; };
 		24A69F2B5D6E37E0115C25B1 /* SplashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B335CF12556D631CEEF0CEB7 /* SplashView.swift */; };
 		24FBA10ADCAFCE1ABDA2F97A /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = 71BEF36CF2D3D854D141876F /* Supabase */; };
+		28B18A105C68BE89EE40E0E9 /* ISO8601.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63E7F62160830A9F6CFCB587 /* ISO8601.swift */; };
 		2B9DCA5299EC570C807571C3 /* SlabFrameCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = C167D5B3B7AF79C3AF256445 /* SlabFrameCapture.swift */; };
 		2EE1644C36D614D6F358963D /* AuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16FAC3298EBD3DC087745E75 /* AuthManager.swift */; };
 		348A7428F459A2A4703F3ED1 /* Grader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BD7F531EC812D969ABA48B2 /* Grader.swift */; };
@@ -66,6 +67,7 @@
 		9F8213AFF8A5B8079A8BDA66 /* AuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16FAC3298EBD3DC087745E75 /* AuthManager.swift */; };
 		A32C47A0EF6B0D292182FF30 /* PriceRefresher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97CCFD7E101B4239277207A0 /* PriceRefresher.swift */; };
 		A48C481203350FB6B0D09CEA /* ImageDownscaleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 322D2E92658BE327D7C8D90E /* ImageDownscaleTests.swift */; };
+		A77CC8A4CF20C3230CF4FB5E /* ISO8601.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63E7F62160830A9F6CFCB587 /* ISO8601.swift */; };
 		A81E4CF97261E227C9C37322 /* RecentCertWindowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABAF245B08CBFD995E3DE090 /* RecentCertWindowTests.swift */; };
 		A9D2D47ECCBA161EAE5CF2F2 /* ExportScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = B786DDE4DC3E91F713F96B1A /* ExportScreen.swift */; };
 		ADE192393A13C82F2F0D90D6 /* PriceWriteback.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EFE27B739F31EE230328B20 /* PriceWriteback.swift */; };
@@ -133,6 +135,7 @@
 		510948805DAF7E65AD34A9F3 /* Slab3App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Slab3App.swift; sourceTree = "<group>"; };
 		54C6B299E227460F46893B62 /* MainShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainShell.swift; sourceTree = "<group>"; };
 		5582A25EEBE1AEFFA653BC8B /* CourtyardClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CourtyardClientTests.swift; sourceTree = "<group>"; };
+		63E7F62160830A9F6CFCB587 /* ISO8601.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ISO8601.swift; sourceTree = "<group>"; };
 		658AFF391A3D5F375DA851D2 /* AuthScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthScreen.swift; sourceTree = "<group>"; };
 		6E31383E440085EB89CF57BE /* RecentCertWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentCertWindow.swift; sourceTree = "<group>"; };
 		71C21BEC4746B70E38C0F3BE /* Card.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Card.swift; sourceTree = "<group>"; };
@@ -276,6 +279,7 @@
 				798032DAAC31DEFD638960BC /* CardKey.swift */,
 				235A7285F6988D3EB121AC61 /* CSVExport.swift */,
 				E959DC4D72F31DB98D47A198 /* ImageDownscale.swift */,
+				63E7F62160830A9F6CFCB587 /* ISO8601.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -515,6 +519,7 @@
 				9BF726DC067A94DDEDE2E34D /* FiltersSheet.swift in Sources */,
 				EE6858D5534F4F4EE2B1D06D /* Folder.swift in Sources */,
 				348A7428F459A2A4703F3ED1 /* Grader.swift in Sources */,
+				A77CC8A4CF20C3230CF4FB5E /* ISO8601.swift in Sources */,
 				87C51F658CF18F40D0241A9A /* ImageDownscale.swift in Sources */,
 				1C7AB3B7F34078B8D1330146 /* MainShell.swift in Sources */,
 				99CF8D8FE39D5EFE09B1C31D /* OnboardingScreen.swift in Sources */,
@@ -561,6 +566,7 @@
 				48E0B0F9315C51FFC3873094 /* FiltersSheet.swift in Sources */,
 				1B7D76D1D5224EAFFA194618 /* Folder.swift in Sources */,
 				5F856B131653DBB68603F43E /* Grader.swift in Sources */,
+				28B18A105C68BE89EE40E0E9 /* ISO8601.swift in Sources */,
 				3AE5E6C646145F6324847503 /* ImageDownscale.swift in Sources */,
 				FF181DAE7D0F64B67F4DB997 /* MainShell.swift in Sources */,
 				671D818ABDCD0E2F585EE75E /* OnboardingScreen.swift in Sources */,

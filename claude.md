@@ -84,9 +84,16 @@ before touching any adapter**; don't re-litigate an access path it already ruled
   an exact cert match. `courtyard-sales.ts` gets real sale prices from
   `/index/asset/{assetID}/transactions` (plain fetch, no browser; USDC 6-dec),
   resolving the asset via `proofOfIntegrity` on a `marketplace_prod_recently_sold`
-  hit — which IS the assetID. Cert is **not facetable** in Algolia, so cert
-  matching stays client-side. Only ~20% of vaulted slabs have ever sold, so an
-  empty Courtyard comps list is normal, not an error.
+  hit — which IS the assetID. Cert is neither facetable NOR searchable
+  (a bare cert query returns typo-tolerant near-misses of unrelated cards), and
+  the indices are recent-activity feeds that cards age out of — so a hit must
+  IDENTIFY the card (cert exact, or year + card number + grade) or we return
+  `not_found` and show an em dash. `identify()` is that bar, mirrored in Swift;
+  the old grade-only and top-hit tiers priced other people's cards and are gone.
+  This blanks Courtyard for most cards, which is correct until the scanner
+  endpoint their own app uses is found — see `spike/README.md` §2. Comps come
+  from `/index/asset/{id}/price-history` (unauthenticated; the CARD's sales split
+  by grade, with population), not the on-chain ledger.
 - **Card Ladder: live (server-side, bring-your-own-account).** The web SPA and
   `search.cardladder.com` are Turnstile-walled, but the real data plane is Firebase
   Cloud Functions on Google hosts (not behind Cloudflare) that take a plain Bearer

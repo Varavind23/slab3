@@ -53,7 +53,8 @@ struct CourtyardClient {
     /// (name + set) and falls back to the cert number, because the index is
     /// `recently_listed`: a card that matched by name last week can drop out of
     /// it, while the exact vaulted slab still resolves by cert.
-    func lookup(grader: Grader, certNumber: String, name: String?, set: String?, grade: String?) async -> Outcome {
+    func lookup(grader: Grader, certNumber: String, name: String?, set: String?, grade: String?,
+                year: Int? = nil, cardNumber: String? = nil) async -> Outcome {
         let named = [name, set].compactMap { $0 }.joined(separator: " ").trimmingCharacters(in: .whitespaces)
         // Deduped, in priority order: identity first, cert as the fallback.
         let queries = named.isEmpty ? [certNumber] : [named, certNumber]
@@ -62,7 +63,8 @@ struct CourtyardClient {
         for query in queries {
             do {
                 let result = try await search(query: query, grader: grader)
-                if let match = bestMatch(in: result.hits, certNumber: certNumber, grade: grade) {
+                if let match = bestMatch(in: result.hits, certNumber: certNumber, grade: grade,
+                                         year: year, cardNumber: cardNumber) {
                     return .match(match)
                 }
             } catch {
@@ -76,18 +78,29 @@ struct CourtyardClient {
 
     /// Pick the best hit that actually carries a price. Ranking a priceless hit
     /// first used to sink the whole lookup even when a good hit sat behind it.
-    private func bestMatch(in hits: [Hit], certNumber: String, grade: String?) -> Match? {
+    ///
+    /// Two tiers ONLY, both of which must identify the same card:
+    ///   • `.exact`    — the cert matches, so it is literally this slab.
+    ///   • `.probable` — a different slab of the SAME card: year, card number and
+    ///     grade all agree.
+    /// Anything looser returns nil, and the caller reports `notListed`.
+    ///
+    /// There used to be a third tier that took the top priced hit when nothing
+    /// agreed. On a query like "Stephen Curry Splash" that is a lottery across
+    /// every Splash card Courtyard has ever vaulted: cert 96679812 (2022 Optic
+    /// Splash! #10 Holo, PSA 10) is not in the index at all, and we showed the
+    /// $18 price of an unrelated Curry against it while Courtyard's own app said
+    /// $50.80. Grade alone was no better — it matched a 2024 #2 Purple. A price
+    /// belonging to another card is a fabricated price for this one, and the em
+    /// dash is what we owe the user instead.
+    private func bestMatch(in hits: [Hit], certNumber: String, grade: String?,
+                           year: Int?, cardNumber: String?) -> Match? {
         let priced = hits.filter { Self.usd($0) != nil }
         guard !priced.isEmpty else { return nil }
 
-        let gnum = Self.gradeNumber(grade)
-        let byCert = priced.first { $0.certification?.number == certNumber }
-        let byGrade = gnum == nil ? nil : priced.first {
-            Self.gradeNumber($0.certification?.grade ?? $0.metadata?.values["Grade"]) == gnum
-        }
-        let hit = byCert ?? byGrade ?? priced[0]
-        let confidence: Confidence = byCert != nil ? .exact : byGrade != nil ? .probable : .fuzzy
-        guard let usd = Self.usd(hit) else { return nil }
+        guard let (hit, confidence) = Self.identify(in: priced, certNumber: certNumber, grade: grade,
+                                                    year: year, cardNumber: cardNumber),
+              let usd = Self.usd(hit) else { return nil }
 
         let meta = hit.metadata?.values ?? [:]
         return Match(
@@ -95,10 +108,10 @@ struct CourtyardClient {
             objectID: hit.objectID,
             confidence: confidence,
             // Courtyard's own confidence is quoted ONLY on an exact cert match.
-            // On a fuzzy hit the value belongs to a different card, so passing
+            // On any looser hit the value belongs to a different slab, so passing
             // Courtyard's confidence in it along would overstate what we know —
-            // the same rule that keeps a fuzzy hit's image off the row.
-            sourceConfidence: byCert != nil ? hit.estimatedValueConfidence?.value : nil,
+            // the same rule that keeps a non-exact hit's image off the row.
+            sourceConfidence: confidence == .exact ? hit.estimatedValueConfidence?.value : nil,
             name: Self.shortName(in: meta),
             title: hit.title,
             set: meta["Set"],
@@ -108,6 +121,30 @@ struct CourtyardClient {
             imageUrl: hit.imageUrl.flatMap(URL.init(string:)),
             lqipBase64: hit.lqipBase64
         )
+    }
+
+    /// Which hit, if any, is THIS card — and how sure we are. The one place the
+    /// identification bar is defined, so price and comps cannot drift apart.
+    private static func identify(in hits: [Hit], certNumber: String, grade: String?,
+                                 year: Int?, cardNumber: String?) -> (Hit, Confidence)? {
+        if let byCert = hits.first(where: { $0.certification?.number == certNumber }) {
+            return (byCert, .exact)
+        }
+        let gnum = gradeNumber(grade)
+        let sameCard = hits.first { hit in
+            guard let gnum,
+                  gradeNumber(hit.certification?.grade ?? hit.metadata?.values["Grade"]) == gnum
+            else { return false }
+            let meta = hit.metadata?.values ?? [:]
+            // Year AND card number must both be known and both agree — either one
+            // alone still spans different cards in the same set.
+            guard let year, let yr = meta["Year"].flatMap({ Int($0) }), yr == year,
+                  let cardNumber, !cardNumber.isEmpty,
+                  let num = meta["Card Number"], num.caseInsensitiveCompare(cardNumber) == .orderedSame
+            else { return false }
+            return true
+        }
+        return sameCard.map { ($0, .probable) }
     }
 
     /// The card's short name out of Courtyard's metadata.
@@ -176,63 +213,57 @@ struct CourtyardClient {
     /// sold on Courtyard — the rest were minted and held. An empty list is the
     /// common, honest answer; we never pad it with estimates.
     /// Mirrors worker/src/sources/courtyard-sales.ts.
-    func recentSales(name: String?, set: String?, grader: Grader, grade: String?) async -> [RecentSale] {
+    func recentSales(name: String?, set: String?, grader: Grader, grade: String?,
+                     certNumber: String = "", year: Int? = nil, cardNumber: String? = nil) async -> [RecentSale] {
         let query = [name, set].compactMap { $0 }.joined(separator: " ").trimmingCharacters(in: .whitespaces)
         guard !query.isEmpty else { return [] }
-        guard let result = try? await search(query: query, grader: grader, index: Self.soldIndex) else { return [] }
+        // Same identification bar as the price: this slab, or a different slab of
+        // the SAME card. Comps for a card that merely shares a player name are
+        // not comps. Note this deliberately does NOT require the hit to be priced
+        // — we only need it to name an asset whose history we can read.
+        guard let result = try? await search(query: query, grader: grader, index: Self.soldIndex),
+              let (hit, _) = Self.identify(in: result.hits, certNumber: certNumber, grade: grade,
+                                           year: year, cardNumber: cardNumber)
+        else { return [] }
 
-        let gnum = Self.gradeNumber(grade)
-        let candidates = result.hits.filter { hit in
-            guard let gnum else { return true }
-            return Self.gradeNumber(hit.certification?.grade ?? hit.metadata?.values["Grade"]) == gnum
-        }.prefix(Self.candidateLimit)
-
-        let sales = await withTaskGroup(of: RecentSale?.self) { group in
-            for hit in candidates {
-                group.addTask { await Self.latestSale(for: hit) }
-            }
-            var out: [RecentSale] = []
-            for await sale in group { if let sale { out.append(sale) } }
-            return out
-        }
-        return sales.sorted { $0.soldAt > $1.soldAt }.prefix(5).map { $0 }
+        let assetId = hit.proofOfIntegrity ?? hit.objectID
+        return await Self.priceHistory(assetId: assetId, grader: grader, grade: grade)
     }
 
-    /// Sized against the ~20% of slabs that carry a sale, to land five.
-    private static let candidateLimit = 12
-
-    private static func latestSale(for hit: Hit) async -> RecentSale? {
-        let assetId = hit.proofOfIntegrity ?? hit.objectID
-        guard let url = URL(string: "https://api.courtyard.io/index/asset/\(assetId)/transactions") else { return nil }
+    /// Courtyard's own sale history for the CARD, from
+    /// /index/asset/{id}/price-history — unauthenticated, and far richer than the
+    /// on-chain ledger it replaced (2026-08-29).
+    ///
+    /// The ledger only knew about slabs that had traded ON Courtyard — about one
+    /// in five — so most cards showed nothing. This endpoint returns Courtyard's
+    /// full sale record for the card, split BY GRADE with population, so we can
+    /// take exactly our grade's sales. It is keyed to an asset but describes the
+    /// card, so any vaulted slab of the same card answers for all of them.
+    private static func priceHistory(assetId: String, grader: Grader, grade: String?) async -> [RecentSale] {
+        guard let url = URL(string: "https://api.courtyard.io/index/asset/\(assetId)/price-history") else { return [] }
         var req = URLRequest(url: url)
-        req.timeoutInterval = 10
+        req.timeoutInterval = 12
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         guard let (data, response) = try? await URLSession.shared.data(for: req),
               (response as? HTTPURLResponse)?.statusCode == 200,
-              let ledger = try? JSONDecoder().decode(Ledger.self, from: data)
-        else { return nil }
+              let history = try? JSONDecoder().decode(PriceHistory.self, from: data)
+        else { return [] }
 
-        // `mint` is excluded on purpose: a vending-machine pack purchase is not a
-        // comp for the card inside it.
-        let sales = ledger.transactions.compactMap { tx -> RecentSale? in
-            guard tx.txType == "sale",
-                  tx.paymentToken?.lowercased() == Self.usdcPolygon,
-                  let cents = Self.usdcToCents(tx.paymentAmount),
-                  let soldAt = ISO8601DateFormatter().date(from: tx.txTime)
-            else { return nil }
-            return RecentSale(priceCents: cents, soldAt: soldAt, platform: "Courtyard",
-                              listingType: nil, title: hit.title, url: nil)
+        let gnum = Self.gradeNumber(grade)
+        // Our grade only. A PSA 10 sale is not a comp for a PSA 9.
+        guard let bucket = history.priceHistory.first(where: {
+            $0.grader.caseInsensitiveCompare(grader.rawValue) == .orderedSame
+                && Self.gradeNumber($0.grade) == gnum
+        }) else { return [] }
+
+        return bucket.sales.compactMap { sale -> RecentSale? in
+            guard let soldAt = ISO8601.date(sale.date),
+                  let dollars = Double(sale.price), dollars > 0 else { return nil }
+            return RecentSale(priceCents: Int((dollars * 100).rounded()), soldAt: soldAt,
+                              platform: "Courtyard", listingType: nil, title: bucket.title, url: nil)
         }
-        return sales.max { $0.soldAt < $1.soldAt }
-    }
-
-    private static let usdcPolygon = "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359"
-
-    /// USDC 6-decimal string -> cents. Nil for anything that is not real money.
-    static func usdcToCents(_ raw: String?) -> Int? {
-        guard let raw, !raw.isEmpty, raw.allSatisfy(\.isNumber), let units = Double(raw) else { return nil }
-        let cents = Int((units / 10_000).rounded())
-        return cents > 0 ? cents : nil
+        .sorted { $0.soldAt > $1.soldAt }
+        .prefix(5).map { $0 }
     }
 
 }
@@ -283,15 +314,21 @@ private struct LenientInt: Decodable {
     }
 }
 
-/// One slab's on-chain ledger — api.courtyard.io/index/asset/{id}/transactions.
-private struct Ledger: Decodable {
-    let transactions: [Tx]
+/// api.courtyard.io/index/asset/{id}/price-history — the card's sale record,
+/// split by grade. `price` is a decimal STRING ("119.95").
+private struct PriceHistory: Decodable {
+    let priceHistory: [Bucket]
 }
-private struct Tx: Decodable {
-    let txType: String
-    let txTime: String
-    let paymentToken: String?
-    let paymentAmount: String?
+private struct Bucket: Decodable {
+    let title: String
+    let grader: String
+    let grade: String
+    let population: Int?
+    let sales: [HistorySale]
+}
+private struct HistorySale: Decodable {
+    let date: String
+    let price: String
 }
 
 private struct Cert: Decodable {

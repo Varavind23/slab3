@@ -63,7 +63,9 @@ enum PriceService {
             certNumber: card.certNumber,
             name: card.name,
             set: card.set,
-            grade: card.grade
+            grade: card.grade,
+            year: card.year,
+            cardNumber: card.cardNumber
         ) {
         case .failed:
             applyCourtyard(.unreachable, to: card)
@@ -83,6 +85,9 @@ enum PriceService {
             // how the match was made: a grade+name hit is circumstantial, a fuzzy
             // hit is barely evidence, and quoting Courtyard's confidence in a
             // different card's value would overstate what we know.
+            // Only two tiers survive matching now (see CourtyardClient.bestMatch):
+            // this slab, or a different slab of the same card. A looser hit is
+            // no longer priced at all.
             let matchConfidence = switch match.confidence {
             case .exact: 5
             case .probable: 3
@@ -240,7 +245,8 @@ enum PriceService {
         // whether the user has connected Card Ladder at all.
         if card.courtyardSales == nil || force {
             card.courtyardSales = await courtyard.recentSales(
-                name: card.name, set: card.set, grader: card.grader, grade: card.grade)
+                name: card.name, set: card.set, grader: card.grader, grade: card.grade,
+                certNumber: card.certNumber, year: card.year, cardNumber: card.cardNumber)
         }
 
         guard UserDefaults.standard.bool(forKey: connectedKey) else {

@@ -89,6 +89,30 @@ struct RecentSalesTests {
         #expect(sale(1, 1, platform: nil, type: nil).provenance == "")
     }
 
+    // ── wire-format dates ────────────────────────────────────────────────────
+
+    // A plain JSONDecoder cannot read an ISO date (its default strategy expects a
+    // NUMBER), and supabase-swift's invoke uses exactly that. Decoding straight
+    // into a Date threw, the catch reported "unavailable", and the panel said
+    // "Sales not loaded" for a perfectly good 200. Dates cross as strings now.
+    @Test func parsesCardLaddersFractionalSecondTimestamps() {
+        let d = ISO8601.date("2026-08-28T15:04:10.000Z")
+        #expect(d != nil)
+        #expect(d?.timeIntervalSince1970 == 1787929450) // 2026-08-28T15:04:10Z
+    }
+
+    @Test func parsesTimestampsWithoutFractionalSeconds() {
+        // Postgres timestamptz commonly comes back in this shape.
+        #expect(ISO8601.date("2026-08-28T15:04:10Z") != nil)
+    }
+
+    @Test func refusesWhatItCannotRead() {
+        #expect(ISO8601.date(nil) == nil)
+        #expect(ISO8601.date("") == nil)
+        #expect(ISO8601.date("yesterday") == nil)
+        #expect(ISO8601.date("1787670250") == nil)
+    }
+
     // ── the metric change itself ─────────────────────────────────────────────
 
     // The regression this release exists for: v1 showed a 30-day average, which is

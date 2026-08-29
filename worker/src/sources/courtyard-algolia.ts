@@ -90,6 +90,45 @@ export function sourceConfidence(raw: unknown): number | undefined {
   return Math.round(n);
 }
 
+/** Which hit, if any, IS this card — mirrored in CourtyardClient.swift:identify.
+ *
+ *  Two tiers, both of which must identify the same card:
+ *    - cert matches            -> this exact slab;
+ *    - year + card number + grade all agree -> a different slab of the same card.
+ *
+ *  There used to be a third tier that took the top priced hit when nothing
+ *  agreed, and a grade-only tier above it. Both are gone (2026-08-29): on a query
+ *  like "Stephen Curry Splash" they are a lottery across every Splash card
+ *  Courtyard ever vaulted, and we showed an unrelated Curry's $18 against cert
+ *  96679812 while Courtyard's own app said $50.80. A price belonging to another
+ *  card is a fabricated price for this one.
+ *
+ *  Note what this CANNOT do: cert is neither searchable nor facetable in these
+ *  indices (verified 2026-08-29 — `restrictSearchableAttributes` on
+ *  certification.number returns 0, and a bare cert query returns typo-tolerant
+ *  near-misses belonging to unrelated cards). So an exact tier is reachable only
+ *  by luck, and the same-card tier only for cards currently in the recent-activity
+ *  feeds. Declining is the correct outcome for everything else. */
+export function identify(
+  hits: AlgoliaHit[],
+  identity: Pick<CardIdentity, "certNumber" | "grade" | "year" | "cardNumber">,
+): { hit: AlgoliaHit; byCert: boolean } | null {
+  if (identity.certNumber) {
+    const byCert = hits.find((h) => h.certification?.number === identity.certNumber);
+    if (byCert) return { hit: byCert, byCert: true };
+  }
+  const gnum = gradeNumber(identity.grade);
+  if (!gnum || identity.year == null || !identity.cardNumber) return null;
+  const sameCard = hits.find((h) => {
+    if (gradeNumber(h.certification?.grade ?? h.metadata?.Grade) !== gnum) return false;
+    const year = Number(h.metadata?.Year);
+    if (!Number.isFinite(year) || year !== identity.year) return false;
+    const num = h.metadata?.["Card Number"];
+    return !!num && num.toLowerCase() === identity.cardNumber!.toLowerCase();
+  });
+  return sameCard ? { hit: sameCard, byCert: false } : null;
+}
+
 export class CourtyardAlgoliaSource implements PriceSource {
   readonly name = "courtyard" as const;
   // What Slabs shows for Courtyard: the confidence-scored value estimate, which
@@ -116,14 +155,10 @@ export class CourtyardAlgoliaSource implements PriceSource {
     }
     if (!result.hits?.length) return notFound(`no Courtyard match for "${text}"`);
 
-    // Prefer an exact cert-number match; else the top hit whose grade agrees.
-    const byCert = identity.certNumber
-      ? result.hits.find((h) => h.certification?.number === identity.certNumber)
-      : undefined;
-    const byGrade = gnum
-      ? result.hits.find((h) => gradeNumber(h.certification?.grade ?? h.metadata?.Grade) === gnum)
-      : undefined;
-    const hit = byCert ?? byGrade ?? result.hits[0];
+    // Identify the card, or decline. Two tiers only — see `identify`.
+    const found = identify(result.hits, identity);
+    if (!found) return notFound("no Courtyard hit identifies this card");
+    const { hit, byCert } = found;
 
     const cents = usdToCents(hit.estimatedValueUsd);
     if (cents === null) {
@@ -145,7 +180,7 @@ export class CourtyardAlgoliaSource implements PriceSource {
       metric: this.metric,
       asOf: hit.lastSaleDate ?? new Date().toISOString(),
       sourceCanonicalId: hit.objectID,
-      confidence: byCert ? "exact" : byGrade ? "probable" : "fuzzy",
+      confidence: byCert ? "exact" : "probable",
       // Courtyard's OWN 1-5 confidence in its estimate — the number its app shows
       // beside the value. Carried only on an exact cert match: on a fuzzy hit the
       // value belongs to a DIFFERENT card, so quoting Courtyard's confidence in it

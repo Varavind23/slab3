@@ -12,6 +12,10 @@ export interface CardIdentity {
   year?: number;
   grade?: string;
   certNumber?: string;
+  /** The number printed on the card (PSA's "Card Number"), not the cert. Needed
+   *  to tell two cards in the same set and year apart — see courtyard-algolia's
+   *  `identify`. */
+  cardNumber?: string;
 }
 
 /** What a source's headline number MEANS. `cl_value` is Card Ladder's own

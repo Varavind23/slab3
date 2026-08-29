@@ -20,14 +20,37 @@ describe("gradeNumber", () => {
 });
 
 describe("CourtyardAlgoliaSource.lookup (real Algolia fixture)", () => {
-  it("returns a priced match for a searched card", async () => {
-    const r = await src.lookup({ cardKey: "x", grader: "psa", name: "Charizard", set: "Base Set", grade: "PSA 10" });
+  // A different slab of the SAME card: year, card number and grade all agree.
+  it("prices a same-card match (year + card number + grade)", async () => {
+    const r = await src.lookup({
+      cardKey: "x", grader: "psa", name: "Charizard", set: "Base Set",
+      grade: "PSA 10", year: 2021, cardNumber: "4",
+    });
     expect(r.kind).toBe("ok");
     if (r.kind === "ok") {
-      expect(r.priceCents).toBeGreaterThan(0);
+      expect(r.priceCents).toBe(53700); // fixture hit 1: estimatedValueUsd 537
       expect(r.metric).toBe("recent_sale");
-      expect(r.sourceCanonicalId).toBeTruthy(); // objectID present
+      expect(r.confidence).toBe("probable");
+      expect(r.sourceCanonicalId).toBeTruthy();
     }
+  });
+
+  // THE bug this rule exists for. Name + set alone is a lottery across every
+  // card of that name Courtyard has vaulted: cert 96679812 (2022 Optic Splash!
+  // #10 Curry) got an unrelated Curry's $18 while Courtyard's app said $50.80.
+  it("declines rather than pricing a card it cannot identify", async () => {
+    const r = await src.lookup({ cardKey: "x", grader: "psa", name: "Charizard", set: "Base Set", grade: "PSA 10" });
+    expect(r).toMatchObject({ kind: "error", error: "not_found" });
+  });
+
+  it("grade agreement alone is not identification", async () => {
+    // Right grade, wrong card: 2002 #40 is in the fixture at grade 10, but this
+    // card is 2021 #4. Matching on grade would have taken it.
+    const r = await src.lookup({
+      cardKey: "x", grader: "psa", name: "Charizard", set: "Base Set",
+      grade: "PSA 10", year: 1874, cardNumber: "999",
+    });
+    expect(r).toMatchObject({ kind: "error", error: "not_found" });
   });
 
   it("marks an exact cert-number match as confidence 'exact'", async () => {

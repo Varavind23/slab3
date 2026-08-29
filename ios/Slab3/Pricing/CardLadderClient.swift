@@ -107,7 +107,9 @@ struct CardLadderClient {
             let status: String
             let priceCents: Int?
             let lastSaleCents: Int?
-            let lastSaleAt: Date?
+            /// Deliberately a String: the SDK decodes with a plain JSONDecoder,
+            /// which cannot read an ISO date. See ISO8601.
+            let lastSaleAt: String?
             let confidence: Int?
             let identity: Identity?
         }
@@ -121,7 +123,7 @@ struct CardLadderClient {
                 guard let cents = reply.priceCents else { return .notFound(reply.identity) }
                 return .ok(
                     Price(valueCents: cents, lastSaleCents: reply.lastSaleCents,
-                          lastSaleAt: reply.lastSaleAt, confidence: reply.confidence),
+                          lastSaleAt: ISO8601.date(reply.lastSaleAt), confidence: reply.confidence),
                     reply.identity
                 )
             case "not_found": return .notFound(reply.identity)
@@ -155,7 +157,8 @@ struct CardLadderClient {
         struct Body: Encodable { let cert: String; let grader: String; let cardKey: String; let force: Bool }
         struct Sale: Decodable {
             let priceCents: Int
-            let soldAt: Date
+            /// String for the same reason as lastSaleAt above.
+            let soldAt: String
             let platform: String?
             let listingType: String?
             let title: String?
@@ -169,9 +172,12 @@ struct CardLadderClient {
             )
             switch reply.status {
             case "ok":
-                return .ok((reply.sales ?? []).map {
-                    RecentSale(priceCents: $0.priceCents, soldAt: $0.soldAt, platform: $0.platform,
-                               listingType: $0.listingType, title: $0.title, url: $0.url)
+                // A sale we cannot date is dropped rather than shown with a
+                // wrong date — the list is evidence, and its order is the point.
+                return .ok((reply.sales ?? []).compactMap { sale in
+                    guard let soldAt = ISO8601.date(sale.soldAt) else { return nil }
+                    return RecentSale(priceCents: sale.priceCents, soldAt: soldAt, platform: sale.platform,
+                                      listingType: sale.listingType, title: sale.title, url: sale.url)
                 })
             case "not_connected": return .notConnected
             case "auth_expired": return .authExpired
