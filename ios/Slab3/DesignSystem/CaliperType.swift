@@ -61,6 +61,10 @@ extension Font {
 
     /// A price on a row. 11/500.
     static let price = mono(11, .medium)
+    /// A completed sale in the comps list. 15/600 — deliberately larger than
+    /// `price`, because these are the numbers a reseller reads one after another
+    /// to pick a figure, not a value glanced at in a dense row.
+    static let saleFigure = mono(15, .semibold)
     /// Year, set, cert, the trailing two prices. 9/500.
     static let meta = mono(9, .medium)
     /// Uppercase tracked label: EST. PAYOUT, 3 SELECTED. 10/500.

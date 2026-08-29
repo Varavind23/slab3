@@ -32,7 +32,8 @@ struct CardDetailScreen: View {
             ScrollView {
                 VStack(spacing: Caliper.rowGap) {
                     slabPanel
-                    salesPanel
+                    SalesPanel(card: card, source: $app.activeSource,
+                               connected: cardLadderConnected) { showConnect = true }
                     pricePanel
                     identityPanel
                     groupPanel
@@ -152,69 +153,6 @@ struct CardDetailScreen: View {
     /// Real completed sales of this card at this grade. Evidence, not a derived
     /// figure — which is the whole point: the user prices the slab themselves.
     ///
-    /// Empty is REAL CONTENT, never a hidden panel. "No recent sales" (the source
-    /// answered and has none) and "not fetched" are different facts and say
-    /// different things. Nothing here is ever synthesized.
-    private var salesPanel: some View {
-        VStack(alignment: .leading, spacing: Caliper.space3) {
-            HStack {
-                SectionLabelInline(text: "Recent sales")
-                if let grade = card.grade {
-                    Text("\(card.grader.rawValue.uppercased()) \(grade)")
-                        .caliperMeta(Caliper.textTertiary)
-                }
-                Spacer()
-                SourceToggle(value: $app.activeSource)
-            }
-
-            let sales = card.sales(for: app.activeSource)
-            if app.activeSource == .cl && !cardLadderConnected {
-                emptyNote("Connect Card Ladder to see sales")
-                CaliperButton(title: "Connect Card Ladder", variant: .outline, fullWidth: true) {
-                    showConnect = true
-                }
-            } else if card.salesLoading && sales == nil {
-                emptyNote("Loading sales\u{2026}")
-            } else if let sales, !sales.isEmpty {
-                VStack(spacing: 0) {
-                    ForEach(Array(sales.prefix(5).enumerated()), id: \.element.id) { index, sale in
-                        if index > 0 { Hairline() }
-                        saleRow(sale)
-                    }
-                }
-            } else if sales != nil {
-                // The source answered: it genuinely has no comps for this card.
-                emptyNote(app.activeSource == .cl
-                          ? "No recent sales on Card Ladder"
-                          : "No recent sales on Courtyard")
-            } else {
-                emptyNote("Sales not loaded")
-            }
-        }
-        .caliperPanel()
-    }
-
-    private func saleRow(_ sale: RecentSale) -> some View {
-        HStack(spacing: Caliper.space3) {
-            Text(caliperMoney(cents: sale.priceCents))
-                .font(.price)
-                .foregroundStyle(Caliper.textPrimary)
-                .frame(minWidth: 62, alignment: .leading)
-            Text(sale.provenance)
-                .caliperMeta(Caliper.textSecondary)
-            Spacer(minLength: Caliper.space2)
-            Text(sale.soldAt.formatted(.dateTime.month(.abbreviated).day()))
-                .caliperMeta(Caliper.textTertiary)
-        }
-        .padding(.vertical, Caliper.space2)
-    }
-
-    private func emptyNote(_ text: String) -> some View {
-        Text(text)
-            .caliperMeta(Caliper.textTertiary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, Caliper.space2)
-    }
 
     private var cachedImage: AnyView? {
         guard let data = card.thumbnailData, let image = UIImage(data: data) else { return nil }

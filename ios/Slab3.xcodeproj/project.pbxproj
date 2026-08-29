@@ -40,6 +40,7 @@
 		58EF3A0285E8D7D6F30E724F /* Card.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71C21BEC4746B70E38C0F3BE /* Card.swift */; };
 		5F856B131653DBB68603F43E /* Grader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BD7F531EC812D969ABA48B2 /* Grader.swift */; };
 		6256D2117C7DF931D94D0095 /* CardLadderClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A691D4B5EEE0D804781EE4C /* CardLadderClient.swift */; };
+		62C4709BF3C1261A2F39B62C /* SalesPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE37174001772495786A18F0 /* SalesPanel.swift */; };
 		63652B6FF9C774FA3DC5B60D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 9B72E4F9B0CD5841954ABFB0 /* Assets.xcassets */; };
 		671D818ABDCD0E2F585EE75E /* OnboardingScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12E2008A54C41BC3F87E1EFA /* OnboardingScreen.swift */; };
 		69D5222E752DF4CBECCA6490 /* CameraPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D0ED565BA10269D99CFEB33 /* CameraPreview.swift */; };
@@ -56,6 +57,7 @@
 		8AB172007E058CF43E10903D /* CardKeyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 326A64A3E3EFCC55A811AC19 /* CardKeyTests.swift */; };
 		8E3962F60A83B68E3EA73B75 /* ScanController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEFE7B251A77514FD26E1F4F /* ScanController.swift */; };
 		8F2105F2F1012985FD443AF8 /* BarcodeDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E023B4F58B5AD8C503B1C04 /* BarcodeDetector.swift */; };
+		8F9E08D3BE8CD8D3718FAD90 /* SalesPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE37174001772495786A18F0 /* SalesPanel.swift */; };
 		90CFA0CD749708D8237F430D /* CardRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CB7ACDEB9DCC17D5FEFF24D /* CardRow.swift */; };
 		959FD80E00EF70AF74BD119C /* CardDetailScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5184E5BA5F561D2570BEED /* CardDetailScreen.swift */; };
 		976C308C3D965AF88B4F2751 /* PsaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 933BABB01A8C65F807AB1F10 /* PsaClient.swift */; };
@@ -91,6 +93,7 @@
 		DDAEE9328B8690D543A9C4D3 /* PriceWriteback.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EFE27B739F31EE230328B20 /* PriceWriteback.swift */; };
 		E2D36845430204BF73B4B62F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 9B72E4F9B0CD5841954ABFB0 /* Assets.xcassets */; };
 		E42A937DC61B84B5C471B2F9 /* CardRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CB7ACDEB9DCC17D5FEFF24D /* CardRow.swift */; };
+		E47F4F0C4DB1D36CD6686805 /* DetailScreenRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B171864AED262D0B57A9CD52 /* DetailScreenRenderTests.swift */; };
 		EAB7896C192E989F8DF36016 /* CardKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 798032DAAC31DEFD638960BC /* CardKey.swift */; };
 		EE6858D5534F4F4EE2B1D06D /* Folder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D3E06953729E4455A27532E /* Folder.swift */; };
 		EF6A8128F0F2713D54756FA0 /* CourtyardClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A46048FD3741C53E6D12137 /* CourtyardClient.swift */; };
@@ -153,10 +156,12 @@
 		9F3BEAA0D73A7F4FD4F274D9 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		AA5184E5BA5F561D2570BEED /* CardDetailScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardDetailScreen.swift; sourceTree = "<group>"; };
 		ABAF245B08CBFD995E3DE090 /* RecentCertWindowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentCertWindowTests.swift; sourceTree = "<group>"; };
+		B171864AED262D0B57A9CD52 /* DetailScreenRenderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailScreenRenderTests.swift; sourceTree = "<group>"; };
 		B335CF12556D631CEEF0CEB7 /* SplashView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplashView.swift; sourceTree = "<group>"; };
 		B7415FBF64C2042D4B9848E5 /* FiltersSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FiltersSheet.swift; sourceTree = "<group>"; };
 		B786DDE4DC3E91F713F96B1A /* ExportScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportScreen.swift; sourceTree = "<group>"; };
 		C167D5B3B7AF79C3AF256445 /* SlabFrameCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SlabFrameCapture.swift; sourceTree = "<group>"; };
+		DE37174001772495786A18F0 /* SalesPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SalesPanel.swift; sourceTree = "<group>"; };
 		E4B7EE9098929151F5C0E1CD /* Backend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Backend.swift; sourceTree = "<group>"; };
 		E71721E8631E053A5A64452B /* SlabsDev.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = SlabsDev.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		E959DC4D72F31DB98D47A198 /* ImageDownscale.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageDownscale.swift; sourceTree = "<group>"; };
@@ -206,6 +211,7 @@
 			children = (
 				AA5184E5BA5F561D2570BEED /* CardDetailScreen.swift */,
 				2CB7ACDEB9DCC17D5FEFF24D /* CardRow.swift */,
+				DE37174001772495786A18F0 /* SalesPanel.swift */,
 			);
 			path = Inventory;
 			sourceTree = "<group>";
@@ -217,6 +223,7 @@
 				33D546D686F37521C73D534B /* CertParserTests.swift */,
 				5582A25EEBE1AEFFA653BC8B /* CourtyardClientTests.swift */,
 				487D4BDA0DA1CEE3D318A32A /* CSVExportTests.swift */,
+				B171864AED262D0B57A9CD52 /* DetailScreenRenderTests.swift */,
 				92EBC5B58905E63350DB3E65 /* IdentityChainTests.swift */,
 				322D2E92658BE327D7C8D90E /* ImageDownscaleTests.swift */,
 				FD7FCEF183684FCC416D32C2 /* PriceWritebackTests.swift */,
@@ -483,6 +490,7 @@
 				8AB172007E058CF43E10903D /* CardKeyTests.swift in Sources */,
 				B4009FB5407F2DBC81512A49 /* CertParserTests.swift in Sources */,
 				D0A00B5EEA8E28652E724F2B /* CourtyardClientTests.swift in Sources */,
+				E47F4F0C4DB1D36CD6686805 /* DetailScreenRenderTests.swift in Sources */,
 				D8D02CD726343F03D657C367 /* IdentityChainTests.swift in Sources */,
 				A48C481203350FB6B0D09CEA /* ImageDownscaleTests.swift in Sources */,
 				88C89988684242FAEC342486 /* PriceWritebackTests.swift in Sources */,
@@ -528,6 +536,7 @@
 				ADE192393A13C82F2F0D90D6 /* PriceWriteback.swift in Sources */,
 				976C308C3D965AF88B4F2751 /* PsaClient.swift in Sources */,
 				DC530A22F5B757EA4D42B02B /* RecentCertWindow.swift in Sources */,
+				62C4709BF3C1261A2F39B62C /* SalesPanel.swift in Sources */,
 				51F651B90F2AA7F5B870F616 /* ScanController.swift in Sources */,
 				3DF61CCF7EA3D6B21A7457FB /* ScanGeometry.swift in Sources */,
 				195C8140A38DC1ADA2788362 /* ScanScreen.swift in Sources */,
@@ -575,6 +584,7 @@
 				DDAEE9328B8690D543A9C4D3 /* PriceWriteback.swift in Sources */,
 				175EBA9AA59AF5413619250D /* PsaClient.swift in Sources */,
 				02206094F216392F84A153D5 /* RecentCertWindow.swift in Sources */,
+				8F9E08D3BE8CD8D3718FAD90 /* SalesPanel.swift in Sources */,
 				8E3962F60A83B68E3EA73B75 /* ScanController.swift in Sources */,
 				B8B8FC226707348AE31E8F94 /* ScanGeometry.swift in Sources */,
 				3C29B593F82E93550D7FCC45 /* ScanScreen.swift in Sources */,
