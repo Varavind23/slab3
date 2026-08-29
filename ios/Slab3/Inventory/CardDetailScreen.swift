@@ -32,6 +32,7 @@ struct CardDetailScreen: View {
             ScrollView {
                 VStack(spacing: Caliper.rowGap) {
                     slabPanel
+                    salesPanel
                     pricePanel
                     identityPanel
                     groupPanel
@@ -55,6 +56,10 @@ struct CardDetailScreen: View {
         }
         .background(Caliper.bg)
         .sheet(isPresented: $showConnect) { CardLadderConnectView() }
+        // Comps are fetched here and ONLY here — never on a scan or a bulk
+        // refresh, which would spend the 200/day Card Ladder budget on cards
+        // nobody opened. Server-side cache makes re-opening a card free.
+        .task(id: card.localId) { await PriceService.loadSales(card, in: context) }
     }
 
     /// The card, big enough to actually check against the slab in your hand.
@@ -65,7 +70,22 @@ struct CardDetailScreen: View {
     /// is loaded when present because the stored copy is capped at ~1024 px,
     /// with the cached bytes standing in while it loads.
     private var slabPanel: some View {
-        VStack(alignment: .leading, spacing: Caliper.space3) {
+        HStack(alignment: .top, spacing: Caliper.space4) {
+            VStack(alignment: .leading, spacing: Caliper.space3) {
+                slabImage
+                Text(card.imageSource.imageCaption)
+                    .caliperMeta(Caliper.textTertiary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            valueBlock
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// The picture, big enough to actually check against the slab in your hand.
+    private var slabImage: some View {
+        Group {
             ZStack {
                 if let url = card.imageUrl.flatMap(URL.init(string:)) {
                     AsyncImage(url: url) { image in
@@ -83,10 +103,117 @@ struct CardDetailScreen: View {
             .aspectRatio(0.72, contentMode: .fit)
             .clipped()
             .overlay(Rectangle().strokeBorder(Caliper.lineStrong, lineWidth: Caliper.borderWidth))
+        }
+    }
 
-            Text(card.imageSource.imageCaption)
+    /// This screen's ONE hero figure: Card Ladder Value — the number Card Ladder's
+    /// own app labels "Value" — with their Last Sold beneath it.
+    ///
+    /// Value leads because it is what a reseller is actually deciding against;
+    /// the last sale is the single hard data point behind it, and the comps panel
+    /// below shows the rest of the evidence. Nothing else on this screen may use
+    /// `.figure`. A missing number is an em dash, never $0 (caliperMoney).
+    private var valueBlock: some View {
+        VStack(alignment: .leading, spacing: Caliper.space3) {
+            VStack(alignment: .leading, spacing: Caliper.space1) {
+                Text("CL Value").caliperLabel(Caliper.textTertiary)
+                Text(caliperMoney(cents: card.cardLadderPriceCents))
+                    .font(.figure)
+                    .foregroundStyle(card.cardLadderPriceCents == nil ? Caliper.textTertiary : Caliper.srcCL)
+                    .minimumScaleFactor(0.6)
+                    .lineLimit(1)
+                if card.cardLadderConfidence > 0 {
+                    ConfidenceMeter(value: card.cardLadderConfidence)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: Caliper.space1) {
+                Text("Last sold").caliperLabel(Caliper.textTertiary)
+                Text(caliperMoney(cents: card.cardLadderLastSaleCents))
+                    .font(.figureSmall)
+                    .foregroundStyle(card.cardLadderLastSaleCents == nil ? Caliper.textTertiary : Caliper.textPrimary)
+                    .minimumScaleFactor(0.6)
+                    .lineLimit(1)
+                if let at = card.cardLadderLastSaleAt {
+                    Text(at.formatted(.dateTime.month(.abbreviated).day().year()))
+                        .caliperMeta(Caliper.textTertiary)
+                }
+            }
+
+            if card.cardLadderIsStale {
+                Text("Couldn\u{2019}t refresh — showing the last known value")
+                    .caliperMeta(Caliper.textTertiary)
+            }
+        }
+    }
+
+    // MARK: Comps
+
+    /// Real completed sales of this card at this grade. Evidence, not a derived
+    /// figure — which is the whole point: the user prices the slab themselves.
+    ///
+    /// Empty is REAL CONTENT, never a hidden panel. "No recent sales" (the source
+    /// answered and has none) and "not fetched" are different facts and say
+    /// different things. Nothing here is ever synthesized.
+    private var salesPanel: some View {
+        VStack(alignment: .leading, spacing: Caliper.space3) {
+            HStack {
+                SectionLabelInline(text: "Recent sales")
+                if let grade = card.grade {
+                    Text("\(card.grader.rawValue.uppercased()) \(grade)")
+                        .caliperMeta(Caliper.textTertiary)
+                }
+                Spacer()
+                SourceToggle(value: $app.activeSource)
+            }
+
+            let sales = card.sales(for: app.activeSource)
+            if app.activeSource == .cl && !cardLadderConnected {
+                emptyNote("Connect Card Ladder to see sales")
+                CaliperButton(title: "Connect Card Ladder", variant: .outline, fullWidth: true) {
+                    showConnect = true
+                }
+            } else if card.salesLoading && sales == nil {
+                emptyNote("Loading sales\u{2026}")
+            } else if let sales, !sales.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(Array(sales.prefix(5).enumerated()), id: \.element.id) { index, sale in
+                        if index > 0 { Hairline() }
+                        saleRow(sale)
+                    }
+                }
+            } else if sales != nil {
+                // The source answered: it genuinely has no comps for this card.
+                emptyNote(app.activeSource == .cl
+                          ? "No recent sales on Card Ladder"
+                          : "No recent sales on Courtyard")
+            } else {
+                emptyNote("Sales not loaded")
+            }
+        }
+        .caliperPanel()
+    }
+
+    private func saleRow(_ sale: RecentSale) -> some View {
+        HStack(spacing: Caliper.space3) {
+            Text(caliperMoney(cents: sale.priceCents))
+                .font(.price)
+                .foregroundStyle(Caliper.textPrimary)
+                .frame(minWidth: 62, alignment: .leading)
+            Text(sale.provenance)
+                .caliperMeta(Caliper.textSecondary)
+            Spacer(minLength: Caliper.space2)
+            Text(sale.soldAt.formatted(.dateTime.month(.abbreviated).day()))
                 .caliperMeta(Caliper.textTertiary)
         }
+        .padding(.vertical, Caliper.space2)
+    }
+
+    private func emptyNote(_ text: String) -> some View {
+        Text(text)
+            .caliperMeta(Caliper.textTertiary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, Caliper.space2)
     }
 
     private var cachedImage: AnyView? {

@@ -3,7 +3,7 @@
 -- RLS isolation between users, and worker-table deny-all to clients.
 
 begin;
-select plan(13);
+select plan(15);
 
 -- Extensions used by the tests
 create extension if not exists pgtap with schema extensions;
@@ -113,6 +113,20 @@ select throws_ok(
   '42501',
   null,
   'authenticated client cannot write worker_jobs'
+);
+-- Sale comps are global and service-role only, same trust model as price_cache:
+-- the client reads them through the Edge Function, which enforces the Card
+-- Ladder connection gate. A readable table would route around that gate.
+select is(
+  (select count(*)::int from card_sales_cache),
+  0,
+  'card_sales_cache is deny-all to authenticated clients (no policy)'
+);
+select throws_ok(
+  $$insert into card_sales_cache (card_key, source) values ('psa:x:1:psa-9', 'cardladder')$$,
+  '42501',
+  null,
+  'authenticated client cannot write card_sales_cache'
 );
 reset role;
 

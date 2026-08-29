@@ -45,6 +45,7 @@
 		AF5EEF9719930EAFCFA5C756 /* CaliperType.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75F77283EDEF3B7FE0479EB6 /* CaliperType.swift */; };
 		B4009FB5407F2DBC81512A49 /* CertParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33D546D686F37521C73D534B /* CertParserTests.swift */; };
 		B82289693C088D15AC834321 /* CaliperComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 883DA9E93F93E97CBE92B077 /* CaliperComponents.swift */; };
+		B9225A0C14359FF4793BF4B8 /* RecentSalesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3731454B7420F7267B365405 /* RecentSalesTests.swift */; };
 		C0494DFC18D318D40C0D8D72 /* CardDetailScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5184E5BA5F561D2570BEED /* CardDetailScreen.swift */; };
 		CA8F2DE0806D19E5AEED8E4F /* CSVExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 235A7285F6988D3EB121AC61 /* CSVExport.swift */; };
 		D0A00B5EEA8E28652E724F2B /* CourtyardClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5582A25EEBE1AEFFA653BC8B /* CourtyardClientTests.swift */; };
@@ -81,6 +82,7 @@
 		322D2E92658BE327D7C8D90E /* ImageDownscaleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageDownscaleTests.swift; sourceTree = "<group>"; };
 		326A64A3E3EFCC55A811AC19 /* CardKeyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardKeyTests.swift; sourceTree = "<group>"; };
 		33D546D686F37521C73D534B /* CertParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CertParserTests.swift; sourceTree = "<group>"; };
+		3731454B7420F7267B365405 /* RecentSalesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentSalesTests.swift; sourceTree = "<group>"; };
 		3DA1684FFD36C9502EB2FF68 /* SettingsScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsScreen.swift; sourceTree = "<group>"; };
 		45645C5E18A1878C4719CC09 /* Slab3Tests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = Slab3Tests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		484401D422E983A22E496B06 /* CameraSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraSession.swift; sourceTree = "<group>"; };
@@ -166,6 +168,7 @@
 				322D2E92658BE327D7C8D90E /* ImageDownscaleTests.swift */,
 				FD7FCEF183684FCC416D32C2 /* PriceWritebackTests.swift */,
 				ABAF245B08CBFD995E3DE090 /* RecentCertWindowTests.swift */,
+				3731454B7420F7267B365405 /* RecentSalesTests.swift */,
 			);
 			path = Tests;
 			sourceTree = "<group>";
@@ -396,6 +399,7 @@
 				A48C481203350FB6B0D09CEA /* ImageDownscaleTests.swift in Sources */,
 				88C89988684242FAEC342486 /* PriceWritebackTests.swift in Sources */,
 				A81E4CF97261E227C9C37322 /* RecentCertWindowTests.swift in Sources */,
+				B9225A0C14359FF4793BF4B8 /* RecentSalesTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -536,7 +540,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 7BMY83MWA8;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Slabs;
@@ -548,7 +552,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1;
+				MARKETING_VERSION = 0.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.varunaravind.slabs;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.9;
@@ -562,7 +566,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 7BMY83MWA8;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Slabs;
@@ -574,7 +578,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1;
+				MARKETING_VERSION = 0.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.varunaravind.slabs;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.9;

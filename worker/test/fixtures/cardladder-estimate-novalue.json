@@ -1,0 +1,28 @@
+{
+  "result": {
+    "estimatedValue": null,
+    "lastSaleDate": null,
+    "confidence": null,
+    "grader": "psa",
+    "index": null,
+    "indexId": null,
+    "description": "2022 Topps Chrome Formula 1 Sapphire Edition #6 Lewis Hamilton Green",
+    "grade": "g9",
+    "twoWeekData": {
+      "velocity": 0,
+      "averagePrice": 0
+    },
+    "oneMonthData": {
+      "velocity": 0,
+      "averagePrice": 0
+    },
+    "oneQuarterData": {
+      "velocity": 0,
+      "averagePrice": 0
+    },
+    "oneYearData": {
+      "velocity": 0,
+      "averagePrice": 0
+    }
+  }
+}

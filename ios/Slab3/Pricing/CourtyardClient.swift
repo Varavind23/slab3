@@ -10,11 +10,17 @@ struct CourtyardClient {
     private static let app = "Y8TL3M06QA"
     private static let key = "3b3ed18284ca0baee9a496aea5f093d6" // public search-only
     private static let index = "marketplace_prod_recently_listed"
+    /// Sibling index found 2026-08-29 — the comps feed behind `recentSales`.
+    private static let soldIndex = "marketplace_prod_recently_sold"
 
     struct Match {
         let priceCents: Int
         let objectID: String
         let confidence: Confidence
+        /// Courtyard's OWN 1-5 confidence in its value estimate — the figure its
+        /// app shows beside the price. Distinct from `confidence` above, which is
+        /// how sure WE are that this is the right card.
+        let sourceConfidence: Int?
         // Metadata for auto-fill (present when Courtyard has the card).
         let name: String?
         /// Courtyard's listing headline, e.g. "2021 Celebrations - Classic
@@ -88,6 +94,11 @@ struct CourtyardClient {
             priceCents: Int((usd * 100).rounded()),
             objectID: hit.objectID,
             confidence: confidence,
+            // Courtyard's own confidence is quoted ONLY on an exact cert match.
+            // On a fuzzy hit the value belongs to a different card, so passing
+            // Courtyard's confidence in it along would overstate what we know —
+            // the same rule that keeps a fuzzy hit's image off the row.
+            sourceConfidence: byCert != nil ? hit.estimatedValueConfidence?.value : nil,
             name: Self.shortName(in: meta),
             title: hit.title,
             set: meta["Set"],
@@ -117,8 +128,8 @@ struct CourtyardClient {
 
     // MARK: Algolia request
 
-    private func search(query: String, grader: Grader) async throws -> AlgoliaResult {
-        var req = URLRequest(url: URL(string: "https://\(Self.app.lowercased())-dsn.algolia.net/1/indexes/\(Self.index)/query")!)
+    private func search(query: String, grader: Grader, index: String = CourtyardClient.index) async throws -> AlgoliaResult {
+        var req = URLRequest(url: URL(string: "https://\(Self.app.lowercased())-dsn.algolia.net/1/indexes/\(index)/query")!)
         req.httpMethod = "POST"
         req.setValue(Self.app, forHTTPHeaderField: "X-Algolia-Application-Id")
         req.setValue(Self.key, forHTTPHeaderField: "X-Algolia-API-Key")
@@ -152,6 +163,78 @@ struct CourtyardClient {
         }
         return out.isEmpty ? nil : out
     }
+    // MARK: Sales (comps)
+
+    /// Real recent sales of this card at this grade, newest first.
+    ///
+    /// Two hops, both unauthenticated: the `recently_sold` Algolia index gives
+    /// candidate slabs, and each slab's own ledger
+    /// (api.courtyard.io/index/asset/{id}/transactions) carries the actual sale
+    /// amount in USDC 6-decimals. `proofOfIntegrity` on a hit IS the assetID.
+    ///
+    /// COVERAGE IS THIN BY NATURE: only about one vaulted slab in five has ever
+    /// sold on Courtyard — the rest were minted and held. An empty list is the
+    /// common, honest answer; we never pad it with estimates.
+    /// Mirrors worker/src/sources/courtyard-sales.ts.
+    func recentSales(name: String?, set: String?, grader: Grader, grade: String?) async -> [RecentSale] {
+        let query = [name, set].compactMap { $0 }.joined(separator: " ").trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { return [] }
+        guard let result = try? await search(query: query, grader: grader, index: Self.soldIndex) else { return [] }
+
+        let gnum = Self.gradeNumber(grade)
+        let candidates = result.hits.filter { hit in
+            guard let gnum else { return true }
+            return Self.gradeNumber(hit.certification?.grade ?? hit.metadata?.values["Grade"]) == gnum
+        }.prefix(Self.candidateLimit)
+
+        let sales = await withTaskGroup(of: RecentSale?.self) { group in
+            for hit in candidates {
+                group.addTask { await Self.latestSale(for: hit) }
+            }
+            var out: [RecentSale] = []
+            for await sale in group { if let sale { out.append(sale) } }
+            return out
+        }
+        return sales.sorted { $0.soldAt > $1.soldAt }.prefix(5).map { $0 }
+    }
+
+    /// Sized against the ~20% of slabs that carry a sale, to land five.
+    private static let candidateLimit = 12
+
+    private static func latestSale(for hit: Hit) async -> RecentSale? {
+        let assetId = hit.proofOfIntegrity ?? hit.objectID
+        guard let url = URL(string: "https://api.courtyard.io/index/asset/\(assetId)/transactions") else { return nil }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 10
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        guard let (data, response) = try? await URLSession.shared.data(for: req),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let ledger = try? JSONDecoder().decode(Ledger.self, from: data)
+        else { return nil }
+
+        // `mint` is excluded on purpose: a vending-machine pack purchase is not a
+        // comp for the card inside it.
+        let sales = ledger.transactions.compactMap { tx -> RecentSale? in
+            guard tx.txType == "sale",
+                  tx.paymentToken?.lowercased() == Self.usdcPolygon,
+                  let cents = Self.usdcToCents(tx.paymentAmount),
+                  let soldAt = ISO8601DateFormatter().date(from: tx.txTime)
+            else { return nil }
+            return RecentSale(priceCents: cents, soldAt: soldAt, platform: "Courtyard",
+                              listingType: nil, title: hit.title, url: nil)
+        }
+        return sales.max { $0.soldAt < $1.soldAt }
+    }
+
+    private static let usdcPolygon = "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359"
+
+    /// USDC 6-decimal string -> cents. Nil for anything that is not real money.
+    static func usdcToCents(_ raw: String?) -> Int? {
+        guard let raw, !raw.isEmpty, raw.allSatisfy(\.isNumber), let units = Double(raw) else { return nil }
+        let cents = Int((units / 10_000).rounded())
+        return cents > 0 ? cents : nil
+    }
+
 }
 
 // MARK: - Algolia response models
@@ -165,6 +248,9 @@ private struct Hit: Decodable {
     let imageUrl: String?
     let lqipBase64: String?
     let estimatedValueUsd: Double?
+    /// Sent as a STRING ("4") on live records — decoded leniently below.
+    let estimatedValueConfidence: LenientInt?
+    let proofOfIntegrity: String?
     let certification: Cert?
     let metadata: LenientStringDict?
     let latestListing: Listing?
@@ -185,6 +271,29 @@ private struct LenientStringDict: Decodable {
         values = out
     }
 }
+/// Courtyard sends confidence as a string on some records and a number on others.
+private struct LenientInt: Decodable {
+    let value: Int?
+    init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        if let i = try? c.decode(Int.self) { value = i }
+        else if let d = try? c.decode(Double.self) { value = Int(d.rounded()) }
+        else if let s = try? c.decode(String.self) { value = Int(s) }
+        else { value = nil }
+    }
+}
+
+/// One slab's on-chain ledger — api.courtyard.io/index/asset/{id}/transactions.
+private struct Ledger: Decodable {
+    let transactions: [Tx]
+}
+private struct Tx: Decodable {
+    let txType: String
+    let txTime: String
+    let paymentToken: String?
+    let paymentAmount: String?
+}
+
 private struct Cert: Decodable {
     let number: String?
     let grade: String?

@@ -75,6 +75,36 @@ enum PriceStatus: String, Codable {
     case notConnected // Card Ladder only: user hasn't connected their own account
 }
 
+/// One real completed sale of this card at this grade — a comp.
+///
+/// Stored rather than fetched on every view because the detail screen must still
+/// show the last known comps offline, and because the fetch that produces them
+/// costs Card Ladder budget (see PriceService.loadSales).
+///
+/// Never synthesized. A source with no comps yields an empty list, which is a
+/// different fact from never having asked — the same distinction prices draw
+/// between `.notListed` and `.unknown`.
+struct RecentSale: Codable, Equatable, Identifiable {
+    var priceCents: Int
+    var soldAt: Date
+    var platform: String?     // "eBay"
+    var listingType: String?  // "Auction" | "BestOffer" | "FixedPrice"
+    var title: String?
+    var url: String?
+
+    var id: String { "\(soldAt.timeIntervalSince1970)-\(priceCents)-\(url ?? "")" }
+
+    /// "eBay · Best offer". Card Ladder sends listing types camel-cased.
+    var provenance: String {
+        let kind: String? = switch listingType {
+        case "BestOffer": "Best offer"
+        case "FixedPrice": "Fixed price"
+        case let other: other
+        }
+        return [platform, kind].compactMap { $0 }.joined(separator: " · ")
+    }
+}
+
 /// A scanned graded card. Mirrors the `cards` table (supabase/migrations):
 /// grader, cert_number, card_key, name, set, year, grade, scanned_at,
 /// manual_price_cents, notes. `serverId` links to the row once synced.
@@ -121,6 +151,27 @@ final class Card {
     var courtyardAsOf: Date?
     var cardLadderAsOf: Date?
 
+    // ── The evidence behind the Card Ladder number (added 2026-08-29) ─────────
+    // `cardLadderPriceCents` above is now Card Ladder VALUE — the figure their own
+    // app labels "Value" — rather than a 30-day average. The average was silently
+    // empty for plenty of well-known cards, which showed up as no price at all.
+    //
+    // These are additive and OPTIONAL on purpose: this project has no
+    // VersionedSchema/SchemaMigrationPlan (Slab3App uses a bare
+    // `.modelContainer(for:)`), so additive-optional is what lets SwiftData
+    // lightweight-migrate the users already running build 1.
+
+    /// Card Ladder's "Last Sold" — the single most recent real sale it has.
+    var cardLadderLastSaleCents: Int?
+    var cardLadderLastSaleAt: Date?
+
+    /// Real recent sales per source, JSON-encoded `[RecentSale]`. `nil` means
+    /// never fetched; an encoded EMPTY array means fetched and the source has
+    /// none. Read through `cardLadderSales` / `courtyardSales`.
+    var cardLadderSalesData: Data?
+    var courtyardSalesData: Data?
+    var salesLoading: Bool = false
+
     /// Match confidence 0–5 per source, derived at fetch time (PriceService).
     /// README.md open question 2 asks the client to define the real scale; until
     /// then these are derived from how the match was actually made, never guessed.
@@ -155,6 +206,34 @@ final class Card {
         get { PriceStatus(rawValue: cardLadderStatusRaw) ?? .unknown }
         set { cardLadderStatusRaw = newValue.rawValue }
     }
+    // ── Comps ────────────────────────────────────────────────────────────────
+    /// Decoded comps per source, newest first. `nil` = never fetched, `[]` =
+    /// fetched and the source genuinely has none. The detail screen says
+    /// something different for each, so the distinction must survive to the UI.
+    var cardLadderSales: [RecentSale]? {
+        get { Self.decodeSales(cardLadderSalesData) }
+        set { cardLadderSalesData = Self.encodeSales(newValue) }
+    }
+    var courtyardSales: [RecentSale]? {
+        get { Self.decodeSales(courtyardSalesData) }
+        set { courtyardSalesData = Self.encodeSales(newValue) }
+    }
+
+    func sales(for source: PriceSource) -> [RecentSale]? {
+        source == .cl ? cardLadderSales : courtyardSales
+    }
+
+    /// Corrupt stored JSON reads as "never fetched" rather than crashing — the
+    /// screen then simply offers to load them again.
+    private static func decodeSales(_ data: Data?) -> [RecentSale]? {
+        guard let data else { return nil }
+        return try? JSONDecoder().decode([RecentSale].self, from: data)
+    }
+    private static func encodeSales(_ sales: [RecentSale]?) -> Data? {
+        guard let sales else { return nil }
+        return try? JSONEncoder().encode(sales)
+    }
+
     /// The row reads both of these with one index (see PriceSet / ConfidenceSet).
     var prices: PriceSet {
         PriceSet(cl: cardLadderPriceCents, cy: courtyardPriceCents)

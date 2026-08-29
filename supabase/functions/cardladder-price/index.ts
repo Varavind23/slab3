@@ -1,4 +1,4 @@
-// Edge Function: fetch a card's Card Ladder average-sale price for the calling user.
+// Edge Function: fetch a card's Card Ladder VALUE for the calling user.
 //
 // Gating (ToS): only users who connected THEIR OWN Card Ladder account get a price —
 // even a cache hit is withheld from users without an active connection, so nobody
@@ -8,12 +8,15 @@
 // failure is a typed status the app degrades on cleanly (the UI already renders a
 // no-price state).
 
-import { lookupAverageSale, ClError } from "../_shared/cardladder.ts";
+import { lookupCardValue, ClError } from "../_shared/cardladder.ts";
 import { acquireIdToken, type SessionState } from "../_shared/session.ts";
 import { admin, callerId, encKey, json } from "../_shared/http.ts";
 
-const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // Card Ladder averages move slowly.
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // Card Ladder Value moves slowly.
 const DAILY_CAP = 200; // per-user request ceiling (keeps volume human-shaped, D10).
+/** What the cached number means. Changed from "average_sale" 2026-08-29 — see the
+ *  lookupCardValue header in _shared/cardladder.ts. */
+const METRIC = "cl_value" as const;
 
 interface Body {
   cert: string;
@@ -70,7 +73,7 @@ Deno.serve(async (req) => {
     ? { data: null }
     : await db
         .from("price_cache")
-        .select("price_cents, as_of, fetch_status, updated_at")
+        .select("price_cents, as_of, fetch_status, updated_at, last_sale_cents, last_sale_at, source_confidence")
         .eq("card_key", cardKey)
         .eq("source", "cardladder")
         .maybeSingle();
@@ -84,8 +87,11 @@ Deno.serve(async (req) => {
         .eq("source", "cardladder")
         .maybeSingle();
       return json({
-        status: "ok", priceCents: cached.price_cents, metric: "average_sale",
+        status: "ok", priceCents: cached.price_cents, metric: METRIC,
         asOf: cached.as_of, cached: true, identity: identityOf(known),
+        lastSaleCents: cached.last_sale_cents ?? null,
+        lastSaleAt: cached.last_sale_at ?? null,
+        confidence: cached.source_confidence ?? null,
       });
     }
     if (cached.fetch_status === "not_found") {
@@ -137,7 +143,7 @@ Deno.serve(async (req) => {
     .eq("user_id", userId);
 
   // 5) Resolve + estimate.
-  const result = await lookupAverageSale(idToken, cert, grader);
+  const result = await lookupCardValue(idToken, cert, grader);
 
   // Count the request against the budget (any outbound lookup counts).
   await db
@@ -152,10 +158,13 @@ Deno.serve(async (req) => {
     await db.from("price_cache").upsert({
       card_key: cardKey,
       source: "cardladder",
-      metric: "average_sale",
+      metric: METRIC,
       price_cents: result.priceCents,
       as_of: result.asOf,
       fetch_status: "ok",
+      last_sale_cents: result.estimate.lastSalePriceCents,
+      last_sale_at: result.estimate.lastSaleAt,
+      source_confidence: result.estimate.confidence,
       updated_at: nowIso,
     });
     await db.from("card_identity_map").upsert({
@@ -172,7 +181,10 @@ Deno.serve(async (req) => {
       updated_at: nowIso,
     });
     return json({
-      status: "ok", priceCents: result.priceCents, metric: "average_sale", asOf: result.asOf,
+      status: "ok", priceCents: result.priceCents, metric: METRIC, asOf: result.asOf,
+      lastSaleCents: result.estimate.lastSalePriceCents,
+      lastSaleAt: result.estimate.lastSaleAt,
+      confidence: result.estimate.confidence,
       identity: {
         label: result.identity.label, player: result.identity.player,
         set: result.identity.set, year: result.identity.year,
@@ -185,7 +197,7 @@ Deno.serve(async (req) => {
     await db.from("price_cache").upsert({
       card_key: cardKey,
       source: "cardladder",
-      metric: "average_sale",
+      metric: METRIC,
       price_cents: null,
       as_of: nowIso,
       fetch_status: "not_found",

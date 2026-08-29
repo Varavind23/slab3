@@ -81,12 +81,41 @@ export interface ClCardIdentity {
 }
 
 export interface ClEstimate {
-  /** Average-sale price in CENTS for the chosen window, or null when unavailable.
-   *  Never 0 — a 0/absent average is reported as null so we never show a bogus price. */
+  /** THE headline number: Card Ladder Value, in CENTS. This is the figure Card
+   *  Ladder's own app labels simply "Value" — their bundle's field table gives
+   *  `currentValue` the tooltip "Card Ladder Value of the card using our
+   *  proprietary algorithm", and for a card in the user's CL collection
+   *  `currentValue` and this `estimatedValue` are the same number (verified
+   *  2026-08-29, cert 20360362: both 120).
+   *
+   *  Sourced from the estimate rather than from `httpbuildcollectioncard`'s
+   *  `currentValue` on purpose: that field is COLLECTION-CONTEXT ONLY and comes
+   *  back null for any card the user doesn't own (verified same day — certs
+   *  96679812 and 154334127 both null there, while this is 89 and null
+   *  respectively). Estimate answers for every card. */
+  clValueCents: number | null;
+  /** Card Ladder's own 1–5 confidence in the value above, or null. Same scale the
+   *  app's ConfidenceMeter already draws. */
+  confidence: number | null;
+  /** The single most recent sale CL has on record — their "Last Sold" column. */
+  lastSalePriceCents: number | null;
+  lastSaleAt: string | null; // ISO 8601, from `lastSaleDate`
+  /** Trailing-window average. NO LONGER the headline (see lookupCardValue), kept
+   *  because it is real data and arrives on the same payload for free. */
   averageSaleCents: number | null;
   window: EstimateWindow;
-  lastSalePriceCents: number | null;
   asOf: string; // ISO 8601 (server "now"; the estimate is a trailing window)
+}
+
+/** One real sale from Card Ladder's sales archive — an actual completed
+ *  transaction, not a derived figure. */
+export interface ClSale {
+  priceCents: number;
+  soldAt: string; // ISO 8601
+  platform?: string; // "eBay"
+  listingType?: string; // "Auction" | "BestOffer" | "FixedPrice"
+  title?: string;
+  url?: string;
 }
 
 // ── Auth ────────────────────────────────────────────────────────────────────
@@ -237,17 +266,80 @@ export async function estimate(
   return parseEstimate(r, window);
 }
 
-/** PURE: pull the average-sale cents (chosen window) out of httpcardestimate's
- *  result. Exported for fixture tests. 0 / missing → null (never a bogus price). */
+/** PURE: pull Card Ladder Value, last sale and the window average out of
+ *  httpcardestimate's result. Exported for fixture tests. Every money field goes
+ *  through usdToCents, so 0 / missing → null (never a bogus price). */
 export function parseEstimate(result: any, window: EstimateWindow = AVERAGE_SALE_WINDOW): ClEstimate {
-  const avgUsd = result?.[window]?.averagePrice;
-  const lastUsd = result?.lastSalePrice;
+  const conf = result?.confidence;
   return {
-    averageSaleCents: usdToCents(avgUsd),
+    clValueCents: usdToCents(result?.estimatedValue),
+    confidence: typeof conf === "number" && Number.isFinite(conf) ? conf : null,
+    lastSalePriceCents: usdToCents(result?.lastSalePrice),
+    lastSaleAt: isoOrNull(result?.lastSaleDate),
+    averageSaleCents: usdToCents(result?.[window]?.averagePrice),
     window,
-    lastSalePriceCents: usdToCents(lastUsd),
     asOf: new Date().toISOString(),
   };
+}
+
+/** PURE: normalize whatever date shape Card Ladder sends into ISO 8601, or null. */
+export function isoOrNull(v: unknown): string | null {
+  if (typeof v !== "string" && typeof v !== "number") return null;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+// ── Sales archive ─────────────────────────────────────────────────────────────
+
+/** How many sales we keep. The UI shows five; we store a few more so a later
+ *  "show more" costs no extra call and no extra Card Ladder quota. */
+export const MAX_SALES = 20;
+
+/** Scanned cert + grader → Card Ladder's real recent sales for THIS card at THIS
+ *  grade, newest first.
+ *
+ *  Discovered 2026-08-29 in Card Ladder's own web bundle (served un-walled from
+ *  the Firebase default origin cardladder-71d53.web.app; app.cardladder.com is
+ *  Turnstile-walled). The function documents its own contract in its 400 body:
+ *  "Must provide one of: (cert + grader), (psaSpecId + grader), (gemRateId ...)".
+ *  Cert + grader is exactly what the scanner already has, so this needs no
+ *  profileId and no resolve step ahead of it.
+ *
+ *  Card Ladder does the grade filtering server-side — verified live, cert
+ *  20360362 returned 20 sales all at g9, cert 96679812 six sales all at g10. So
+ *  these are true comps, not a mixed-grade feed. */
+export async function fetchProfileSales(
+  idToken: string,
+  cert: string,
+  grader: ClGrader,
+  deps?: Deps,
+): Promise<ClSale[]> {
+  const r = await callFn("httpprofilesales", { cert, grader }, idToken, deps);
+  return parseSales(r);
+}
+
+/** PURE: shape httpprofilesales' result into ClSale[]. Exported for fixture tests.
+ *  Drops any entry without a real price or a real date — a comp we can't state
+ *  honestly is not a comp. Sorted newest first; an empty archive is a legitimate
+ *  answer (cert 154334127 returns zero sales), never an error. */
+export function parseSales(result: any): ClSale[] {
+  const raw = Array.isArray(result?.sales) ? result.sales : [];
+  const out: ClSale[] = [];
+  for (const s of raw) {
+    const priceCents = usdToCents(s?.price);
+    const soldAt = isoOrNull(s?.date);
+    if (priceCents === null || soldAt === null) continue;
+    out.push({
+      priceCents,
+      soldAt,
+      platform: s?.platform || undefined,
+      listingType: s?.listingType || undefined,
+      title: s?.title || undefined,
+      url: s?.url || undefined,
+    });
+  }
+  out.sort((a, b) => b.soldAt.localeCompare(a.soldAt));
+  return out.slice(0, MAX_SALES);
 }
 
 /** USD number → integer cents, or null for 0/absent/non-finite. */
@@ -257,10 +349,18 @@ export function usdToCents(usd: unknown): number | null {
   return Math.round(n * 100);
 }
 
-// ── High-level: one call from a scanned card to an average-sale price ──────────
+// ── High-level: one call from a scanned card to Card Ladder's Value ───────────
 
 export type ClLookup =
-  | { kind: "ok"; priceCents: number; profileId: string; asOf: string; identity: ClCardIdentity }
+  | {
+      kind: "ok";
+      /** Card Ladder Value — see ClEstimate.clValueCents. */
+      priceCents: number;
+      profileId: string;
+      asOf: string;
+      identity: ClCardIdentity;
+      estimate: ClEstimate;
+    }
   /** No price. `identity` is present when Card Ladder KNOWS the card but has no
    *  recent comps — a different fact from "no such cert", and the card can still
    *  be named and pictured. Discarding it here is why resolved cards showed up
@@ -268,9 +368,16 @@ export type ClLookup =
   | { kind: "not_found"; identity?: ClCardIdentity }
   | { kind: "error"; error: ClErrorKind; detail?: string };
 
-/** Resolve + estimate in one shot. Never throws — every failure becomes a typed
- *  result the pipeline degrades on cleanly. */
-export async function lookupAverageSale(
+/** Resolve + estimate in one shot, returning Card Ladder VALUE as the price.
+ *  Never throws — every failure becomes a typed result the pipeline degrades on.
+ *
+ *  Was `lookupAverageSale`, returning `oneMonthData.averagePrice`, until
+ *  2026-08-29. That window is empty for plenty of perfectly well-known cards, and
+ *  since a 0 average maps to null, those cards displayed NO Card Ladder price at
+ *  all — the first users' main complaint. Cert 96679812 is the worked example:
+ *  one-month average 0, but Card Ladder Value $89, last sale $46, six real comps.
+ *  The average was never the number Card Ladder itself shows; see spike/README §1a. */
+export async function lookupCardValue(
   idToken: string,
   cert: string,
   grader: ClGrader,
@@ -282,10 +389,17 @@ export async function lookupAverageSale(
     // Genuinely unknown cert: nothing to say about it.
     if (!identity) return { kind: "not_found" };
     const est = await estimate(idToken, identity, window, deps);
-    // Known card, no comps. Keep the identity — it is the only thing naming this
+    // Known card, no value. Keep the identity — it is the only thing naming this
     // card at all when PSA is walled, and a missing price is not a missing card.
-    if (est.averageSaleCents === null) return { kind: "not_found", identity };
-    return { kind: "ok", priceCents: est.averageSaleCents, profileId: identity.profileId, asOf: est.asOf, identity };
+    if (est.clValueCents === null) return { kind: "not_found", identity };
+    return {
+      kind: "ok",
+      priceCents: est.clValueCents,
+      profileId: identity.profileId,
+      asOf: est.asOf,
+      identity,
+      estimate: est,
+    };
   } catch (e) {
     if (e instanceof ClError) return { kind: "error", error: e.kind, detail: e.message };
     return { kind: "error", error: "network", detail: e instanceof Error ? e.message : "unknown" };

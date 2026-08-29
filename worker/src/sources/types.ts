@@ -14,7 +14,22 @@ export interface CardIdentity {
   certNumber?: string;
 }
 
-export type PriceMetric = "average_sale" | "recent_sale";
+/** What a source's headline number MEANS. `cl_value` is Card Ladder's own
+ *  algorithmic "Value"; `recent_sale` is a real completed sale; `average_sale`
+ *  is a trailing-window mean (no longer any source's headline, kept because the
+ *  price_cache enum and old rows still carry it). */
+export type PriceMetric = "average_sale" | "recent_sale" | "cl_value";
+
+/** One real completed sale, for the comps list on the card detail screen.
+ *  Never synthesized — if a source has no sales, the list is empty. */
+export interface RecentSale {
+  priceCents: number;
+  soldAt: string; // ISO 8601
+  platform?: string;
+  listingType?: string;
+  title?: string;
+  url?: string;
+}
 
 export interface PriceResult {
   kind: "ok";
@@ -23,6 +38,15 @@ export interface PriceResult {
   asOf: string; // ISO 8601
   sourceCanonicalId?: string; // the source's own id, for card_identity_map
   confidence: "exact" | "probable" | "fuzzy";
+  /** The source's OWN 1-5 confidence in the price, distinct from `confidence`
+   *  above (which is how sure we are we matched the right card). */
+  sourceConfidence?: number;
+  /** The single most recent real sale, when the source reports one. */
+  lastSaleCents?: number;
+  lastSaleAt?: string;
+  /** Real recent sales, newest first. Absent = not fetched; empty = fetched and
+   *  the source genuinely has none. The two are different facts. */
+  recentSales?: RecentSale[];
 }
 
 export type SourceErrorKind =

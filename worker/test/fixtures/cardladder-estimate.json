@@ -1,7 +1,7 @@
 {
   "result": {
     "estimatedValue": 120,
-    "lastSaleDate": "2026-08-19T13:55:14.000Z",
+    "lastSaleDate": "2026-08-28T15:04:10.000Z",
     "confidence": 5,
     "grader": "psa",
     "index": "Kevin McHale",
@@ -10,19 +10,19 @@
     "grade": "g9",
     "twoWeekData": {
       "velocity": 2,
-      "averagePrice": 125
+      "averagePrice": 120
     },
     "oneMonthData": {
-      "velocity": 6,
-      "averagePrice": 116.92
+      "velocity": 7,
+      "averagePrice": 117.36
     },
     "oneQuarterData": {
-      "velocity": 20,
-      "averagePrice": 115.76
+      "velocity": 19,
+      "averagePrice": 116.64
     },
     "oneYearData": {
       "velocity": 70,
-      "averagePrice": 99.4
+      "averagePrice": 99.74
     },
     "lastSalePrice": 120,
     "isPlayerIndex": true,

@@ -69,6 +69,79 @@ verified client, shared with `worker/`), `cardladder-{connect,price}`, and
 `worker/test/cardladder.test.ts`. The old `spike/cardladder/*.ts` (headed login +
 session capture) are obsolete — kept only as history.
 
+## 1a. Card Ladder metric + sales history — REVISED 2026-08-29
+
+**§4's recorded metric is OVERTURNED.** "Card Ladder metric: average sale
+(confirmed 2026-08-21)" was a buyer's answer to *which number do you use*, and we
+implemented it as `oneMonthData.averagePrice`. That was the wrong field, and it
+failed silently: the 30-day window is EMPTY for plenty of cards Card Ladder knows
+perfectly well, a 0 average maps to null, and the row then shows no Card Ladder
+price at all. First TestFlight users reported exactly this. Worked example, live:
+
+| cert | one-month avg (shipped in v1) | `estimatedValue` | `lastSalePrice` | comps |
+|---|---|---|---|---|
+| 20360362 (McHale PSA 9) | 117.36 | **120** | 120 (8/28) | 20 |
+| 96679812 (Curry PSA 10) | **0 → no price shown** | **89** | 46 (2025-07-09) | 6 |
+| 154334127 (Hamilton PSA 9) | 0 | null | null | 0 |
+
+### The un-walled origin (how any of this was findable)
+
+`app.cardladder.com` is Cloudflare-Turnstile-walled, but the SAME SPA bundle is
+served from Firebase's default hosting domain, which is not:
+
+```sh
+curl https://cardladder-71d53.web.app/            # 200 (app.cardladder.com → 403)
+curl https://cardladder-71d53.web.app/assets/index-<hash>.js
+```
+
+Mining that bundle gives their field/label table and their full callable list:
+`httpbuildcollectioncard httpcardestimate httpcardimagedetection httpcertlookup
+httpexcludeprofilefrommatch httpmatchprofiles httpprofile httpprofilesales
+httpsaleprofile httpsuggestsetprofilematches`. Re-mine here when a field moves;
+the hashed asset name changes per deploy, so read it out of the HTML.
+
+### The right fields
+
+Their own tooltips: `currentValue` → label **"Value"**, *"Card Ladder Value of the
+card using our proprietary algorithm"*; `marketValue` → label **"Last Sold"**.
+
+**TRAP — do not source the headline from `httpbuildcollectioncard`.** Its
+`currentValue`/`marketValue`/`guideValue` are **collection-context only**:
+populated for a card in YOUR CL collection, `null` for every other card (verified:
+20360362 owned → 120; 96679812 and 154334127 not owned → null). The
+general-purpose equivalents are on `httpcardestimate`, which we already call:
+
+* **`estimatedValue`** = Card Ladder Value → the headline. For the owned card it
+  equals `currentValue` exactly (both 120), which is what confirms the identity.
+* **`lastSalePrice`** + **`lastSaleDate`** = "Last Sold".
+* **`confidence`** = their own 1–5, same scale as the app's ConfidenceMeter.
+
+The window averages stay on the payload and are still parsed; they simply lead
+nothing now.
+
+### `httpprofilesales` — real comps, SOLVED
+
+Same un-walled Firebase host, same Bearer token. Its own 400 body documents the
+contract: *"Must provide one of: (cert + grader), (psaSpecId + grader), (gemRateId
+with optional grade/grader/qualifierType), or universalGemRateId"* — **cert +
+grader is exactly what the scanner has**, so no profileId and no resolve step.
+
+Returns `{sales, totalHits}`, date-descending, **already filtered to the same card
+AND the same grade server-side** (20360362 → 20 sales all g9; 96679812 → 6 all
+g10). Per-sale: `price date platform listingType title url cert grade thumbnail
+seller feedback`. So these are true comps, not a mixed feed.
+
+Cost: it is a SECOND callable per card. Fetched lazily on the detail screen only —
+never on a scan or bulk refresh — or a 200-slab stack would spend its 200/day
+budget on comps nobody opened. Net usage still DROPS, because the price no longer
+needs `httpbuildcollectioncard` at all.
+
+### Also found, not yet used
+
+`httpcertlookup {cert, grader}` → `{label, grade, grader, graderId, dateGraded,
+profileId, source}`. A cert→identity path carrying `dateGraded`, which PSA itself
+will not give us while its wall is up (§4a). Option, not shipped.
+
 ## 2. Courtyard (no account needed; curl already 403s — bot wall confirmed)
 
 ```sh
@@ -95,6 +168,42 @@ ALL search through its own `search.cardladder.com` backend, which is Cloudflare-
 Turnstile-walled like the rest of its stack — there is NO direct third-party search
 service to hit. Confirmed 2026-08-22. So Card Ladder remains: official API (friend's
 ask) or human-obtained session only. No headless bypass exists.
+
+### Courtyard sale prices + the app's own number — added 2026-08-29
+
+Asked because users wanted "the value Courtyard's own scanner shows" plus real
+comps. Mining courtyard.io's Next.js chunks turns up `fmv_estimate_usd` /
+`fmvEstimateUsd` / `estimatedValueUsd` and nothing else price-shaped, so the
+scanner's number IS the FMV estimate — the field `courtyard-algolia.ts` already
+reads. What was missing is Courtyard's own `estimatedValueConfidence` (1–5, sent
+as a STRING on live records), now surfaced, but ONLY on an exact cert match: on a
+fuzzy hit the value belongs to a different card.
+
+Three new findings:
+
+* **`marketplace_prod_recently_sold`** exists alongside `recently_listed` (same
+  app, same public key). Full index list: `marketplace_prod_{asset_ownership,
+  asset_ownership_listed_date_desc, asset_ownership_price_high_to_low,
+  asset_ownership_price_low_to_high, best_deals, price_high_to_low,
+  price_low_to_high, recently_added, recently_listed, recently_sold}`.
+* **`proofOfIntegrity` on an Algolia hit IS the `assetID`.** That is the
+  card_key→assetID resolution `courtyard.ts:resolveAssetId` has been stubbed out
+  waiting for (D10).
+* **`GET api.courtyard.io/index/asset/{assetID}/transactions`** returns that
+  slab's own ledger on a PLAIN request — no browser, no auth — unlike
+  `/index/asset/{id}`, which is still Cloudflare-fingerprinted. `paymentAmount` is
+  USDC 6-decimals: `209810000` → **$209.81**, verified.
+
+**Cert is NOT facetable.** `facetFilters: ["certification.number:…"]`,
+`filters: 'certification.number:"…"'` and `metadata.Serial` all return `nbHits: 0`.
+Cert matching must stay client-side over query hits — do not "fix" it into a
+filter.
+
+**Comp coverage is genuinely thin.** Sampling 10 `recently_sold` hits, only **2**
+had a sale transaction at all; the rest carry a lone `mint` (a vending-machine
+pack purchase, `paymentToken: "stripe"` — not a comp for the card). So an empty
+Courtyard comps list is the normal case and is never treated as an error. Card
+Ladder is the real comps source; Courtyard's is a bonus when the slab has traded.
 
 ## 3. Physical slab scanning (needs iPhone + real PSA and CGC slabs)
 
@@ -144,8 +253,14 @@ thermals across a few hundred slabs, and PSA + CGC in the same stack.
 Ask the friend: when you decide where to sell, which Card Ladder number do you
 actually use, and which Courtyard number? (avg / last sale / current floor / other)
 
-- Card Ladder metric: **average sale** (confirmed 2026-08-21)
-- Courtyard metric: **recent sale** — from `api.courtyard.io/index/transactions?tx_type=sale` (confirmed 2026-08-21)
+- Card Ladder metric: ~~average sale~~ → **Card Ladder Value** (`estimatedValue`),
+  with **Last Sold** (`lastSalePrice`) beside it. **OVERTURNED 2026-08-29 — see §1a.**
+  The 2026-08-21 answer was right about intent and wrong about the field; the
+  average window is empty often enough that those cards showed no price at all.
+- Courtyard metric: **FMV estimate + confidence** — `estimatedValueUsd` /
+  `estimatedValueConfidence`, which is what Courtyard's own scanner shows
+  (confirmed 2026-08-29, §2). Real per-slab sale prices come from the ledger,
+  but only ~20% of vaulted slabs have ever sold.
 
 ## 4a. PSA cert scrape is DEAD — wall tightened (2026-08-28)
 

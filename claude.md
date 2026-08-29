@@ -37,13 +37,14 @@ xcodebuild -project ios/Slab3.xcodeproj -scheme Slab3 \
 # single test: add -only-testing:Slab3Tests/CardKeyTests/matchesSqlNormalization
 # ios/Tests uses Swift Testing (@Test/#expect), NOT XCTest — match it.
 # suites: CardKey, CertParser, CourtyardClient, CSVExport, PriceWriteback,
-#         IdentityChain, ImageDownscale, RecentCertWindow
+#         IdentityChain, ImageDownscale, RecentCertWindow, RecentSales
 
 # supabase
 supabase db reset      # apply migrations locally
 supabase test db       # pgTAP (supabase/tests/schema_test.sql)
 supabase functions serve                       # all Edge Functions locally (needs Docker)
 supabase functions deploy cardladder-price     # deploy one
+# NOTE: cardladder-sales is a separate function — deploy it too.
 # Edge Function logic is covered offline by the worker/ vitest suite, not by a Deno suite.
 # Setup + curl smoke tests live in supabase/functions/README.md.
 
@@ -77,14 +78,29 @@ before touching any adapter**; don't re-litigate an access path it already ruled
   adapter, not dead code: it hits `api.courtyard.io` (Cloudflare-fingerprinted, so
   browser transport) for per-asset detail — ask/bid/FMV — and its `lookup()`
   degrades to `not_found` until card_key→assetID resolution (D10) lands.
-  Algolia = search/price; `courtyard.ts` = asset detail.
+  Algolia = search/price; `courtyard.ts` = asset detail. Courtyard's displayed
+  number is `estimatedValueUsd` + `estimatedValueConfidence` (1–5, sent as a
+  STRING) — the same FMV its own scanner shows; the confidence is quoted only on
+  an exact cert match. `courtyard-sales.ts` gets real sale prices from
+  `/index/asset/{assetID}/transactions` (plain fetch, no browser; USDC 6-dec),
+  resolving the asset via `proofOfIntegrity` on a `marketplace_prod_recently_sold`
+  hit — which IS the assetID. Cert is **not facetable** in Algolia, so cert
+  matching stays client-side. Only ~20% of vaulted slabs have ever sold, so an
+  empty Courtyard comps list is normal, not an error.
 - **Card Ladder: live (server-side, bring-your-own-account).** The web SPA and
   `search.cardladder.com` are Turnstile-walled, but the real data plane is Firebase
   Cloud Functions on Google hosts (not behind Cloudflare) that take a plain Bearer
   ID token. Verified flow: `signInWithPassword` → `httpbuildcollectioncard`
-  (cert→profileId+grade) → `httpcardestimate` (→ `oneMonthData.averagePrice` =
-  average sale). **Gotcha:** `httpcardestimate.condition` must be the grade CODE
-  (`g9`), not `"PSA 9"`. Canonical client lives in
+  (cert→profileId+grade) → `httpcardestimate` (→ **`estimatedValue` = Card Ladder
+  Value**, the number CL's own app labels "Value", plus `lastSalePrice` = "Last
+  Sold" and a 1–5 `confidence`). Comps come from **`httpprofilesales {cert,
+  grader}`** — real sales, already filtered to the same card AND grade
+  server-side. **Gotchas:** `httpcardestimate.condition` must be the grade CODE
+  (`g9`), not `"PSA 9"`; and `httpbuildcollectioncard`'s `currentValue`/
+  `marketValue` are **collection-context only** (null for cards the user doesn't
+  own), so the headline must come from the estimate. The metric was
+  `oneMonthData.averagePrice` until 2026-08-29 — that window is empty often
+  enough that those cards showed NO price; see `spike/README.md` §1a. Canonical client lives in
   `supabase/functions/_shared/cardladder.ts` (cross-runtime: the Supabase Edge
   Functions run it in Deno, `worker/` vitest-tests it in Node);
   `worker/src/sources/cardladder.ts` only adapts that shared module to the
@@ -92,7 +108,12 @@ before touching any adapter**; don't re-litigate an access path it already ruled
   Deno ships — logic changes go in `_shared/`, never in the adapter. Each user connects
   their OWN paid CL account (`cardladder-connect`); prices are fetched server-side
   (`cardladder-price`, cache-first, per-user daily budget) and shown only to
-  connected users. `search.cardladder.com` is never used.
+  connected users. Comps go through a SEPARATE `cardladder-sales`, fetched
+  **lazily when a card's detail screen opens** — never on a scan or bulk refresh,
+  or a 200-slab stack spends its 200/day budget on comps nobody opened.
+  `search.cardladder.com` is never used, but note the SPA bundle is served
+  un-walled from `cardladder-71d53.web.app` — that is how the callable list and
+  field labels were recovered.
 - **PSA: both paths are CLOSED as of 2026-08-28 — see `spike/README.md` §4a.** The
   official API is still unapproved (403), and the cert page now returns 403 with a
   Cloudflare interstitial even to Cloudflare's own Browser Rendering, so the scrape
@@ -217,6 +238,11 @@ card render and rides the existing price call — never fetch it separately, tha
 burns the daily budget; Courtyard's Algolia hits carry a cert-keyed render plus an
 `lqipBase64` preview.
 
+Comps (`RecentSale`) follow the same honesty rules as prices: stored per source,
+`nil` = never fetched but `[]` = fetched and the source genuinely has none (the
+detail screen says something different for each), a failed fetch keeps the last
+list, and nothing is ever synthesized to fill the panel.
+
 Prices: a refresh **never blanks a value the user already saw**. Only an
 authoritative answer clears a price (`PriceWriteback` holds that rule and is tested
 directly); a transient failure keeps the last value and marks the column stale.
@@ -267,7 +293,8 @@ appendix — not current guidance.
 - `worker/.env` (`PSA_ACCESS_TOKEN`) and `spike/.env` (`CL_EMAIL`/`CL_PASSWORD`) hold
   real personal credentials — gitignored, never commit or echo them. `spike/.state/`
   holds live session cookies, likewise.
-- Commit messages record the test count (e.g. `52/52 tests` — the `worker/` vitest
-  total, currently 52 across 6 files; the iOS suite is a separate 50 in 9 suites);
+- Commit messages record the test count (e.g. `77/77 tests` — the `worker/` vitest
+  total, currently 77 across 7 files; the iOS suite is a separate 66 in 10 suites,
+  and pgTAP is 15);
   tests are expected green before committing.
 - `TODOS.md` holds deferred scope with the rationale (currently: offline scan queue).

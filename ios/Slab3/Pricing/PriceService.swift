@@ -81,11 +81,18 @@ enum PriceService {
             // an exact cert hit is the strongest evidence Courtyard can give us,
             // a grade+name hit is circumstantial, a fuzzy hit is barely evidence.
             // README.md open question 2 asks the client for the real scale.
-            card.courtyardConfidence = switch match.confidence {
+            // On an exact cert match, prefer COURTYARD's own 1-5 confidence in
+            // its value — that is the number its app shows next to the price, and
+            // it says something we cannot know ourselves. Otherwise fall back to
+            // how the match was made: a grade+name hit is circumstantial, a fuzzy
+            // hit is barely evidence, and quoting Courtyard's confidence in a
+            // different card's value would overstate what we know.
+            let matchConfidence = switch match.confidence {
             case .exact: 5
             case .probable: 3
             case .fuzzy: 1
             }
+            card.courtyardConfidence = match.sourceConfidence ?? matchConfidence
 
             // Auto-fill identity from an exact/probable Courtyard match. The
             // funnel decides what survives: Courtyard can fill what PSA left
@@ -159,8 +166,13 @@ enum PriceService {
         // key we send is then the stable one the cache will be keyed under.
         let outcome = await cardLadder.price(cert: card.certNumber, grader: card.grader, cardKey: card.cardKey, force: force)
         switch outcome {
-        case .ok(let cents, let identity):
-            applyCardLadder(.price(cents), to: card)
+        case .ok(let price, let identity):
+            applyCardLadder(.price(price.valueCents), to: card)
+            // Card Ladder's "Last Sold", shown under the Value on the detail
+            // screen. Follows the price rule: only an authoritative answer
+            // replaces it, so a transient failure below leaves it alone.
+            card.cardLadderLastSaleCents = price.lastSaleCents
+            card.cardLadderLastSaleAt = price.lastSaleAt
             // Card Ladder resolves by cert number server-side, so a hit is exact
             // by construction — there is no fuzzy path to score lower. That also
             // makes its identity and its card render safe to trust outright.
@@ -171,6 +183,9 @@ enum PriceService {
         case .notFound(let identity):
             applyCardLadder(.notListed, to: card)
             card.cardLadderConfidence = 0
+            // Authoritative "no value" clears the supporting figures too.
+            card.cardLadderLastSaleCents = nil
+            card.cardLadderLastSaleAt = nil
             // No comps, but Card Ladder may still know exactly what this is.
             if let identity { await applyCardLadderIdentity(identity, to: card) }
             return .notListed
@@ -188,6 +203,54 @@ enum PriceService {
             UserDefaults.standard.set(false, forKey: connectedKey)
             return .notConnected
         }
+    }
+
+    // MARK: Sales (comps)
+
+    /// Load this card's real recent sales. Called from the card detail screen on
+    /// appear — deliberately NOT part of `refresh`.
+    ///
+    /// Comps cost a second Card Ladder request per card against a 200/day budget.
+    /// Folding them into a scan or a bulk refresh would halve how many slabs a
+    /// user can run through a stack, and the user would experience that as prices
+    /// going blank — the exact failure the cache-first rule exists to prevent.
+    ///
+    /// Cache-first is handled server-side (24h), so re-opening a card is free.
+    static func loadSales(_ card: Card, in context: ModelContext, force: Bool = false) async {
+        guard !card.salesLoading else { return }
+        // Already have them and not explicitly refreshing: nothing to do. An
+        // EMPTY stored list counts as having them — "Card Ladder has no comps"
+        // is an answer, not a reason to ask again every time the screen opens.
+        if card.cardLadderSales != nil && card.courtyardSales != nil && !force { return }
+
+        card.salesLoading = true
+        defer { card.salesLoading = false }
+
+        // Courtyard first: unauthenticated, costs no budget, and independent of
+        // whether the user has connected Card Ladder at all.
+        if card.courtyardSales == nil || force {
+            card.courtyardSales = await courtyard.recentSales(
+                name: card.name, set: card.set, grader: card.grader, grade: card.grade)
+        }
+
+        guard UserDefaults.standard.bool(forKey: connectedKey) else {
+            try? context.save()
+            return
+        }
+
+        let outcome = await cardLadder.sales(
+            cert: card.certNumber, grader: card.grader, cardKey: card.cardKey, force: force)
+        switch outcome {
+        case .ok(let sales):
+            card.cardLadderSales = sales
+        case .notConnected, .authExpired:
+            UserDefaults.standard.set(false, forKey: connectedKey)
+        case .unavailable:
+            // Keep whatever we already showed. Same rule as prices: a failed
+            // fetch never erases evidence the user has already seen.
+            break
+        }
+        try? context.save()
     }
 
     // MARK: Write-back (rule lives in PriceWriteback, tested there)

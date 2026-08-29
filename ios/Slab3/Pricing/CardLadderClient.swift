@@ -35,8 +35,14 @@ struct CardLadderClient {
 
     // MARK: Price
 
+    /// Everything the price call returns about the number itself. `valueCents`
+    /// is Card Ladder VALUE (their app's "Value" column); `lastSaleCents` is
+    /// their "Last Sold". Both ride the one call — see Identity below.
     struct Price: Equatable {
-        let priceCents: Int
+        let valueCents: Int
+        let lastSaleCents: Int?
+        let lastSaleAt: Date?
+        let confidence: Int?
     }
 
     /// What Card Ladder knows about the card, alongside the price.
@@ -56,7 +62,7 @@ struct CardLadderClient {
 
     /// Outcome of a price lookup, so the caller can update the local connection flag.
     enum PriceOutcome: Equatable {
-        case ok(Int, Identity?) // average-sale cents + what CL knows about the card
+        case ok(Price, Identity?) // Card Ladder Value + what CL knows about the card
         /// No price — but Card Ladder may still KNOW the card. A missing comp is
         /// not a missing card, and while PSA is walled this is often the only
         /// thing that can name a slab at all.
@@ -66,20 +72,88 @@ struct CardLadderClient {
         case unavailable  // rate limited / source error — transient
     }
 
-    /// Fetch the Card Ladder average-sale price (cents) for a scanned card.
+    /// Fetch the Card Ladder VALUE (cents) for a scanned card, plus its last
+    /// sale and Card Ladder's own confidence in it.
+    ///
+    /// The metric changed 2026-08-29: this used to be `oneMonthData.averagePrice`,
+    /// a trailing 30-day mean that is simply empty for many well-known cards —
+    /// so they showed no Card Ladder price at all. Value is the number Card
+    /// Ladder itself displays. See supabase/functions/_shared/cardladder.ts.
+    ///
     /// `force` skips the server's 24h cache read — used by manual refresh so the
     /// user gets a genuinely current number rather than a replayed one.
     func price(cert: String, grader: Grader, cardKey: String, force: Bool = false) async -> PriceOutcome {
         struct Body: Encodable { let cert: String; let grader: String; let cardKey: String; let force: Bool }
-        struct Reply: Decodable { let status: String; let priceCents: Int?; let identity: Identity? }
+        struct Reply: Decodable {
+            let status: String
+            let priceCents: Int?
+            let lastSaleCents: Int?
+            let lastSaleAt: Date?
+            let confidence: Int?
+            let identity: Identity?
+        }
         do {
             let reply: Reply = try await Backend.client.functions.invoke(
                 "cardladder-price",
                 options: .init(body: Body(cert: cert, grader: grader.rawValue, cardKey: cardKey, force: force))
             )
             switch reply.status {
-            case "ok": return reply.priceCents.map { .ok($0, reply.identity) } ?? .notFound(reply.identity)
+            case "ok":
+                guard let cents = reply.priceCents else { return .notFound(reply.identity) }
+                return .ok(
+                    Price(valueCents: cents, lastSaleCents: reply.lastSaleCents,
+                          lastSaleAt: reply.lastSaleAt, confidence: reply.confidence),
+                    reply.identity
+                )
             case "not_found": return .notFound(reply.identity)
+            case "not_connected": return .notConnected
+            case "auth_expired": return .authExpired
+            default: return .unavailable // rate_limited / source_error
+            }
+        } catch {
+            return .unavailable
+        }
+    }
+
+    // MARK: Sales
+
+    /// Outcome of a comps lookup. `.ok([])` is a real answer — Card Ladder has no
+    /// sales for this card — and is deliberately not collapsed into a failure.
+    enum SalesOutcome: Equatable {
+        case ok([RecentSale])
+        case notConnected
+        case authExpired
+        case unavailable
+    }
+
+    /// Fetch this card's real recent sales at this grade.
+    ///
+    /// Called LAZILY, when the detail screen opens — never during a scan or a
+    /// bulk refresh. It is a second Card Ladder request per card, and the daily
+    /// budget is 200; spending it on comps nobody opened would read to the user
+    /// as prices going blank. See supabase/functions/cardladder-sales.
+    func sales(cert: String, grader: Grader, cardKey: String, force: Bool = false) async -> SalesOutcome {
+        struct Body: Encodable { let cert: String; let grader: String; let cardKey: String; let force: Bool }
+        struct Sale: Decodable {
+            let priceCents: Int
+            let soldAt: Date
+            let platform: String?
+            let listingType: String?
+            let title: String?
+            let url: String?
+        }
+        struct Reply: Decodable { let status: String; let sales: [Sale]? }
+        do {
+            let reply: Reply = try await Backend.client.functions.invoke(
+                "cardladder-sales",
+                options: .init(body: Body(cert: cert, grader: grader.rawValue, cardKey: cardKey, force: force))
+            )
+            switch reply.status {
+            case "ok":
+                return .ok((reply.sales ?? []).map {
+                    RecentSale(priceCents: $0.priceCents, soldAt: $0.soldAt, platform: $0.platform,
+                               listingType: $0.listingType, title: $0.title, url: $0.url)
+                })
             case "not_connected": return .notConnected
             case "auth_expired": return .authExpired
             default: return .unavailable // rate_limited / source_error

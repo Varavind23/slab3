@@ -17,13 +17,19 @@ import { usdToCents } from "./courtyard.js";
 
 const ALGOLIA_APP = "Y8TL3M06QA";
 const ALGOLIA_KEY = "3b3ed18284ca0baee9a496aea5f093d6"; // public search-only key
-const INDEX = "marketplace_prod_recently_listed";
+export const INDEX_LISTED = "marketplace_prod_recently_listed";
+/** Sibling index of the same Algolia app, found 2026-08-29 — the comps feed. */
+export const INDEX_SOLD = "marketplace_prod_recently_sold";
 
-interface AlgoliaHit {
+export interface AlgoliaHit {
   objectID: string;
+  /** Courtyard's assetID under another name — confirmed 2026-08-29. It is what
+   *  /index/asset/{id}/transactions is keyed by, so an Algolia hit resolves
+   *  straight to a slab's ledger with no extra lookup (the D10 gap). */
+  proofOfIntegrity?: string;
   title?: string;
   estimatedValueUsd?: number;
-  estimatedValueConfidence?: number;
+  estimatedValueConfidence?: number | string;
   lastSaleDate?: string;
   latestListing?: { price?: { amount?: { usd?: number } } };
   certification?: { agency?: string; number?: string; grade?: string };
@@ -37,7 +43,7 @@ interface AlgoliaHit {
   imageUrl?: string;
   lqipBase64?: string;
 }
-interface AlgoliaResult {
+export interface AlgoliaResult {
   hits: AlgoliaHit[];
   nbHits: number;
 }
@@ -49,9 +55,11 @@ export interface AlgoliaSearch {
 
 /** Production Algolia client — plain fetch, no browser. */
 export class HttpAlgoliaSearch implements AlgoliaSearch {
+  constructor(private readonly index: string = INDEX_LISTED) {}
+
   async query(text: string, facetFilters: string[][]): Promise<AlgoliaResult> {
     const res = await fetch(
-      `https://${ALGOLIA_APP.toLowerCase()}-dsn.algolia.net/1/indexes/${INDEX}/query`,
+      `https://${ALGOLIA_APP.toLowerCase()}-dsn.algolia.net/1/indexes/${this.index}/query`,
       {
         method: "POST",
         headers: {
@@ -72,6 +80,14 @@ export class HttpAlgoliaSearch implements AlgoliaSearch {
 export function gradeNumber(grade: string | undefined): string | undefined {
   const m = grade?.match(/(\d+(?:\.\d+)?)/);
   return m ? m[1] : undefined;
+}
+
+/** Courtyard sends estimatedValueConfidence as a STRING ("4") on live records and
+ *  a number on others. Normalize to 1-5, or undefined when it says nothing. */
+export function sourceConfidence(raw: unknown): number | undefined {
+  const n = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isFinite(n) || n < 1 || n > 5) return undefined;
+  return Math.round(n);
 }
 
 export class CourtyardAlgoliaSource implements PriceSource {
@@ -130,6 +146,11 @@ export class CourtyardAlgoliaSource implements PriceSource {
       asOf: hit.lastSaleDate ?? new Date().toISOString(),
       sourceCanonicalId: hit.objectID,
       confidence: byCert ? "exact" : byGrade ? "probable" : "fuzzy",
+      // Courtyard's OWN 1-5 confidence in its estimate — the number its app shows
+      // beside the value. Carried only on an exact cert match: on a fuzzy hit the
+      // value belongs to a DIFFERENT card, so quoting Courtyard's confidence in it
+      // would overstate what we know. Same rule the official image already follows.
+      sourceConfidence: byCert ? sourceConfidence(hit.estimatedValueConfidence) : undefined,
     };
   }
 }

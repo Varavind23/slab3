@@ -1,4 +1,10 @@
-// Card Ladder PriceSource adapter (plan: T4). Metric = AVERAGE SALE (buyer decision).
+// Card Ladder PriceSource adapter (plan: T4). Metric = CARD LADDER VALUE.
+//
+// Metric changed 2026-08-29 from average sale (oneMonthData.averagePrice) to Card
+// Ladder Value (httpcardestimate.estimatedValue) — the number Card Ladder's own
+// app shows. The average silently produced NO price for cards whose 30-day window
+// was empty; see the lookupCardValue header in _shared/cardladder.ts and
+// spike/README.md 1a.
 //
 // The real client logic lives in the cross-runtime shared module
 // (supabase/functions/_shared/cardladder.ts) — the SAME code the production Supabase
@@ -9,7 +15,7 @@
 
 import type { CardIdentity, Lookup, PriceSource, SourceError } from "./types.js";
 import {
-  lookupAverageSale,
+  lookupCardValue,
   type ClErrorKind,
   type FetchLike,
 } from "../../../supabase/functions/_shared/cardladder";
@@ -21,12 +27,16 @@ export {
   isExpired,
   resolveCert,
   estimate,
-  lookupAverageSale,
+  lookupCardValue,
+  fetchProfileSales,
   parseResolve,
   cardImage,
   parseEstimate,
+  parseSales,
+  isoOrNull,
   usdToCents,
   AVERAGE_SALE_WINDOW,
+  MAX_SALES,
 } from "../../../supabase/functions/_shared/cardladder";
 
 const ERROR_MAP: Record<ClErrorKind, SourceError["error"]> = {
@@ -39,7 +49,7 @@ const ERROR_MAP: Record<ClErrorKind, SourceError["error"]> = {
 
 export class CardLadderSource implements PriceSource {
   readonly name = "cardladder" as const;
-  readonly metric = "average_sale" as const;
+  readonly metric = "cl_value" as const;
 
   /** idTokenProvider yields a valid Firebase ID token for the user's OWN Card Ladder
    *  account (the Edge Function supplies one after refresh/sign-in). fetchImpl is
@@ -57,7 +67,7 @@ export class CardLadderSource implements PriceSource {
       return { kind: "error", error: "auth_expired", detail: "Card Ladder not connected — reconnect your account" };
     }
 
-    const r = await lookupAverageSale(idToken, identity.certNumber ?? "", identity.grader, undefined, {
+    const r = await lookupCardValue(idToken, identity.certNumber ?? "", identity.grader, undefined, {
       fetch: this.fetchImpl,
     });
     if (r.kind === "ok") {
@@ -69,6 +79,9 @@ export class CardLadderSource implements PriceSource {
         asOf: r.asOf,
         sourceCanonicalId: r.profileId,
         confidence: "exact",
+        sourceConfidence: r.estimate.confidence ?? undefined,
+        lastSaleCents: r.estimate.lastSalePriceCents ?? undefined,
+        lastSaleAt: r.estimate.lastSaleAt ?? undefined,
       };
     }
     if (r.kind === "not_found") return { kind: "error", error: "not_found" };

@@ -1,12 +1,18 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { CardLadderSource, cardImage, lookupAverageSale, parseEstimate, parseResolve, usdToCents } from "../src/sources/cardladder.js";
+import { CardLadderSource, cardImage, lookupCardValue, parseEstimate, parseResolve, parseSales, isoOrNull, usdToCents } from "../src/sources/cardladder.js";
 
 // Fixtures captured LIVE from the real Card Ladder Firebase callables (2026-08-24).
 const load = (n: string) => JSON.parse(readFileSync(new URL(`./fixtures/${n}`, import.meta.url), "utf8"));
 const RESOLVE = load("cardladder-resolve.json"); // httpbuildcollectioncard result envelope
 const ESTIMATE = load("cardladder-estimate.json"); // httpcardestimate result envelope
 const QUOTA = load("cardladder-quota.json"); // RESOURCE_EXHAUSTED envelope
+// Captured live 2026-08-29 alongside the metric change.
+const SALES = load("cardladder-sales.json"); // httpprofilesales result envelope (cert 20360362)
+// Cert 154334127: Card Ladder KNOWS the card but has no value and no comps. The
+// honest-empty case, which is the one most likely to regress into a bogus $0.
+const ESTIMATE_NOVALUE = load("cardladder-estimate-novalue.json");
+const SALES_NOVALUE = load("cardladder-sales-novalue.json");
 
 const identity = { cardKey: "psa:1986-fleer:73:psa-9", grader: "psa" as const, certNumber: "20360362", name: "Kevin McHale" };
 
@@ -24,19 +30,22 @@ function stubFetch(routes: Array<{ match: string; body: unknown; status?: number
 const token = async () => "test-id-token";
 
 describe("CardLadderSource — verified Firebase callable contract", () => {
-  it("resolves cert then estimates → ok with average-sale cents + profileId", async () => {
+  it("resolves cert then estimates → ok with Card Ladder Value + profileId", async () => {
     const fetchImpl = stubFetch([
       { match: "httpbuildcollectioncard", body: RESOLVE },
       { match: "httpcardestimate", body: ESTIMATE },
     ]);
     const r = await new CardLadderSource(token, fetchImpl).lookup(identity);
-    // ESTIMATE.result.oneMonthData.averagePrice = 116.92 → 11692 cents.
+    // ESTIMATE.result.estimatedValue = 120 → 12000 cents. NOT oneMonthData's
+    // 117.36 — the headline is Card Ladder's own Value as of 2026-08-29.
     expect(r).toMatchObject({
       kind: "ok",
-      priceCents: 11692,
-      metric: "average_sale",
+      priceCents: 12000,
+      metric: "cl_value",
       confidence: "exact",
       sourceCanonicalId: "psa-299594",
+      sourceConfidence: 5,
+      lastSaleCents: 12000,
     });
   });
 
@@ -90,13 +99,13 @@ describe("Card Ladder pure parsing (the condition=grade gotcha)", () => {
   // which showed up in the app as "Details pending" on cards Card Ladder had
   // named perfectly. Verified live against two real certs (2026-08-28).
   it("keeps the identity when the card is known but has no comps", async () => {
-    const noComps = { result: { ...ESTIMATE.result, oneMonthData: { velocity: 0, averagePrice: 0 } } };
+    const noComps = { result: { ...ESTIMATE.result, estimatedValue: 0 } };
     const fetchStub = stubFetch([
       { match: "signInWithPassword", body: { idToken: "t", refreshToken: "r", expiresIn: "3600" } },
       { match: "httpbuildcollectioncard", body: RESOLVE },
       { match: "httpcardestimate", body: noComps },
     ]);
-    const out = await lookupAverageSale("tok", "20360362", "psa", "oneMonthData", { fetch: fetchStub });
+    const out = await lookupCardValue("tok", "20360362", "psa", "oneMonthData", { fetch: fetchStub });
     expect(out.kind).toBe("not_found");
     expect((out as any).identity?.label).toBe("1986 Fleer #73 Kevin Mchale");
     expect((out as any).identity?.player).toBe("Kevin McHale");
@@ -106,7 +115,7 @@ describe("Card Ladder pure parsing (the condition=grade gotcha)", () => {
     const fetchStub = stubFetch([
       { match: "httpbuildcollectioncard", body: { result: null } },
     ]);
-    const out = await lookupAverageSale("tok", "00000000", "psa", "oneMonthData", { fetch: fetchStub });
+    const out = await lookupCardValue("tok", "00000000", "psa", "oneMonthData", { fetch: fetchStub });
     expect(out.kind).toBe("not_found");
     expect((out as any).identity).toBeUndefined();
   });
@@ -156,14 +165,80 @@ describe("Card Ladder pure parsing (the condition=grade gotcha)", () => {
     expect(cardImage(null)).toBeUndefined();
   });
 
-  it("parseEstimate reads the one-month average as the default metric", () => {
-    expect(parseEstimate(ESTIMATE.result).averageSaleCents).toBe(11692);
-    expect(parseEstimate(ESTIMATE.result, "twoWeekData").averageSaleCents).toBe(12500);
+  // The metric that ships. `estimatedValue` is the figure Card Ladder's own app
+  // labels "Value"; the window averages stay on the payload but lead nothing.
+  it("parseEstimate reads Card Ladder Value, last sale and confidence", () => {
+    const e = parseEstimate(ESTIMATE.result);
+    expect(e.clValueCents).toBe(12000);
+    expect(e.lastSalePriceCents).toBe(12000);
+    expect(e.lastSaleAt).toBe("2026-08-28T15:04:10.000Z");
+    expect(e.confidence).toBe(5);
+  });
+
+  it("still carries the window averages, which are no longer the headline", () => {
+    expect(parseEstimate(ESTIMATE.result).averageSaleCents).toBe(11736);
+    expect(parseEstimate(ESTIMATE.result, "twoWeekData").averageSaleCents).toBe(12000);
+  });
+
+  // THE regression this whole change exists for. Before 2026-08-29 the headline
+  // was oneMonthData.averagePrice, so a card with an empty 30-day window showed no
+  // Card Ladder price at all even when Card Ladder knew its value perfectly well.
+  it("a card with an empty one-month window still has a Card Ladder Value", () => {
+    const emptyWindow = { ...ESTIMATE.result, oneMonthData: { velocity: 0, averagePrice: 0 } };
+    const e = parseEstimate(emptyWindow);
+    expect(e.averageSaleCents).toBeNull(); // what v1 would have shown: nothing
+    expect(e.clValueCents).toBe(12000); // what the user actually gets now
   });
 
   it("an all-zero estimate (what the wrong condition returns) yields null, not $0", () => {
-    const zeroed = { oneMonthData: { velocity: 0, averagePrice: 0 } };
+    const zeroed = { estimatedValue: 0, oneMonthData: { velocity: 0, averagePrice: 0 } };
+    expect(parseEstimate(zeroed).clValueCents).toBeNull();
     expect(parseEstimate(zeroed).averageSaleCents).toBeNull();
+  });
+
+  it("a card Card Ladder has no value for reports null across the board, never $0", () => {
+    const e = parseEstimate(ESTIMATE_NOVALUE.result);
+    expect(e.clValueCents).toBeNull();
+    expect(e.lastSalePriceCents).toBeNull();
+    expect(e.lastSaleAt).toBeNull();
+    expect(e.confidence).toBeNull();
+  });
+
+  // ── httpprofilesales: real comps ───────────────────────────────────────────
+  it("parseSales shapes real sales, newest first", () => {
+    const sales = parseSales(SALES.result);
+    expect(sales).toHaveLength(20);
+    expect(sales[0]).toMatchObject({
+      priceCents: 12000,
+      soldAt: "2026-08-28T15:04:10.000Z",
+      platform: "eBay",
+      listingType: "BestOffer",
+    });
+    const dates = sales.map((s) => s.soldAt);
+    expect([...dates].sort().reverse()).toEqual(dates);
+  });
+
+  it("an empty sales archive is a real answer, not an error", () => {
+    expect(parseSales(SALES_NOVALUE.result)).toEqual([]);
+    expect(parseSales(null)).toEqual([]);
+    expect(parseSales({})).toEqual([]);
+  });
+
+  // A comp we cannot state honestly is not a comp.
+  it("parseSales drops entries missing a real price or a real date", () => {
+    const out = parseSales({ sales: [
+      { price: 0, date: "2026-08-01T00:00:00.000Z" },
+      { price: 50, date: null },
+      { price: 50, date: "not a date" },
+      { price: 50, date: "2026-08-01T00:00:00.000Z" },
+    ] });
+    expect(out).toEqual([{ priceCents: 5000, soldAt: "2026-08-01T00:00:00.000Z" }]);
+  });
+
+  it("isoOrNull normalizes or refuses", () => {
+    expect(isoOrNull("2026-08-28T15:04:10.000Z")).toBe("2026-08-28T15:04:10.000Z");
+    expect(isoOrNull("garbage")).toBeNull();
+    expect(isoOrNull(null)).toBeNull();
   });
 
   it("usdToCents guards 0/absent/non-finite", () => {
