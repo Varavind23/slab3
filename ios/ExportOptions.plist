@@ -2,8 +2,40 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- App Store Connect distribution. `destination: upload` sends the build
-         straight to TestFlight; switch to `export` to inspect the .ipa first. -->
+    <!-- App Store Connect distribution.
+
+         `destination: export` writes an .ipa so it can be inspected; switch to
+         `upload` to send straight to TestFlight. Kept on `export` because an
+         accidental upload is worse than an extra edit.
+
+         The full ship, as actually run for 0.3 (3) on 2026-08-31:
+
+           xcodebuild -project ios/Slab3.xcodeproj -scheme Slab3 \
+             -destination 'generic/platform=iOS' \
+             -archivePath <path>.xcarchive -allowProvisioningUpdates archive
+           xcodebuild -exportArchive -archivePath <path>.xcarchive \
+             -exportOptionsPlist ios/ExportOptions.plist -exportPath <dir> \
+             -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_F2F97BLXVN.p8 \
+             -authenticationKeyID F2F97BLXVN -authenticationKeyIssuerID <issuer-uuid>
+
+         SIGNING IS MANUAL ON PURPOSE (was: automatic). Automatic signing needs
+         Xcode's CLOUD signing to mint a certificate and regenerate the profile,
+         and the App Store Connect API key is refused for it — cloud signing wants
+         an Admin/App Manager role key, and this one is not. It can still read and
+         CREATE certificates and profiles through the API, which is how the pair
+         below was made. Symptoms when this regresses to automatic:
+             "Cloud signing permission error"
+             "No signing certificate iOS Distribution found"
+             "Provisioning profile … doesn't include signing certificate …"
+         Upgrading the key to App Manager would let automatic signing work again.
+
+         The certificate below is the one whose PRIVATE KEY lives on the ship
+         machine's login keychain. The account's older iOS Distribution cert
+         (expires 2027-05-05) was created elsewhere, so its key is not here and it
+         cannot sign from this machine — a certificate without its key is inert.
+         If you ship from a different Mac, that Mac needs its own key: either
+         export this identity as a .p12, or create another cert and a profile
+         naming it. -->
     <key>method</key>
     <string>app-store-connect</string>
     <key>destination</key>
@@ -11,7 +43,17 @@
     <key>teamID</key>
     <string>7BMY83MWA8</string>
     <key>signingStyle</key>
-    <string>automatic</string>
+    <string>manual</string>
+    <key>signingCertificate</key>
+    <string>iPhone Distribution: varun aravind (7BMY83MWA8)</string>
+    <!-- Created via the ASC API 2026-08-31 and installed to
+         ~/Library/MobileDevice/Provisioning Profiles/. Only the shipping target
+         is listed; SlabsDev is a development build and never goes through here. -->
+    <key>provisioningProfiles</key>
+    <dict>
+        <key>com.varunaravind.slabs</key>
+        <string>Slabs AppStore 20260831</string>
+    </dict>
     <!-- dSYMs, so TestFlight crash reports symbolicate. -->
     <key>uploadSymbols</key>
     <true/>
