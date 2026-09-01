@@ -142,6 +142,47 @@ needs `httpbuildcollectioncard` at all.
 profileId, source}`. A cert→identity path carrying `dateGraded`, which PSA itself
 will not give us while its wall is up (§4a). Option, not shipped.
 
+### 1b. What Card Ladder returns for POKEMON, and why card_key could not be a cache key — 2026-08-31
+
+Opened by a V2 report: a PSA 9 slab showed a PSA 10's value. Not a scanning bug —
+the barcode carries a cert number and nothing else. Probed `httpbuildcollectioncard`
+live with three real Pokemon certs (taken from the Courtyard fixture):
+
+| cert | profileId | set | player | # | year | grade |
+|---|---|---|---|---|---|---|
+| 98881872 | `psa-5850773` | Pokemon Celebrations Classic Collection | Charizard-**Holo** | 4 | 2021 | g10 |
+| 77286827 | `psa-544027` | Pokemon Game | Charizard-**Holo** | 4 | 1999 | g6 |
+| 51203633 | `psa-1724389` | Pokemon Expedition | Charizard-**Reverse Foil** | 40 | 2002 | g10 |
+
+**Pokemon field shapes, for anyone matching against this source.** The variant is
+baked into `player` (`Charizard-Holo`, `Charizard-Reverse Foil`), not into the
+absent `variation` field, which came back empty on every card probed. `set` is
+fully qualified (`Pokemon Celebrations Classic Collection`, not `Celebrations`)
+and carries no year. `category` is `Pokemon`. So `set` + `player` discriminates
+Pokemon far better than it does the sports cards this was first tested on — which
+is why the card-number axis is a low-risk collision here.
+
+**The one that is NOT safe: `set` reuses a name across printings.** Card Ladder
+calls the 1999 Base Set `Pokemon Game`, and that name is shared by the printings
+a 1st Edition / Shadowless / Unlimited Charizard belongs to — an order-of-magnitude
+price difference. **Unverified**: no 1st Edition or Shadowless cert was available
+to probe. Do not assume set+player+year is sufficient for Pokemon until one is.
+
+**What this settles.** Do not rebuild a source's identity out of the source's own
+text fields and use it as a key. `httpcardestimate` takes `profileId` and
+`condition` (the grade code) as SEPARATE arguments — that is the proof profileId is
+card-level and grade-independent, so `{profileId}:{gradeCode}` is exactly one
+priced thing at Card Ladder, by construction, with no reconstruction to get wrong.
+That pair is now the cache key for price, identity and comps (see
+`clSourceKey`, and the migration `20260831000000_cl_profile_keyed_cache.sql`).
+
+The key it replaced, `card_key`, was wrong twice over: no source ever populated a
+`grade` (PSA is walled per §4a, and Courtyard's matcher refuses to run without a
+grade in hand, so neither could supply one), so every key ended in a bare `:` and
+every grade of a card collapsed onto one row — and the caches are GLOBAL, so the
+first grade anyone scanned answered for all of them. `card_key` keeps its real
+jobs: the per-folder sale limit and cross-source matching.
+
 ## 2. Courtyard (no account needed; curl already 403s — bot wall confirmed)
 
 ```sh
@@ -251,6 +292,191 @@ it describes the card rather than the slab, ANY vaulted asset of that card answe
 for all of them. Comps now come from here, gated behind the same identification
 bar as the price. The `/transactions` ledger approach is retired: ~20% coverage
 and one sale per slab.
+
+### 2a. Courtyard auth is Privy, and the scanner call is CERT-KEYED — 2026-08-29 (night)
+
+Opened to test the owner's theory that connecting an account unlocks the
+scanner. Half of it is confirmed, and it is the buildable half.
+
+**The auth mechanism — SOLVED, and there is no password by design.** Courtyard
+authenticates with Privy. Their bundle drives two plain client endpoints:
+`POST auth.privy.io/api/v1/passwordless/{init,authenticate}` — email, then the
+emailed code. Both take only the PUBLIC `privy-app-id` header; Privy's
+app-secret Basic Auth belongs to their *server* REST API, a different surface.
+So a server can drive the login for the user: init -> user reads their own inbox
+-> authenticate. That is the OTP relay, and it is what replaces Card Ladder's
+"store email+password" pattern, which cannot port because no password exists.
+
+Captured live (public client identifiers, observed off the login modal's request
+headers — they are in no static chunk on any server-rendered route):
+* `privy-app-id: cldj2z0b70001mm08l39me9k5`
+* `privy-client-id: client-WY2UXndhQ4SHyZxA4a9fAyZtFTD8SFca7MVefZ9EyVom4`
+
+Verified accepted: `init` with that app id validates past app-id straight to
+email validation (`[Input error] email: Invalid email address`),
+where a bad app id returns `missing_or_invalid_privy_app_id`. See
+`courtyard/privy-auth.ts` (`CY_CAPTURE_ONLY=1` re-captures without sending mail).
+
+**The token is the API bearer.** courtyard.io sets `OpenAPI.TOKEN =
+getAccessToken` directly from `usePrivyClient()`, so the Privy access token is
+what `api.courtyard.io` authenticates. There is no second Courtyard-issued
+credential to obtain. `/users/login` exists but the web client never calls it.
+
+**The web API still has no scanner route — re-verified.** The generated client
+in their bundle is **exactly 172 endpoints** (unchanged). Every pricing endpoint
+is per-vaulted-asset or owner-scoped. `/pricing/instant-sell-offers` was the last
+plausible candidate — the app says "Courtyard isn't buying this card" — and it
+takes **assetIds**, with `403 "caller is not the asset owner"`. Not the scanner.
+
+**NEW, and it changes the odds on the APK: the app is Expo, and the scanner call
+is keyed by CERT.** The web bundle ships the whole scanner feature's strings and
+react-query keys even though `courtyard.io/scanner` 404s (mobile-only route):
+`GET_SCANNER_CARD_DETAILS`, `GET_SCANNER_CARD_GRADER_IMAGE`, "Courtyard Pricing
+/ Market Value", confidence high/medium/low, and decisively
+**"Failed to fetch scanner data for cert: {{cert}}"** — a cert-keyed lookup,
+exactly the shape the web API lacks. `EXPO_PUBLIC_SCANDIT_LICENSE_KEY` means the
+mobile app is **Expo/React Native sharing this codebase**, so its bundle is plain
+JS in `assets/index.android.bundle`. The teardown is a grep for that call site,
+not a reverse-engineering project.
+
+**CORRECTION to a reading made earlier the same day.** `/index/*` returned 403 to
+every local request, which first looked like a route-level auth change. It is
+not: from a different egress `/index/asset/{id}/price-history` returns valid JSON
+unauthenticated, while `/orderbook/config` and `/configs/providers/config.json`
+answer 200 from here. **This machine's IP is rate-limited on the `/index/*`
+prefix** after the day's probing. Production is unaffected and the §2 findings
+above stand. A 403 on `/index/*` from a hammered IP is INCONCLUSIVE — never
+record it as a closed route; `courtyard/probe-auth.ts` flags it in the output.
+
+**RUN 2026-08-29 (night) — the OTP relay WORKS end to end on a real account.**
+`courtyard/privy-auth.ts` against the owner's own Courtyard login:
+`passwordless/init` -> `{"success":true}` (code emailed) -> `authenticate` with
+the emailed code -> **HTTP 200**. Response carries `user`, `token` (ES256 JWT,
+413 chars), `privy_access_token`, **`refresh_token`**, `session_update_action`,
+`is_new_user`. So the relay does not need re-OTPing on every call — the refresh
+token is there, which is what makes a server-side `courtyard-connect` viable.
+The script runs two-step (`CY_CODE=… npx tsx courtyard/privy-auth.ts`) because
+the code arrives out of band; on a TTY it just prompts.
+**The session file `.state/courtyard-session.json` holds a LIVE credential.**
+`.state/` is gitignored — keep it that way, same rule as `spike/.env`.
+
+**Whether the Privy bearer authenticates api.courtyard.io is STILL OPEN**, and
+not for an interesting reason: this machine's IP is 403-blocked on `/users/*`
+as well as `/index/*`. Evidence it is the IP and not the route: the same
+`/users/ids/{id}` URL answers **400 Bad Request** from a clean egress, while
+from here it is a bare-HTML 403 both anonymously AND with the bearer — an auth
+rejection would be JSON. `/orderbook/config` and `/configs/providers/config.json`
+still answer 200 from here, which is what makes the block look route-shaped at
+first glance. It is not.
+
+**Browser transport does NOT route around it, and that is worth knowing before
+someone tries.** In-page `fetch` from a courtyard.io page dies on CORS (a 403
+carries no ACAO header, so it surfaces as "Failed to fetch"). Top-level
+navigation with `extraHTTPHeaders` gets 403 even on `/orderbook/config`, which
+plain curl fetches at 200 — the WAF rejects navigations to the API outright. So
+the documented "use the browser transport" workaround is for Cloudflare TLS
+fingerprinting, NOT for this block. The only fix is a different egress.
+
+**Verdict:** the account mechanism is real and buildable, but authentication most
+likely gates *access*, not *capability*. `courtyard/probe-auth.ts` is the bounded
+test (fixed guess list, hard cap 20, ~1 req/sec); it needs `CY_EMAIL` in
+`spike/.env` and a session from `privy-auth.ts`. If it finds no cert-keyed route,
+the theory is retired and the next step is the APK teardown — not a wider probe.
+
+### 2b. THE SCANNER ENDPOINT IS FOUND — `/scanner/card-details` — 2026-08-31
+
+**`GET https://api.courtyard.io/scanner/card-details?cert={cert}&grader={PSA|CGC}`**
+**No auth. No browser. No account.** Anonymous and bearer-authenticated responses
+are byte-identical. `grader` is optional (the cert alone resolves).
+
+Found by tearing down the Android app (`io.courtyard.app` 1.7.00 build 90, XAPK
+from a mirror). Two things made it findable: the app is Expo/React Native, and
+its `assets/index.android.bundle` is **Hermes bytecode, not plain JS** — `grep`
+finds nothing, `strings` finds everything. The URL is in the Hermes string table.
+Sibling endpoint: `GET /scanner/card-grader-image` (not yet used).
+
+**The live bar is MET, exactly.** Cert 96679812 -> `price: 50.8`,
+`priceConfidence: "2"` — the same $50.80 / confidence 2 Courtyard's own app shows
+for that slab, the number this whole spike existed to reach.
+
+**Response shape** (one call answers price, identity AND comps):
+```
+{ "priceModel":  { "price": 50.8, "priceConfidence": "2",
+                   "gemrateDescription": "..." },
+  "graderData":  { "id": "PSA_96679812", "grader", "cert", "title", "subject",
+                   "cardNumber", "set", "language", "category", "year",
+                   "grade": "g10", "population": 38, "primaryImages": [] },
+  "priceHistory":[ { "title", "grader", "grade", "population",
+                     "sales": [ { "date", "price" } ] } ],   // split BY GRADE
+  "acquisition": { "accepted": true } }                      // "Courtyard isn't
+                                                             //  buying this card"
+```
+
+**Error semantics are clean, and map onto our honesty rules:**
+* `404 {"message":"card details not found"}` — authoritative not_found. Em dash.
+* `502 {"message":"invalid response from gemrate"}` — TRANSIENT upstream failure.
+  Must NOT blank a price the user already saw (`PriceWriteback`'s rule).
+* The upstream is **GemRate** (pop-report aggregator) — hence `population` and
+  the grade-split history.
+
+**Verified across cards and graders** (2026-08-31):
+| cert | grader | result |
+|---|---|---|
+| 96679812 | PSA | $50.80 conf 2, 5 comp groups — the bar card |
+| 4260611176 | CGC | $111 conf 5, 9 comp groups |
+| 41066652 | PSA | $247 conf 4, 29 comp groups |
+| 133653550 | PSA | 404 not found |
+
+**This overturns §2's conclusions, and more besides:**
+1. **It is a catalog-backed pricing MODEL, not vault inventory.** Cert 41066652
+   was `burn`ed out of the vault and unfindable in Algolia by evening on 08-29 —
+   this endpoint prices it fine. The "cards age out" problem is gone.
+2. **CGC is answered.** §5 has CGC as "no public API, Turnstile-walled, source
+   undecided". This returns CGC identity, price and comps from the same call.
+3. **Cert-keyed identity, exact by construction.** No fuzzy matching, so the
+   whole `identify()` guessing problem disappears for this source — the cert IS
+   the key. The `identify()` bar still governs the ALGOLIA adapter.
+4. **Comps come free** — grade-split with population, in the same response, so
+   no second call and no `/index/asset/{id}/price-history` round trip.
+
+**CONFIRMED AGAINST THE APP ON DEVICE — 2026-08-31.** The owner scanned two
+slabs in Courtyard's own app and read the values off the screen; both match this
+endpoint exactly:
+
+| cert | app shows | endpoint returns |
+|---|---|---|
+| 96679812 (PSA 10 Curry) | $50.80, medium confidence | `price: 50.8`, `priceConfidence: "2"` |
+| 154334127 (PSA 9 Hamilton Sapphire) | "not applicable", low confidence, last sold May 16 2026 $145 as a PSA 10 | `price: 0`, `priceConfidence: "0"`, priceHistory grade 10 sale `2026-05-17T00:00:00Z` `$145.00` |
+
+Three rules fall out of the second card, and each is a bug waiting to happen:
+1. **`price: 0` + `priceConfidence: "0"` means NOT APPLICABLE, not $0.** The app
+   renders it as "not applicable". Map it to the em-dash no-price state — this is
+   the exact case the "never `$0`" rule exists for.
+2. **Confidence is 0-5 and the app BUCKETS it** to low/medium/high
+   (`scanner.confidence.{low,medium,high}`): observed 0 -> low, 2 -> medium. It is
+   not displayed as a raw number.
+3. **Sale dates are UTC midnight** (`...T00:00:00Z`) and the app renders them in
+   LOCAL time, so a naive UTC render shows a date one day later than Courtyard's
+   own app. Card 2's "May 16" is `2026-05-17T00:00:00Z`.
+
+And one found while reconciling: **`priceHistory` groups are per (grader, grade),
+not per grade** — cert 96679812 returns TWO grade-10 groups, PSA (pop 23) and SGC
+(pop 3). Every group repeats the SCANNED card's `title`, so the SGC group is
+labelled "(PSA g10)". Key comps off `group.grader` + `group.grade`; trusting
+`title` mislabels other graders' sales as PSA. Note also that comps may be for a
+DIFFERENT grade than the scanned slab (card 2 is a g9 whose only comps are g10),
+which the app handles by labelling the grade — so must we.
+
+**Access-model note for whoever writes the adapter:** `/scanner/*` is NOT subject
+to the block that hits `/index/*` and `/users/*` from consumer networks (see §2a)
+— it answered plain curl from a mobile hotspot throughout. It is also not
+Cloudflare-fingerprinted: no browser transport needed.
+
+**The account theory is retired, with evidence.** Connecting a Courtyard account
+is NOT required for pricing — the endpoint is public. The Privy OTP relay in
+§2a still works and is still the right design *if* a future feature needs a user
+session, but nothing in the price path needs it. Do not build
+`courtyard-connect` for pricing.
 
 ## 3. Physical slab scanning (needs iPhone + real PSA and CGC slabs)
 

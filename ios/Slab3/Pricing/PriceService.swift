@@ -3,7 +3,10 @@ import SwiftData
 
 /// Fetches a card's market prices and writes them back to the store. Two sources,
 /// fetched independently so one failing never blocks the other:
-///   • Courtyard — live, direct Algolia (public key), also auto-fills identity.
+///   • Courtyard — the SCANNER endpoint (cert-keyed, via courtyard-price), which is
+///     the price, the identity and the comps. Algolia is kept for the cert-keyed
+///     render image only; it indexes the marketplace, so it blanked most scanned
+///     cards and could match a different one (spike/README.md §2b).
 ///   • Card Ladder — server-side, bring-your-own-account: only fetched when the user
 ///     has connected their own CL account (see CardLadderConnectView).
 ///
@@ -16,7 +19,10 @@ import SwiftData
 /// (Card.PriceStatus). We still never fabricate a price (CLAUDE.md).
 @MainActor
 enum PriceService {
+    /// Algolia — retained for the cert-keyed render image only (see refreshCourtyard).
     private static let courtyard = CourtyardClient()
+    /// Courtyard's own scanner API: price + identity + comps in one call.
+    private static let scanner = CourtyardScannerClient()
     private static let cardLadder = CardLadderClient()
 
     /// Set true after a successful connect; cleared if the server reports the
@@ -45,7 +51,7 @@ enum PriceService {
         card.pricesLoading = true
         defer { card.pricesLoading = false }
         var result = Result()
-        result.courtyard = await refreshCourtyard(card)
+        result.courtyard = await refreshCourtyard(card, force: force)
         if includeCardLadder {
             result.cardLadder = await refreshCardLadder(card, force: force)
         } else {
@@ -57,59 +63,84 @@ enum PriceService {
     // MARK: Courtyard
 
     @discardableResult
-    private static func refreshCourtyard(_ card: Card) async -> PriceStatus {
-        switch await courtyard.lookup(
-            grader: card.grader,
-            certNumber: card.certNumber,
-            name: card.name,
-            set: card.set,
-            grade: card.grade,
-            year: card.year,
-            cardNumber: card.cardNumber
-        ) {
-        case .failed:
+    private static func refreshCourtyard(_ card: Card, force: Bool = false) async -> PriceStatus {
+        // Cert-keyed, so there is no matching to get wrong: the endpoint either
+        // knows this cert or it does not. That retires the whole `identify()`
+        // problem for this source — the Algolia path could only ever answer with
+        // "a slab of the same card", and when it guessed it priced someone else's.
+        switch await scanner.lookup(cert: card.certNumber, grader: card.grader, force: force) {
+        case .unavailable:
+            // Their GemRate upstream, or ours. Keeps the last value, marks stale.
             applyCourtyard(.unreachable, to: card)
             return .unavailable
 
-        case .notListed:
+        case .noPrice(let identity, let groups):
+            // Either Courtyard's catalog has no such cert, or it knows the card and
+            // has no model price — it says the latter with price 0 / confidence 0
+            // and its own app renders "not applicable". Both are authoritative and
+            // both show an em dash; neither is ever a $0.
             applyCourtyard(.notListed, to: card)
             card.courtyardConfidence = 0
-            if card.lookupStatus == .pending { card.lookupStatus = .needsConfirm }
-            return .notListed
-
-        case .match(let match):
-            applyCourtyard(.price(match.priceCents), to: card)
-            // On an exact cert match, prefer COURTYARD's own 1-5 confidence in
-            // its value — that is the number its app shows next to the price, and
-            // it says something we cannot know ourselves. Otherwise fall back to
-            // how the match was made: a grade+name hit is circumstantial, a fuzzy
-            // hit is barely evidence, and quoting Courtyard's confidence in a
-            // different card's value would overstate what we know.
-            // Only two tiers survive matching now (see CourtyardClient.bestMatch):
-            // this slab, or a different slab of the same card. A looser hit is
-            // no longer priced at all.
-            let matchConfidence = switch match.confidence {
-            case .exact: 5
-            case .probable: 3
-            case .fuzzy: 1
-            }
-            card.courtyardConfidence = match.sourceConfidence ?? matchConfidence
-
-            // Auto-fill identity from an exact/probable Courtyard match. The
-            // funnel decides what survives: Courtyard can fill what PSA left
-            // empty but never overwrite what PSA answered.
-            if match.confidence != .fuzzy {
-                if card.grade == nil { card.grade = match.grade }
-                card.setIdentity(
-                    name: match.name, title: match.title, set: match.set,
-                    year: match.year, cardNumber: match.cardNumber, from: .courtyard
-                )
-                await applyCourtyardImage(match, to: card)
-            } else if card.lookupStatus == .pending {
+            if let identity { applyScannerIdentity(identity, to: card) }
+            applyScannerSales(groups, to: card)
+            if card.lookupStatus == .pending, card.name == nil, card.title == nil {
                 card.lookupStatus = .needsConfirm
             }
+            await fillCourtyardImage(card)
+            return .notListed
+
+        case .ok(let price, let identity, let groups):
+            applyCourtyard(.price(price.valueCents), to: card)
+            // Courtyard's OWN 1-5 confidence — the figure its app buckets to
+            // low/medium/high. The old match-quality tiers are gone with the
+            // matching: a cert hit is this slab, so there is nothing to discount.
+            card.courtyardConfidence = price.confidence ?? 5
+            applyScannerIdentity(identity, to: card)
+            applyScannerSales(groups, to: card)
+            await fillCourtyardImage(card)
             return .ok
         }
+    }
+
+    /// Courtyard's cert-exact identity. Ranked below Card Ladder in the funnel
+    /// (both are cert-exact and should agree; CL is the paid, authoritative one),
+    /// so this FILLS what CL has not answered and never overwrites it.
+    private static func applyScannerIdentity(_ id: CourtyardScannerClient.Identity, to card: Card) {
+        card.setIdentity(
+            name: id.subject,          // the short name — feeds card_key
+            title: id.title,           // the long assembled one — display only
+            set: id.set,
+            year: id.year.flatMap { Int($0) },
+            // Already a bare number from the server. Before this source, Card
+            // Ladder was the only supplier of a grade at all — so a user with no
+            // CL account now gets one, and their card_key stops collapsing.
+            grade: id.grade,
+            cardNumber: id.cardNumber,
+            from: .courtyard
+        )
+    }
+
+    /// Comps for the slab's OWN grader and grade. Called AFTER the identity so the
+    /// grade it selects on is populated. A slab whose grade has no group gets [] —
+    /// a real answer ("Courtyard has no sales at this grade"), never another
+    /// grade's sales, which is what the panel would otherwise imply are this
+    /// card's.
+    private static func applyScannerSales(_ groups: [CourtyardScannerClient.SaleGroup], to card: Card) {
+        card.courtyardSales = CourtyardScannerClient.sales(
+            from: groups, grader: card.grader, grade: card.grade)
+    }
+
+    /// The cert-keyed render, still from Algolia — the one thing the scanner
+    /// endpoint does not give us (its `primaryImages` came back empty on every
+    /// card sampled). Only fetched when the row has no better picture already, so
+    /// the marketplace search is no longer on the price path.
+    private static func fillCourtyardImage(_ card: Card) async {
+        guard card.thumbnailData == nil || card.imageSource < .courtyard else { return }
+        guard case .match(let match) = await courtyard.lookup(
+            grader: card.grader, certNumber: card.certNumber, name: card.name,
+            set: card.set, grade: card.grade, year: card.year, cardNumber: card.cardNumber)
+        else { return }
+        await applyCourtyardImage(match, to: card)
     }
 
     /// Courtyard's render, but ONLY on an exact cert hit.
@@ -139,6 +170,11 @@ enum PriceService {
             title: identity.label,
             set: identity.set,
             year: identity.year.flatMap { Int($0) },
+            // The ONLY authoritative grade in the pipeline: the barcode carries a
+            // cert number and nothing else, and PSA's cert page is walled. Before
+            // 2026-08-31 the server dropped this field, so every card's grade was
+            // nil and card_key collapsed a PSA 9 onto a PSA 10.
+            grade: identity.grade,
             cardNumber: identity.cardNumber,
             from: .cardLadder
         )
@@ -162,10 +198,11 @@ enum PriceService {
             return .notConnected
         }
 
-        // Courtyard auto-fill can rewrite card_key (name replaces cert as the
-        // card id), so we deliberately price Card Ladder *after* Courtyard — the
-        // key we send is then the stable one the cache will be keyed under.
-        let outcome = await cardLadder.price(cert: card.certNumber, grader: card.grader, cardKey: card.cardKey, force: force)
+        // Order-independent since 2026-08-31: the server caches under Card
+        // Ladder's own {profileId}:{gradeCode}, resolved from the cert, so nothing
+        // Courtyard does to card_key can move the row this call reads. It used to
+        // matter, and getting it wrong is what served a PSA 9 the PSA 10's price.
+        let outcome = await cardLadder.price(cert: card.certNumber, grader: card.grader, force: force)
         switch outcome {
         case .ok(let price, let identity):
             applyCardLadder(.price(price.valueCents), to: card)
@@ -255,7 +292,7 @@ enum PriceService {
         }
 
         let outcome = await cardLadder.sales(
-            cert: card.certNumber, grader: card.grader, cardKey: card.cardKey, force: force)
+            cert: card.certNumber, grader: card.grader, force: force)
         switch outcome {
         case .ok(let sales):
             card.cardLadderSales = sales

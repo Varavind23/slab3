@@ -54,6 +54,48 @@ struct IdentityChainTests {
     /// card_key is the spine — byte-identical across SQL, Swift and TS — and it
     /// is derived from `name`, so a name change that didn't refresh it would
     /// silently orphan the card's cached prices.
+    // MARK: Grade (the V2 "a PSA 9 read as a PSA 10" report, 2026-08-31)
+
+    /// The defect in one test. `grade` was written straight onto the card by
+    /// PriceService, OUTSIDE this funnel, so a circumstantial Courtyard hit beat
+    /// Card Ladder's cert-resolved answer purely by finishing first.
+    @Test func gradeObeysTheSameRankRuleAsEverythingElse() {
+        let card = makeCard()
+        card.setIdentity(grade: "10", from: .courtyard)
+        card.setIdentity(grade: "9", from: .cardLadder)
+        #expect(card.grade == "9", "the cert-resolved grade wins")
+
+        let other = makeCard()
+        other.setIdentity(grade: "9", from: .cardLadder)
+        other.setIdentity(grade: "10", from: .courtyard)
+        #expect(other.grade == "9", "and a worse source cannot overwrite it either way round")
+    }
+
+    /// Why the grade mattered beyond the badge: it is a card_key segment, and the
+    /// key was the GLOBAL price cache's key. With no source populating a grade,
+    /// every grade of a card produced the same key ending in a bare ':' — so a
+    /// PSA 9 was served the PSA 10's price, identity, slab photograph and comps.
+    @Test func gradeSeparatesTheCardKey() {
+        let nine = makeCard()
+        nine.setIdentity(name: "Charizard-Holo", set: "Pokemon Game", grade: "9", from: .cardLadder)
+        let ten = makeCard()
+        ten.setIdentity(name: "Charizard-Holo", set: "Pokemon Game", grade: "10", from: .cardLadder)
+        #expect(nine.cardKey != ten.cardKey)
+        #expect(!nine.cardKey.hasSuffix(":"), "an empty grade segment is what collapsed them")
+    }
+
+    /// Each source spells the grade differently — Courtyard "10 GEM MINT", PSA
+    /// "PSA 9", Card Ladder the code "g9". They must land on one spelling or the
+    /// same card occupies two card_keys depending on who answered first.
+    @Test func everySourcesGradeNormalizesToABareNumber() {
+        #expect(GradeText.normalized("10 GEM MINT") == "10")
+        #expect(GradeText.normalized("PSA 9") == "9")
+        #expect(GradeText.normalized("g9") == "9")
+        #expect(GradeText.normalized("9.5") == "9.5")
+        #expect(GradeText.normalized("AUTH") == nil, "not a numeric grade — say nothing")
+        #expect(GradeText.normalized(nil) == nil)
+    }
+
     @Test func nameChangeRefreshesCardKey() {
         let card = makeCard()
         let before = card.cardKey

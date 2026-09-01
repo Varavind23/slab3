@@ -2,13 +2,27 @@
 //
 // Gating (ToS): only users who connected THEIR OWN Card Ladder account get a price —
 // even a cache hit is withheld from users without an active connection, so nobody
-// ever sees Card Ladder data their own subscription doesn't cover. Cache-first
-// (price_cache is global; the average is the same regardless of whose token fetched
-// it), then a per-user daily budget, then the verified Firebase callable flow. Every
-// failure is a typed status the app degrades on cleanly (the UI already renders a
-// no-price state).
+// ever sees Card Ladder data their own subscription doesn't cover.
+//
+// TWO caches, because Card Ladder answers two different questions (2026-08-31):
+//
+//   cl_resolve_cache   cert → profileId + grade + the card's details. A cert is
+//                      one physical slab, so this mapping never changes: cached
+//                      with NO TTL, and a rescanned slab costs no CL request.
+//   price_cache        {profileId}:{gradeCode} → the Value. 24h TTL, global,
+//                      shared by every slab of the same card at the same grade.
+//
+// That split is the fix for V2's "a PSA 9 shows the PSA 10's price". Both caches
+// used to be keyed on `card_key`, which is rebuilt in the app from text fields and
+// carried NO grade at all (no source populated one — see clSourceKey's header), so
+// every grade of a card collapsed onto one global row and whichever grade was
+// scanned first answered for all of them. Keying on what Card Ladder itself uses
+// makes that class of collision impossible rather than merely less likely.
+//
+// Every failure is a typed status the app degrades on cleanly (the UI already
+// renders a no-price state).
 
-import { lookupCardValue, ClError } from "../_shared/cardladder.ts";
+import { resolveCert, estimate, clSourceKey, ClError, type ClCardIdentity } from "../_shared/cardladder.ts";
 import { acquireIdToken, type SessionState } from "../_shared/session.ts";
 import { admin, callerId, encKey, json } from "../_shared/http.ts";
 
@@ -21,11 +35,44 @@ const METRIC = "cl_value" as const;
 interface Body {
   cert: string;
   grader: "psa" | "cgc";
-  cardKey: string;
   /** Manual refresh: skip the cache READ so the user gets a genuinely current
    *  value. The budget check still applies and the result still updates the cache. */
   force?: boolean;
+  /** Accepted and ignored. Older builds send the app's card_key here; it is no
+   *  longer a cache key for any source. Kept optional so a TestFlight build in the
+   *  field keeps working after this function deploys. */
+  cardKey?: string;
 }
+
+/** The identity block the app shows, including the GRADE — the only authoritative
+ *  grade the pipeline gets, since the barcode carries a cert number and nothing
+ *  else and PSA's cert page is walled. It rides this call; never fetch it
+ *  separately, which would burn the daily budget. */
+const identityOf = (r: {
+  grade_label?: string | null; label?: string | null; player?: string | null;
+  card_set?: string | null; card_year?: string | null; card_number?: string | null;
+  image_url?: string | null;
+}) => ({
+  grade: r.grade_label ?? undefined,
+  label: r.label ?? undefined,
+  player: r.player ?? undefined,
+  set: r.card_set ?? undefined,
+  year: r.card_year ?? undefined,
+  cardNumber: r.card_number ?? undefined,
+  imageUrl: r.image_url ?? undefined,
+});
+
+const rowOf = (id: ClCardIdentity) => ({
+  profile_id: id.profileId,
+  grade: id.grade,
+  grade_label: id.gradeLabel ?? null,
+  label: id.label ?? null,
+  player: id.player ?? null,
+  card_set: id.set ?? null,
+  card_year: id.year ?? null,
+  card_number: id.number ?? null,
+  image_url: id.imageUrl ?? null,
+});
 
 Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ status: "method_not_allowed" }, 405);
@@ -39,8 +86,8 @@ Deno.serve(async (req) => {
   } catch {
     return json({ status: "bad_request" }, 400);
   }
-  const { cert, grader, cardKey, force = false } = body;
-  if (!cert || !grader || !cardKey) return json({ status: "bad_request" }, 400);
+  const { cert, grader, force = false } = body;
+  if (!cert || !grader) return json({ status: "bad_request" }, 400);
 
   const db = admin();
 
@@ -52,71 +99,52 @@ Deno.serve(async (req) => {
     .maybeSingle();
   if (!cred) return json({ status: "not_connected" });
 
-  // The identity block the app shows: Card Ladder's own label/player and its
-  // canonical card render. It rides this price call — NEVER fetch it separately,
-  // which would burn the daily budget and read to the user as prices going blank.
-  const identityOf = (row: Record<string, unknown> | null | undefined) =>
-    row
-      ? {
-          label: row.label ?? undefined,
-          player: row.player ?? undefined,
-          set: row.card_set ?? undefined,
-          year: row.card_year ?? undefined,
-          cardNumber: row.card_number ?? undefined,
-          imageUrl: row.image_url ?? undefined,
-        }
-      : undefined;
+  // 2) Who is this slab? Cert-keyed and immutable, so a known cert answers from
+  //    cache with no token, no network and no budget — which is also what lets
+  //    the price cache below be checked under the RIGHT key before we spend
+  //    anything. A forced refresh does NOT re-resolve: the cert→card mapping
+  //    cannot go stale, and re-resolving would spend the budget the user is
+  //    forcing a refresh in order to spend on the price.
+  const { data: known } = await db
+    .from("cl_resolve_cache")
+    .select("profile_id, grade, grade_label, label, player, card_set, card_year, card_number, image_url")
+    .eq("grader", grader)
+    .eq("cert", cert)
+    .maybeSingle();
 
-  // 2) Cache-first: a fresh, ok'd global row serves everyone connected.
-  //    A forced (manual) refresh skips this read and goes to the source.
-  const { data: cached } = force
-    ? { data: null }
-    : await db
-        .from("price_cache")
-        .select("price_cents, as_of, fetch_status, updated_at, metric, last_sale_cents, last_sale_at, source_confidence")
-        .eq("card_key", cardKey)
-        .eq("source", "cardladder")
-        .maybeSingle();
-  // A row cached under a DIFFERENT metric is not this metric's answer, however
-  // fresh it is. Without this the 2026-08-29 switch was invisible: every card
-  // kept replaying its `average_sale` row for the full 24h TTL, relabelled as
-  // cl_value — and a card whose average window was empty (cached `not_found`,
-  // e.g. cert 96679812) kept reporting no Card Ladder price at all, which is
-  // precisely the bug the metric change existed to fix. Comparing the metric
-  // makes any future change self-healing instead of needing a manual purge.
-  const usable = cached && cached.metric === METRIC;
-  if (usable && Date.now() - new Date(cached.updated_at).getTime() < CACHE_TTL_MS) {
-    if (cached.fetch_status === "ok" && cached.price_cents != null) {
-      // Serve the stored identity too, or a cached price leaves the row anonymous.
-      const { data: known } = await db
-        .from("card_identity_map")
-        .select("label, player, card_set, card_year, card_number, image_url")
-        .eq("card_key", cardKey)
-        .eq("source", "cardladder")
-        .maybeSingle();
-      return json({
-        status: "ok", priceCents: cached.price_cents, metric: METRIC,
-        asOf: cached.as_of, cached: true, identity: identityOf(known),
-        lastSaleCents: cached.last_sale_cents ?? null,
-        lastSaleAt: cached.last_sale_at ?? null,
-        confidence: cached.source_confidence ?? null,
-      });
-    }
-    if (cached.fetch_status === "not_found") {
-      // A cached "no price" still has a name if we ever resolved one. Card Ladder
-      // is the only source naming cards while PSA is walled, so dropping it here
-      // would leave the row anonymous for the whole TTL.
-      const { data: known } = await db
-        .from("card_identity_map")
-        .select("label, player, card_set, card_year, card_number, image_url")
-        .eq("card_key", cardKey)
-        .eq("source", "cardladder")
-        .maybeSingle();
-      return json({ status: "not_found", cached: true, identity: identityOf(known) });
+  // 3) Cache-first on the price, but only once we know the key it lives under.
+  if (known && !force) {
+    const { data: cached } = await db
+      .from("price_cache")
+      .select("price_cents, as_of, fetch_status, updated_at, metric, last_sale_cents, last_sale_at, source_confidence")
+      .eq("source_key", clSourceKey(known.profile_id, known.grade))
+      .eq("source", "cardladder")
+      .maybeSingle();
+    // A row cached under a DIFFERENT metric is not this metric's answer, however
+    // fresh it is. Without this the 2026-08-29 switch was invisible: every card
+    // kept replaying its `average_sale` row for the full 24h TTL, relabelled as
+    // cl_value. Comparing the metric makes any future change self-healing.
+    if (cached && cached.metric === METRIC &&
+        Date.now() - new Date(cached.updated_at).getTime() < CACHE_TTL_MS) {
+      if (cached.fetch_status === "ok" && cached.price_cents != null) {
+        return json({
+          status: "ok", priceCents: cached.price_cents, metric: METRIC,
+          asOf: cached.as_of, cached: true, identity: identityOf(known),
+          lastSaleCents: cached.last_sale_cents ?? null,
+          lastSaleAt: cached.last_sale_at ?? null,
+          confidence: cached.source_confidence ?? null,
+        });
+      }
+      if (cached.fetch_status === "not_found") {
+        // A cached "no price" still has a name, a grade and a picture. Card Ladder
+        // is the only source naming cards while PSA is walled, so dropping the
+        // identity here would leave the row anonymous for the whole TTL.
+        return json({ status: "not_found", cached: true, identity: identityOf(known) });
+      }
     }
   }
 
-  // 3) Per-user daily budget.
+  // 4) Per-user daily budget.
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
   const windowStart = today.toISOString();
@@ -129,7 +157,7 @@ Deno.serve(async (req) => {
     .maybeSingle();
   if (budget && budget.request_count >= DAILY_CAP) return json({ status: "rate_limited" });
 
-  // 4) Acquire a valid ID token (refresh-first, sign-in fallback).
+  // 5) Acquire a valid ID token (refresh-first, sign-in fallback).
   let idToken: string, sessionState: SessionState;
   try {
     ({ idToken, sessionState } = await acquireIdToken(cred, encKey()));
@@ -150,94 +178,82 @@ Deno.serve(async (req) => {
     .update({ session_state: sessionState, last_ok_at: new Date().toISOString(), failure_count: 0, updated_at: new Date().toISOString() })
     .eq("user_id", userId);
 
-  // 5) Resolve + estimate.
-  const result = await lookupCardValue(idToken, cert, grader);
-
-  // Count the request against the budget (any outbound lookup counts).
-  await db
-    .from("scrape_budget")
-    .upsert(
+  // One outbound lookup = one unit of budget, whether or not it needed a resolve
+  // as well. The cap is a ceiling on how many CARDS a user prices in a day, which
+  // is what they actually experience; counting Card Ladder callables instead would
+  // silently halve it.
+  const spend = () =>
+    db.from("scrape_budget").upsert(
       { source: "cardladder", user_id: userId, window_start: windowStart, request_count: (budget?.request_count ?? 0) + 1, cap: DAILY_CAP },
       { onConflict: "source,user_id,window_start" },
     );
 
-  const nowIso = new Date().toISOString();
-  if (result.kind === "ok") {
-    await db.from("price_cache").upsert({
-      card_key: cardKey,
-      source: "cardladder",
-      metric: METRIC,
-      price_cents: result.priceCents,
-      as_of: result.asOf,
-      fetch_status: "ok",
-      last_sale_cents: result.estimate.lastSalePriceCents,
-      last_sale_at: result.estimate.lastSaleAt,
-      source_confidence: result.estimate.confidence,
-      updated_at: nowIso,
-    });
-    await db.from("card_identity_map").upsert({
-      card_key: cardKey,
-      source: "cardladder",
-      source_canonical_id: result.profileId,
-      confidence: "exact",
-      label: result.identity.label ?? null,
-      player: result.identity.player ?? null,
-      card_set: result.identity.set ?? null,
-      card_year: result.identity.year ?? null,
-      card_number: result.identity.number ?? null,
-      image_url: result.identity.imageUrl ?? null,
-      updated_at: nowIso,
-    });
-    return json({
-      status: "ok", priceCents: result.priceCents, metric: METRIC, asOf: result.asOf,
-      lastSaleCents: result.estimate.lastSalePriceCents,
-      lastSaleAt: result.estimate.lastSaleAt,
-      confidence: result.estimate.confidence,
-      identity: {
-        label: result.identity.label, player: result.identity.player,
-        set: result.identity.set, year: result.identity.year,
-        cardNumber: result.identity.number, imageUrl: result.identity.imageUrl,
-      },
-    });
-  }
-
-  if (result.kind === "not_found") {
-    await db.from("price_cache").upsert({
-      card_key: cardKey,
-      source: "cardladder",
-      metric: METRIC,
-      price_cents: null,
-      as_of: nowIso,
-      fetch_status: "not_found",
-      updated_at: nowIso,
-    });
-    // "No comps" is not "no card". When Card Ladder resolved the cert but has no
-    // recent sales, keep and return what it told us about the card.
-    if (result.identity) {
-      await db.from("card_identity_map").upsert({
-        card_key: cardKey,
-        source: "cardladder",
-        source_canonical_id: result.identity.profileId,
-        confidence: "exact",
-        label: result.identity.label ?? null,
-        player: result.identity.player ?? null,
-        card_set: result.identity.set ?? null,
-        card_year: result.identity.year ?? null,
-        card_number: result.identity.number ?? null,
-        image_url: result.identity.imageUrl ?? null,
-        updated_at: nowIso,
-      });
+  // 6) Resolve the cert if we have never seen it.
+  let identity: ClCardIdentity | null;
+  if (known) {
+    identity = {
+      profileId: known.profile_id, grade: known.grade, grader,
+      gradeLabel: known.grade_label ?? undefined,
+      label: known.label ?? undefined, player: known.player ?? undefined,
+      set: known.card_set ?? undefined, year: known.card_year ?? undefined,
+      number: known.card_number ?? undefined, imageUrl: known.image_url ?? undefined,
+    };
+  } else {
+    try {
+      identity = await resolveCert(idToken, cert, grader);
+    } catch (e) {
+      await spend();
+      return json({ status: statusFor(e) });
     }
-    return json({
-      status: "not_found",
-      identity: result.identity && {
-        label: result.identity.label, player: result.identity.player,
-        set: result.identity.set, year: result.identity.year,
-        cardNumber: result.identity.number, imageUrl: result.identity.imageUrl,
-      },
+    if (!identity) {
+      // Genuinely unknown cert. Nothing to cache: an unresolvable cert is more
+      // often a mis-scan than a card Card Ladder has never heard of, and caching
+      // it would make a one-off misread permanent.
+      await spend();
+      return json({ status: "not_found" });
+    }
+    await db.from("cl_resolve_cache").upsert({
+      grader, cert, ...rowOf(identity), fetched_at: new Date().toISOString(),
     });
   }
 
-  // rate_limited / auth_expired / network → typed degraded state; don't poison cache.
-  return json({ status: result.error === "rate_limited" ? "rate_limited" : result.error === "auth_expired" ? "auth_expired" : "source_error" });
+  // 7) Estimate — the part that is actually per-card-per-grade and actually stale.
+  const sourceKey = clSourceKey(identity.profileId, identity.grade);
+  const nowIso = new Date().toISOString();
+  try {
+    const est = await estimate(idToken, identity);
+    await spend();
+    if (est.clValueCents === null) {
+      await db.from("price_cache").upsert({
+        source_key: sourceKey, source: "cardladder", metric: METRIC,
+        price_cents: null, as_of: nowIso, fetch_status: "not_found", updated_at: nowIso,
+      });
+      // "No comps" is not "no card" — the identity stands on its own.
+      return json({ status: "not_found", identity: identityOf(rowOf(identity)) });
+    }
+    await db.from("price_cache").upsert({
+      source_key: sourceKey, source: "cardladder", metric: METRIC,
+      price_cents: est.clValueCents, as_of: est.asOf, fetch_status: "ok",
+      last_sale_cents: est.lastSalePriceCents, last_sale_at: est.lastSaleAt,
+      source_confidence: est.confidence, updated_at: nowIso,
+    });
+    return json({
+      status: "ok", priceCents: est.clValueCents, metric: METRIC, asOf: est.asOf,
+      lastSaleCents: est.lastSalePriceCents, lastSaleAt: est.lastSaleAt,
+      confidence: est.confidence, identity: identityOf(rowOf(identity)),
+    });
+  } catch (e) {
+    // Transient failure: don't poison the cache. The app keeps the last known
+    // number and marks the column stale, so it wants nothing from us here.
+    await spend();
+    return json({ status: statusFor(e) });
+  }
 });
+
+/** Typed CL failure → the degraded status the app already handles. */
+function statusFor(e: unknown): string {
+  const kind = e instanceof ClError ? e.kind : "network";
+  if (kind === "rate_limited") return "rate_limited";
+  if (kind === "auth_expired" || kind === "invalid_credentials") return "auth_expired";
+  return "source_error";
+}

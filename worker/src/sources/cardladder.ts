@@ -30,6 +30,8 @@ export {
   lookupCardValue,
   fetchProfileSales,
   parseResolve,
+  clSourceKey,
+  displayGrade,
   cardImage,
   parseEstimate,
   parseSales,

@@ -308,6 +308,7 @@ final class Card {
         title: String? = nil,
         set: String? = nil,
         year: Int? = nil,
+        grade: String? = nil,
         cardNumber: String? = nil,
         from source: IdentitySource
     ) {
@@ -321,9 +322,15 @@ final class Card {
         self.title = take(title?.isEmpty == false ? title : nil, self.title)
         self.set = take(set?.isEmpty == false ? set : nil, self.set)
         self.year = take(year, self.year)
+        // Grade goes through the same funnel as everything else. It used to be
+        // written straight onto the card by PriceService, outside the rank rule,
+        // so a circumstantial Courtyard hit could beat Card Ladder's cert-resolved
+        // answer. Every source now states it as a bare number ("9", "10", "9.5")
+        // so the badge, the comps header and card_key all agree on one spelling.
+        self.grade = take(grade?.isEmpty == false ? grade : nil, self.grade)
         self.cardNumber = take(cardNumber?.isEmpty == false ? cardNumber : nil, self.cardNumber)
         if source > identitySource { identitySource = source }
-        // name feeds the key, so any change to it has to be reflected.
+        // name AND grade feed the key, so any change to either has to be reflected.
         refreshCardKey()
         // Identified is identified, whatever else failed on the way. This used to
         // promote only from `.pending`, which meant a PSA failure stamping

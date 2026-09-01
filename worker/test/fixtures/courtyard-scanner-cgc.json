@@ -1,0 +1,223 @@
+{
+    "priceModel": {
+        "price": 111,
+        "priceConfidence": "5",
+        "gemrateDescription": "2018 GX Starter Decks - Japanese Charizard GX Fire Charizard GX Deck (Non-Holo) 013/131"
+    },
+    "graderData": {
+        "id": "CGC_4260611176",
+        "grader": "CGC",
+        "cert": "4260611176",
+        "title": "2018 GX Starter Decks - Japanese #013/131 Charizard GX - (CGC g10pristine)",
+        "subject": "Charizard GX",
+        "cardNumber": "013/131",
+        "set": "GX Starter Decks - Japanese",
+        "language": "",
+        "category": "pok\u00e9mon",
+        "year": "2018",
+        "grade": "g10pristine",
+        "population": 380,
+        "primaryImages": []
+    },
+    "priceHistory": [
+        {
+            "title": "2018 GX Starter Decks - Japanese #013/131 Charizard GX - (CGC g10pristine)",
+            "grader": "CGC",
+            "grade": "10",
+            "population": 97,
+            "sales": [
+                {
+                    "date": "2024-11-03T00:00:00Z",
+                    "price": "28.99"
+                },
+                {
+                    "date": "2025-03-29T00:00:00Z",
+                    "price": "35.00"
+                },
+                {
+                    "date": "2025-05-25T00:00:00Z",
+                    "price": "25.20"
+                },
+                {
+                    "date": "2025-06-01T00:00:00Z",
+                    "price": "27.60"
+                },
+                {
+                    "date": "2025-11-30T00:00:00Z",
+                    "price": "34.80"
+                },
+                {
+                    "date": "2025-12-28T00:00:00Z",
+                    "price": "33.60"
+                },
+                {
+                    "date": "2026-03-29T00:00:00Z",
+                    "price": "40.80"
+                },
+                {
+                    "date": "2026-04-07T00:00:00Z",
+                    "price": "145.00"
+                },
+                {
+                    "date": "2026-04-11T00:00:00Z",
+                    "price": "49.99"
+                }
+            ]
+        },
+        {
+            "title": "2018 GX Starter Decks - Japanese #013/131 Charizard GX - (CGC g10pristine)",
+            "grader": "CGC",
+            "grade": "10pristine",
+            "population": 0,
+            "sales": [
+                {
+                    "date": "2024-06-20T00:00:00Z",
+                    "price": "60.00"
+                },
+                {
+                    "date": "2025-01-25T00:00:00Z",
+                    "price": "42.00"
+                },
+                {
+                    "date": "2026-08-27T00:00:00Z",
+                    "price": "130.00"
+                }
+            ]
+        },
+        {
+            "title": "2018 GX Starter Decks - Japanese #013/131 Charizard GX - (CGC g10pristine)",
+            "grader": "CGC",
+            "grade": "6",
+            "population": 11,
+            "sales": [
+                {
+                    "date": "2025-12-02T00:00:00Z",
+                    "price": "7.00"
+                },
+                {
+                    "date": "2025-12-08T00:00:00Z",
+                    "price": "7.00"
+                }
+            ]
+        },
+        {
+            "title": "2018 GX Starter Decks - Japanese #013/131 Charizard GX - (CGC g10pristine)",
+            "grader": "CGC",
+            "grade": "7",
+            "population": 10,
+            "sales": [
+                {
+                    "date": "2026-02-10T00:00:00Z",
+                    "price": "15.00"
+                },
+                {
+                    "date": "2026-06-21T00:00:00Z",
+                    "price": "12.00"
+                }
+            ]
+        },
+        {
+            "title": "2018 GX Starter Decks - Japanese #013/131 Charizard GX - (CGC g10pristine)",
+            "grader": "CGC",
+            "grade": "7.5",
+            "population": 25,
+            "sales": [
+                {
+                    "date": "2025-03-28T00:00:00Z",
+                    "price": "27.00"
+                },
+                {
+                    "date": "2025-03-28T00:00:00Z",
+                    "price": "27.00"
+                }
+            ]
+        },
+        {
+            "title": "2018 GX Starter Decks - Japanese #013/131 Charizard GX - (CGC g10pristine)",
+            "grader": "CGC",
+            "grade": "8",
+            "population": 42,
+            "sales": [
+                {
+                    "date": "2024-09-19T00:00:00Z",
+                    "price": "10.80"
+                }
+            ]
+        },
+        {
+            "title": "2018 GX Starter Decks - Japanese #013/131 Charizard GX - (CGC g10pristine)",
+            "grader": "CGC",
+            "grade": "8.5",
+            "population": 53,
+            "sales": [
+                {
+                    "date": "2025-02-21T00:00:00Z",
+                    "price": "15.00"
+                },
+                {
+                    "date": "2025-09-22T00:00:00Z",
+                    "price": "14.74"
+                },
+                {
+                    "date": "2026-07-05T00:00:00Z",
+                    "price": "15.60"
+                }
+            ]
+        },
+        {
+            "title": "2018 GX Starter Decks - Japanese #013/131 Charizard GX - (CGC g10pristine)",
+            "grader": "CGC",
+            "grade": "9",
+            "population": 98,
+            "sales": [
+                {
+                    "date": "2025-04-29T00:00:00Z",
+                    "price": "10.50"
+                },
+                {
+                    "date": "2025-05-25T00:00:00Z",
+                    "price": "14.40"
+                },
+                {
+                    "date": "2026-02-05T00:00:00Z",
+                    "price": "24.00"
+                },
+                {
+                    "date": "2026-04-07T00:00:00Z",
+                    "price": "20.00"
+                },
+                {
+                    "date": "2026-05-29T00:00:00Z",
+                    "price": "8.50"
+                },
+                {
+                    "date": "2026-05-31T00:00:00Z",
+                    "price": "18.99"
+                }
+            ]
+        },
+        {
+            "title": "2018 GX Starter Decks - Japanese #013/131 Charizard GX - (CGC g10pristine)",
+            "grader": "CGC",
+            "grade": "9.5",
+            "population": 12,
+            "sales": [
+                {
+                    "date": "2026-02-10T00:00:00Z",
+                    "price": "15.50"
+                },
+                {
+                    "date": "2026-03-04T00:00:00Z",
+                    "price": "10.00"
+                },
+                {
+                    "date": "2026-06-21T00:00:00Z",
+                    "price": "33.60"
+                }
+            ]
+        }
+    ],
+    "acquisition": {
+        "accepted": true
+    }
+}

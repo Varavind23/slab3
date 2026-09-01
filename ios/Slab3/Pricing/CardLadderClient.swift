@@ -71,6 +71,14 @@ struct CardLadderClient {
     /// experiences as prices going blank. Card Ladder is the only one of the
     /// three sources that answers for CGC slabs at all.
     struct Identity: Equatable, Decodable {
+        /// The card's GRADE as a bare number — "9", "10", "9.5".
+        ///
+        /// Card Ladder is the only source that can supply this. The slab's barcode
+        /// carries a cert number and nothing else, and PSA's cert page — the
+        /// obvious answer — has been 403-walled since 2026-08-28. Until 2026-08-31
+        /// the server dropped the field, so `Card.grade` was nil for every card
+        /// ever scanned; see the migration 20260831000000 for what that cost.
+        let grade: String?
         let label: String?      // "1986 Fleer #73 Kevin Mchale" — assembled title
         let player: String?     // "Kevin McHale" — the short name
         let set: String?
@@ -101,8 +109,14 @@ struct CardLadderClient {
     ///
     /// `force` skips the server's 24h cache read — used by manual refresh so the
     /// user gets a genuinely current number rather than a replayed one.
-    func price(cert: String, grader: Grader, cardKey: String, force: Bool = false) async -> PriceOutcome {
-        struct Body: Encodable { let cert: String; let grader: String; let cardKey: String; let force: Bool }
+    ///
+    /// No card_key is sent: the server caches under Card Ladder's own
+    /// `{profileId}:{gradeCode}`, resolved from the cert. The app's card_key was
+    /// the cache key until 2026-08-31 and could not do the job — it is rebuilt
+    /// from text fields and carried no grade, so a PSA 9 was served the PSA 10's
+    /// row. That also removes the ordering rule this call used to live under.
+    func price(cert: String, grader: Grader, force: Bool = false) async -> PriceOutcome {
+        struct Body: Encodable { let cert: String; let grader: String; let force: Bool }
         struct Reply: Decodable {
             let status: String
             let priceCents: Int?
@@ -116,7 +130,7 @@ struct CardLadderClient {
         do {
             let reply: Reply = try await Backend.client.functions.invoke(
                 "cardladder-price",
-                options: .init(body: Body(cert: cert, grader: grader.rawValue, cardKey: cardKey, force: force))
+                options: .init(body: Body(cert: cert, grader: grader.rawValue, force: force))
             )
             switch reply.status {
             case "ok":
@@ -153,8 +167,8 @@ struct CardLadderClient {
     /// bulk refresh. It is a second Card Ladder request per card, and the daily
     /// budget is 200; spending it on comps nobody opened would read to the user
     /// as prices going blank. See supabase/functions/cardladder-sales.
-    func sales(cert: String, grader: Grader, cardKey: String, force: Bool = false) async -> SalesOutcome {
-        struct Body: Encodable { let cert: String; let grader: String; let cardKey: String; let force: Bool }
+    func sales(cert: String, grader: Grader, force: Bool = false) async -> SalesOutcome {
+        struct Body: Encodable { let cert: String; let grader: String; let force: Bool }
         struct Sale: Decodable {
             let priceCents: Int
             /// String for the same reason as lastSaleAt above.
@@ -168,7 +182,7 @@ struct CardLadderClient {
         do {
             let reply: Reply = try await Backend.client.functions.invoke(
                 "cardladder-sales",
-                options: .init(body: Body(cert: cert, grader: grader.rawValue, cardKey: cardKey, force: force))
+                options: .init(body: Body(cert: cert, grader: grader.rawValue, force: force))
             )
             switch reply.status {
             case "ok":

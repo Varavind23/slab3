@@ -34,6 +34,7 @@
 		3D10BE8D549CE61E97641DAC /* PriceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98A3E0E69BB2070CBB599462 /* PriceService.swift */; };
 		3DF61CCF7EA3D6B21A7457FB /* ScanGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0359733CBB800254024ACB8 /* ScanGeometry.swift */; };
 		3F5D6E940524E93F57854AE4 /* CaliperComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 883DA9E93F93E97CBE92B077 /* CaliperComponents.swift */; };
+		4179EF6215E2DF181CACC0E7 /* GradeText.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7DF7D1A002F34ACE1D1A77C /* GradeText.swift */; };
 		47DC05E89D3C632651AC7FE5 /* CardKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 798032DAAC31DEFD638960BC /* CardKey.swift */; };
 		48E0B0F9315C51FFC3873094 /* FiltersSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7415FBF64C2042D4B9848E5 /* FiltersSheet.swift */; };
 		51F651B90F2AA7F5B870F616 /* ScanController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEFE7B251A77514FD26E1F4F /* ScanController.swift */; };
@@ -49,6 +50,7 @@
 		75BED109AA1EE89901CD6B73 /* AuthScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 658AFF391A3D5F375DA851D2 /* AuthScreen.swift */; };
 		775F74D54CE356F40E0429B7 /* CameraSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 484401D422E983A22E496B06 /* CameraSession.swift */; };
 		7B6E4D3F047D201741155E1A /* CardsScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = F18B844D54873207894A1174 /* CardsScreen.swift */; };
+		7EA04D290D4A0AF366609AB3 /* CourtyardScannerClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75F94F2CED6113EC0C7ECBAC /* CourtyardScannerClient.swift */; };
 		7F432087D9128905BEE041E7 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F3BEAA0D73A7F4FD4F274D9 /* AppState.swift */; };
 		7FA02FE87A7CED224AF39F5A /* Backend.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4B7EE9098929151F5C0E1CD /* Backend.swift */; };
 		8752A0C8711B1C13ADCFC4A4 /* DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = F663C262CDD9A3E33B4E4E35 /* DesignTokens.swift */; };
@@ -88,8 +90,10 @@
 		D0A00B5EEA8E28652E724F2B /* CourtyardClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5582A25EEBE1AEFFA653BC8B /* CourtyardClientTests.swift */; };
 		D6734CE574FEEB07A6D81A06 /* SettingsScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DA1684FFD36C9502EB2FF68 /* SettingsScreen.swift */; };
 		D8D02CD726343F03D657C367 /* IdentityChainTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92EBC5B58905E63350DB3E65 /* IdentityChainTests.swift */; };
+		DBB75C66CEEDD5CF8D7702A3 /* CourtyardScannerClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75F94F2CED6113EC0C7ECBAC /* CourtyardScannerClient.swift */; };
 		DC530A22F5B757EA4D42B02B /* RecentCertWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E31383E440085EB89CF57BE /* RecentCertWindow.swift */; };
 		DC54C3E711709E3BFFA42940 /* PriceRefresher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97CCFD7E101B4239277207A0 /* PriceRefresher.swift */; };
+		DD18EED8A90F814B7BBFEC5D /* GradeText.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7DF7D1A002F34ACE1D1A77C /* GradeText.swift */; };
 		DDAEE9328B8690D543A9C4D3 /* PriceWriteback.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EFE27B739F31EE230328B20 /* PriceWriteback.swift */; };
 		E2D36845430204BF73B4B62F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 9B72E4F9B0CD5841954ABFB0 /* Assets.xcassets */; };
 		E42A937DC61B84B5C471B2F9 /* CardRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CB7ACDEB9DCC17D5FEFF24D /* CardRow.swift */; };
@@ -144,6 +148,7 @@
 		71C21BEC4746B70E38C0F3BE /* Card.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Card.swift; sourceTree = "<group>"; };
 		72023CD6735DFED270E3DF92 /* Slab3.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Slab3.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		75F77283EDEF3B7FE0479EB6 /* CaliperType.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaliperType.swift; sourceTree = "<group>"; };
+		75F94F2CED6113EC0C7ECBAC /* CourtyardScannerClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CourtyardScannerClient.swift; sourceTree = "<group>"; };
 		798032DAAC31DEFD638960BC /* CardKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardKey.swift; sourceTree = "<group>"; };
 		7BD7F531EC812D969ABA48B2 /* Grader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Grader.swift; sourceTree = "<group>"; };
 		883DA9E93F93E97CBE92B077 /* CaliperComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaliperComponents.swift; sourceTree = "<group>"; };
@@ -160,6 +165,7 @@
 		B335CF12556D631CEEF0CEB7 /* SplashView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplashView.swift; sourceTree = "<group>"; };
 		B7415FBF64C2042D4B9848E5 /* FiltersSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FiltersSheet.swift; sourceTree = "<group>"; };
 		B786DDE4DC3E91F713F96B1A /* ExportScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportScreen.swift; sourceTree = "<group>"; };
+		B7DF7D1A002F34ACE1D1A77C /* GradeText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GradeText.swift; sourceTree = "<group>"; };
 		C167D5B3B7AF79C3AF256445 /* SlabFrameCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SlabFrameCapture.swift; sourceTree = "<group>"; };
 		DE37174001772495786A18F0 /* SalesPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SalesPanel.swift; sourceTree = "<group>"; };
 		E4B7EE9098929151F5C0E1CD /* Backend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Backend.swift; sourceTree = "<group>"; };
@@ -238,6 +244,7 @@
 			children = (
 				4A691D4B5EEE0D804781EE4C /* CardLadderClient.swift */,
 				4A46048FD3741C53E6D12137 /* CourtyardClient.swift */,
+				75F94F2CED6113EC0C7ECBAC /* CourtyardScannerClient.swift */,
 				97CCFD7E101B4239277207A0 /* PriceRefresher.swift */,
 				98A3E0E69BB2070CBB599462 /* PriceService.swift */,
 				9EFE27B739F31EE230328B20 /* PriceWriteback.swift */,
@@ -285,6 +292,7 @@
 			children = (
 				798032DAAC31DEFD638960BC /* CardKey.swift */,
 				235A7285F6988D3EB121AC61 /* CSVExport.swift */,
+				B7DF7D1A002F34ACE1D1A77C /* GradeText.swift */,
 				E959DC4D72F31DB98D47A198 /* ImageDownscale.swift */,
 				63E7F62160830A9F6CFCB587 /* ISO8601.swift */,
 			);
@@ -522,10 +530,12 @@
 				11B153849EAF424603F9C6C2 /* CardsScreen.swift in Sources */,
 				F2558025F5FDB3AA6947484E /* CertParser.swift in Sources */,
 				103079BE575D9B2818185563 /* CourtyardClient.swift in Sources */,
+				7EA04D290D4A0AF366609AB3 /* CourtyardScannerClient.swift in Sources */,
 				98407B922A088892094E8075 /* DesignTokens.swift in Sources */,
 				A9D2D47ECCBA161EAE5CF2F2 /* ExportScreen.swift in Sources */,
 				9BF726DC067A94DDEDE2E34D /* FiltersSheet.swift in Sources */,
 				EE6858D5534F4F4EE2B1D06D /* Folder.swift in Sources */,
+				4179EF6215E2DF181CACC0E7 /* GradeText.swift in Sources */,
 				348A7428F459A2A4703F3ED1 /* Grader.swift in Sources */,
 				A77CC8A4CF20C3230CF4FB5E /* ISO8601.swift in Sources */,
 				87C51F658CF18F40D0241A9A /* ImageDownscale.swift in Sources */,
@@ -570,10 +580,12 @@
 				7B6E4D3F047D201741155E1A /* CardsScreen.swift in Sources */,
 				08C8CFA06669110E501C29F5 /* CertParser.swift in Sources */,
 				EF6A8128F0F2713D54756FA0 /* CourtyardClient.swift in Sources */,
+				DBB75C66CEEDD5CF8D7702A3 /* CourtyardScannerClient.swift in Sources */,
 				8752A0C8711B1C13ADCFC4A4 /* DesignTokens.swift in Sources */,
 				CD5E758CF636BD6BDAF1A4E8 /* ExportScreen.swift in Sources */,
 				48E0B0F9315C51FFC3873094 /* FiltersSheet.swift in Sources */,
 				1B7D76D1D5224EAFFA194618 /* Folder.swift in Sources */,
+				DD18EED8A90F814B7BBFEC5D /* GradeText.swift in Sources */,
 				5F856B131653DBB68603F43E /* Grader.swift in Sources */,
 				28B18A105C68BE89EE40E0E9 /* ISO8601.swift in Sources */,
 				3AE5E6C646145F6324847503 /* ImageDownscale.swift in Sources */,

@@ -1,0 +1,43 @@
+{
+    "priceModel": {
+        "price": 0,
+        "priceConfidence": "0",
+        "gemrateDescription": "2022 Topps Chrome Formula 1 Sapphire Edition Lewis Hamilton Green 6"
+    },
+    "graderData": {
+        "id": "PSA_154334127",
+        "grader": "PSA",
+        "cert": "154334127",
+        "title": "2022 Topps Chrome Formula 1 Sapphire Edition #6 Lewis Hamilton - (PSA g9)",
+        "subject": "Lewis Hamilton",
+        "cardNumber": "6",
+        "set": "Topps Chrome Formula 1 Sapphire Edition",
+        "language": "",
+        "category": "misc",
+        "year": "2022",
+        "grade": "g9",
+        "population": 7,
+        "primaryImages": []
+    },
+    "priceHistory": [
+        {
+            "title": "2022 Topps Chrome Formula 1 Sapphire Edition #6 Lewis Hamilton - (PSA g9)",
+            "grader": "PSA",
+            "grade": "10",
+            "population": 6,
+            "sales": [
+                {
+                    "date": "2024-06-04T00:00:00Z",
+                    "price": "54.00"
+                },
+                {
+                    "date": "2026-05-17T00:00:00Z",
+                    "price": "145.00"
+                }
+            ]
+        }
+    ],
+    "acquisition": {
+        "accepted": true
+    }
+}

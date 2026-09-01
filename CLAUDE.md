@@ -36,12 +36,16 @@ xcodebuild -project ios/Slab3.xcodeproj -scheme Slab3 \
   -destination 'platform=iOS Simulator,name=iPhone 17' test   # pick a simulator you actually have
 # single test: add -only-testing:Slab3Tests/CardKeyTests/matchesSqlNormalization
 # ios/Tests uses Swift Testing (@Test/#expect), NOT XCTest — match it.
-# suites: CardKey, CertParser, CourtyardClient, CSVExport, PriceWriteback,
-#         IdentityChain, ImageDownscale, RecentCertWindow, RecentSales,
-#         DetailScreenRender  (renders panels to PNG — layout bugs shipped green
-#                              three times because nothing asserted on layout)
+# suites: CardKey, CertParser, CourtyardClient, CSVExport, PriceSet,
+#         PriceWriteback, IdentityChain, ImageDownscale, RecentCertWindow,
+#         RecentSales, DetailScreenRender  (renders panels to PNG — layout bugs
+#                              shipped green three times because nothing
+#                              asserted on layout)
 # ios/project.yml also defines SlabsDev, a side-by-side test build (separate
 # bundle id) so a TestFlight build and a dev build coexist on one device.
+# Shipping version + build live ONLY in ios/project.yml (MARKETING_VERSION /
+# CURRENT_PROJECT_VERSION, currently 0.2 / 2 = "V2"); bump BOTH targets together
+# or the dev build stops matching the TestFlight build it exists to compare against.
 
 # supabase
 supabase db reset      # apply migrations locally
@@ -55,6 +59,11 @@ supabase functions deploy cardladder-price     # deploy one
 # spike (rarely — verdicts are already recorded in spike/README.md)
 cd spike && npm install && npx playwright install chromium
 npm run courtyard -- "charizard base set psa 9"
+npm run courtyard:probe          # is api.courtyard.io reachable from THIS egress?
+CY_CAPTURE_ONLY=1 npm run courtyard:auth   # re-capture Privy client ids, sends no mail
+CY_CODE=123456 npm run courtyard:auth      # step 2 of the OTP relay (step 1 emails the code)
+cd spike/scan-harness && xcodegen generate  # on-device scanner harness; builds ios/Slab3's
+                                            # scanner sources directly, so it drifts if they move
 ```
 
 ## Architecture
@@ -65,9 +74,20 @@ collapsed to `-`, **no** leading/trailing trim. It is implemented **three times*
 and all three must stay byte-identical: `make_card_key()` in
 `supabase/migrations/*.sql`, `CardKey.make` in `ios/Slab3/Shared/CardKey.swift`,
 and the `cardKey` field in `worker/src/sources/types.ts`. The SQL and Swift tests
-share the same vectors on purpose. It drives both price matching and the
-sale-limit rule (max 3 identical card_key per folder; the 4th requires an explicit
-`over_limit_ack`). Change one, change all three and both test suites.
+share the same vectors on purpose. It drives the sale-limit rule
+(max 3 identical card_key per folder; the 4th requires an explicit
+`over_limit_ack`) and cross-source matching. Change one, change all three and both
+test suites.
+
+**It is NOT a cache key, and must not become one again** (2026-08-31). It is
+rebuilt in the app from whatever text the sources filled in, so it is mutable and
+lossy: it omits year and card number, and until that date NO source populated
+`grade` at all — PSA is walled and Courtyard's matcher refuses to run without a
+grade already in hand — so every key ended in a bare `:` and every grade of a card
+collapsed onto one string. The server caches are GLOBAL, so a PSA 9 was served the
+PSA 10's price, identity, slab photograph and comps, and never reached Card Ladder
+at all. Card Ladder's caches now key on `clSourceKey` = `{profileId}:{gradeCode}`
+— the source's own identity. See `spike/README.md` §1b.
 
 ### The bot-wall problem shapes the whole worker
 Every price/cert source is behind some bot protection, and the findings differ per
@@ -101,18 +121,36 @@ before touching any adapter**; don't re-litigate an access path it already ruled
   **Active work — the scanner rebuild.** Courtyard's app prices cards it does NOT
   vault, so the marketplace indices are the wrong product, not a mistuned query.
   `spike/courtyard-plan.md` is the plan of record; read it *and* `spike/README.md`
-  §2 before touching any Courtyard code. Four things it already settles, so don't
-  redo them: the whole courtyard.io web API was enumerated (172 endpoints from the
-  bundle's generated client) and has **no cert-lookup and no price-by-card-identity
-  route** — every pricing endpoint is per-vaulted-asset; the source is the **mobile
-  app**, and the agreed way in is an **Android APK teardown** of `io.courtyard.app`
+  §2 **and §2a** before touching any Courtyard code. What they already settle, so
+  don't redo it: the whole courtyard.io web API was enumerated (172 endpoints from
+  the bundle's generated client, re-verified) and has **no cert-lookup and no
+  price-by-card-identity route** — every pricing endpoint is per-vaulted-asset or
+  owner-scoped, `/pricing/instant-sell-offers` included (it takes assetIds and 403s
+  as "caller is not the asset owner"); the source is the **mobile app**, and the
+  agreed way in is an **Android APK teardown** of `io.courtyard.app`
   (`spike/courtyard/capture-app.py` is the mitmproxy addon for the phone-proxy route
-  the owner **declined** — don't run it); account-connect is **not** to be built
-  speculatively, because Courtyard auth is Privy (email-OTP / wallet), so the Card
-  Ladder store-email+password pattern may not port; and the acceptance bar is live,
-  not a fixture — **cert 96679812 must read $50.80 at confidence 2**, what their own
-  app shows for that slab. Whatever the new source is, it feeds the same `identify()`
-  bar; a new source is not a licence to loosen it.
+  the owner **declined** — don't run it). The teardown is now a grep, not a
+  reverse-engineering job: the app is **Expo/React Native sharing the web codebase**,
+  so its bundle is plain JS in `assets/index.android.bundle`, and the web bundle
+  already ships the scanner's strings — including **"Failed to fetch scanner data
+  for cert: {{cert}}"**, proving the call is **cert-keyed**, the exact shape the web
+  API lacks.
+  **Auth is SOLVED and no longer speculative** (§2a, verified end to end on a real
+  account): Courtyard uses **Privy**, and there is no password by design. Two plain
+  client calls — `POST auth.privy.io/api/v1/passwordless/{init,authenticate}` — take
+  only the PUBLIC `privy-app-id`, so a server can drive login as an **OTP relay**
+  (init → the user reads their own inbox → authenticate), and the response carries a
+  **refresh_token**, which is what makes a server-side `courtyard-connect` viable.
+  The Privy access token IS the `api.courtyard.io` bearer (`OpenAPI.TOKEN =
+  getAccessToken`); there is no second Courtyard credential. Still open: whether that
+  bearer actually unlocks anything, untestable from this machine's egress.
+  **A 403 from here is INCONCLUSIVE, never a closed route** — this IP is
+  rate-limited on the `/index/*` and `/users/*` prefixes, and the same URLs answer
+  normally from a clean egress. Run `npm run courtyard:probe` before recording any
+  403 as a finding.
+  The acceptance bar is live, not a fixture — **cert 96679812 must read $50.80 at
+  confidence 2**, what their own app shows for that slab. Whatever the new source is,
+  it feeds the same `identify()` bar; a new source is not a licence to loosen it.
 - **Card Ladder: live (server-side, bring-your-own-account).** The web SPA and
   `search.cardladder.com` are Turnstile-walled, but the real data plane is Firebase
   Cloud Functions on Google hosts (not behind Cloudflare) that take a plain Bearer
@@ -137,6 +175,15 @@ before touching any adapter**; don't re-litigate an access path it already ruled
   connected users. Comps go through a SEPARATE `cardladder-sales`, fetched
   **lazily when a card's detail screen opens** — never on a scan or bulk refresh,
   or a 200-slab stack spends its 200/day budget on comps nobody opened.
+  **Two caches, split along what actually goes stale** (2026-08-31): `cl_resolve_cache`
+  maps cert → profileId + grade + identity and has NO TTL, because a cert is one
+  physical slab and that mapping cannot change — so a rescan costs nothing;
+  `price_cache` / `card_sales_cache` hold the per-card-per-grade answers under
+  `clSourceKey` on a 24h TTL. Resolving first is also what lets a price lookup
+  compute the right key before deciding whether it needs the network.
+  **`resolveCert` is the only authoritative grade in the whole pipeline** — the
+  barcode carries a cert number and nothing else — so its `grade`/`gradeLabel`
+  must reach the app; dropping it is what caused the V2 grade bug.
   `search.cardladder.com` is never used, but note the SPA bundle is served
   un-walled from `cardladder-71d53.web.app` — that is how the callable list and
   field labels were recovered.
@@ -201,11 +248,14 @@ constructor, add fixtures.
 ### Data / trust model
 `supabase/migrations` splits tables in two:
 - **User tables** (`cards`, `folders`, `folder_cards`) — RLS scoped to `auth.uid()`.
-- **Worker tables** (`price_cache`, `card_identity_map`, `worker_jobs`,
-  `scrape_budget`, `cardladder_credentials`, `psa_cert_cache`) — RLS enabled with
-  **zero policies** = deny-all to clients; reachable only via service role.
-  `price_cache` and the 30-day `psa_cert_cache` are global, not per-user; the
-  budget is per-user.
+- **Worker tables** (`price_cache`, `card_sales_cache`, `cl_resolve_cache`,
+  `card_identity_map`, `worker_jobs`, `scrape_budget`, `cardladder_credentials`,
+  `psa_cert_cache`) — RLS enabled with **zero policies** = deny-all to clients;
+  reachable only via service role. `price_cache`, `card_sales_cache`,
+  `cl_resolve_cache` and the 30-day `psa_cert_cache` are global, not per-user; the
+  budget is per-user. The first three key on `source_key` — the SOURCE's own id for
+  the thing it priced, not our `card_key`; `card_identity_map` is now reserved for
+  Courtyard's D10 attribute-match work.
 
 The iOS app currently persists locally with SwiftData (`Card`, `Folder` `@Model`s
 mirror the SQL columns, with `serverId` reserved for the sync link) and uses
@@ -253,7 +303,10 @@ Identity and images resolve through a **ranked chain**, not a single source
 with the camera capture as the image floor so a row is never picture-less. It has
 to be stored rather than implied by call order, because all three writers are
 independent async tasks. A lower source may FILL a gap a better one left, never
-overwrite it. Two rules: **an official image is used only on an exact cert match**
+overwrite it. Grade rides that same chain and is normalized to a bare number by
+`GradeText` at every source (`"10 GEM MINT"` / `"PSA 9"` / `"g9"` → `"10"` / `"9"`),
+because it is a `card_key` segment and two spellings would be two keys.
+Two rules: **an official image is used only on an exact cert match**
 (a fuzzy Courtyard hit is a different card — the image analogue of fabricating a
 price), and **the long assembled title never goes in `name`**, which feeds
 `refreshCardKey()`; it lives in `Card.title`. Only Card Ladder answers for CGC.
@@ -317,11 +370,14 @@ appendix — not current guidance.
   the evidence (spike date, plan task id like `T3`/`D10`, buyer decision). Match that
   density; when you learn something about a source's access model, write it into the
   adapter header and `spike/README.md`.
-- `worker/.env` (`PSA_ACCESS_TOKEN`) and `spike/.env` (`CL_EMAIL`/`CL_PASSWORD`) hold
-  real personal credentials — gitignored, never commit or echo them. `spike/.state/`
-  holds live session cookies, likewise.
-- Commit messages record the test count (e.g. `77/77 tests` — the `worker/` vitest
-  total, currently 77 across 7 files; the iOS suite is a separate 66 in 10 suites,
-  and pgTAP is 15);
+- `worker/.env` (`PSA_ACCESS_TOKEN`) and `spike/.env` (`CL_EMAIL`/`CL_PASSWORD`, plus
+  `SLABS_EMAIL`/`SLABS_PASSWORD` — the app's own test account, which is what lets the
+  UI be driven in the simulator without the owner's phone) hold real personal
+  credentials — gitignored, never commit or echo them. `spike/.state/` holds live
+  sessions, likewise: `courtyard-session.json` is a LIVE Privy credential, not a fixture.
+- Commit messages record the test count (e.g. `83/83 tests` — the `worker/` vitest
+  total, currently 83 across 7 files; the iOS suite is a separate 74 in 11 suites,
+  and pgTAP is 17). Re-count before writing the message rather than copying the
+  last commit's numbers — they have gone stale twice;
   tests are expected green before committing.
 - `TODOS.md` holds deferred scope with the rationale (currently: offline scan queue).

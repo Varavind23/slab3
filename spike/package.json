@@ -4,7 +4,9 @@
   "type": "module",
   "scripts": {
     "cardladder": "tsx cardladder/spike.ts",
-    "courtyard": "tsx courtyard/spike.ts"
+    "courtyard": "tsx courtyard/spike.ts",
+    "courtyard:auth": "tsx courtyard/privy-auth.ts",
+    "courtyard:probe": "tsx courtyard/probe-auth.ts"
   },
   "dependencies": {
     "playwright": "^1.49.0"

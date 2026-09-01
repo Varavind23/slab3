@@ -1,0 +1,171 @@
+{
+    "priceModel": {
+        "price": 50.8,
+        "priceConfidence": "2",
+        "gemrateDescription": "2022 Panini Donruss Optic Splash! Stephen Curry Holo 10"
+    },
+    "graderData": {
+        "id": "PSA_96679812",
+        "grader": "PSA",
+        "cert": "96679812",
+        "title": "2022 Panini Donruss Optic Splash! #10 Stephen Curry - (PSA g10)",
+        "subject": "Stephen Curry",
+        "cardNumber": "10",
+        "set": "Panini Donruss Optic Splash!",
+        "language": "",
+        "category": "basketball-cards",
+        "year": "2022",
+        "grade": "g10",
+        "population": 38,
+        "primaryImages": []
+    },
+    "priceHistory": [
+        {
+            "title": "2022 Panini Donruss Optic Splash! #10 Stephen Curry - (PSA g10)",
+            "grader": "PSA",
+            "grade": "10",
+            "population": 23,
+            "sales": [
+                {
+                    "date": "2023-10-28T00:00:00Z",
+                    "price": "50.00"
+                },
+                {
+                    "date": "2023-10-28T00:00:00Z",
+                    "price": "50.00"
+                },
+                {
+                    "date": "2024-03-31T00:00:00Z",
+                    "price": "76.00"
+                },
+                {
+                    "date": "2024-04-01T00:00:00Z",
+                    "price": "76.00"
+                },
+                {
+                    "date": "2024-05-10T00:00:00Z",
+                    "price": "57.50"
+                },
+                {
+                    "date": "2024-08-07T00:00:00Z",
+                    "price": "50.00"
+                },
+                {
+                    "date": "2024-08-08T00:00:00Z",
+                    "price": "50.00"
+                },
+                {
+                    "date": "2025-01-07T00:00:00Z",
+                    "price": "70.00"
+                },
+                {
+                    "date": "2025-01-07T00:00:00Z",
+                    "price": "99.00"
+                },
+                {
+                    "date": "2025-05-04T00:00:00Z",
+                    "price": "55.00"
+                },
+                {
+                    "date": "2025-07-08T00:00:00Z",
+                    "price": "46.00"
+                },
+                {
+                    "date": "2025-07-09T00:00:00Z",
+                    "price": "46.00"
+                }
+            ]
+        },
+        {
+            "title": "2022 Panini Donruss Optic Splash! #10 Stephen Curry - (PSA g10)",
+            "grader": "PSA",
+            "grade": "6",
+            "population": 1,
+            "sales": [
+                {
+                    "date": "2024-03-22T00:00:00Z",
+                    "price": "7.00"
+                },
+                {
+                    "date": "2024-03-23T00:00:00Z",
+                    "price": "7.00"
+                }
+            ]
+        },
+        {
+            "title": "2022 Panini Donruss Optic Splash! #10 Stephen Curry - (PSA g10)",
+            "grader": "PSA",
+            "grade": "8",
+            "population": 2,
+            "sales": [
+                {
+                    "date": "2024-12-18T00:00:00Z",
+                    "price": "9.00"
+                },
+                {
+                    "date": "2024-12-19T00:00:00Z",
+                    "price": "9.00"
+                }
+            ]
+        },
+        {
+            "title": "2022 Panini Donruss Optic Splash! #10 Stephen Curry - (PSA g10)",
+            "grader": "PSA",
+            "grade": "9",
+            "population": 11,
+            "sales": [
+                {
+                    "date": "2023-08-25T00:00:00Z",
+                    "price": "24.99"
+                },
+                {
+                    "date": "2023-09-30T00:00:00Z",
+                    "price": "25.00"
+                },
+                {
+                    "date": "2024-10-31T00:00:00Z",
+                    "price": "11.50"
+                },
+                {
+                    "date": "2025-02-10T00:00:00Z",
+                    "price": "25.00"
+                },
+                {
+                    "date": "2025-04-16T00:00:00Z",
+                    "price": "20.50"
+                },
+                {
+                    "date": "2025-06-24T00:00:00Z",
+                    "price": "23.95"
+                },
+                {
+                    "date": "2025-11-12T00:00:00Z",
+                    "price": "30.00"
+                },
+                {
+                    "date": "2026-01-21T00:00:00Z",
+                    "price": "30.00"
+                },
+                {
+                    "date": "2026-02-25T00:00:00Z",
+                    "price": "25.00"
+                }
+            ]
+        },
+        {
+            "title": "2022 Panini Donruss Optic Splash! #10 Stephen Curry - (PSA g10)",
+            "grader": "SGC",
+            "grade": "10",
+            "population": 3,
+            "sales": [
+                {
+                    "date": "2024-02-21T00:00:00Z",
+                    "price": "52.00"
+                }
+            ]
+        }
+    ],
+    "acquisition": {
+        "accepted": true
+    }
+}

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { CardLadderSource, cardImage, lookupCardValue, parseEstimate, parseResolve, parseSales, isoOrNull, usdToCents } from "../src/sources/cardladder.js";
+import { CardLadderSource, cardImage, clSourceKey, displayGrade, lookupCardValue, parseEstimate, parseResolve, parseSales, isoOrNull, usdToCents } from "../src/sources/cardladder.js";
 
 // Fixtures captured LIVE from the real Card Ladder Firebase callables (2026-08-24).
 const load = (n: string) => JSON.parse(readFileSync(new URL(`./fixtures/${n}`, import.meta.url), "utf8"));
@@ -246,5 +246,43 @@ describe("Card Ladder pure parsing (the condition=grade gotcha)", () => {
     expect(usdToCents(0)).toBeNull();
     expect(usdToCents(null)).toBeNull();
     expect(usdToCents(undefined)).toBeNull();
+  });
+});
+
+describe("the cache key (2026-08-31: a PSA 9 was showing the PSA 10's price)", () => {
+  it("clSourceKey is Card Ladder's own identity, so grades cannot collide", () => {
+    // The bug in one assertion. card_key was `{grader}:{set}:{name}:{grade}` with
+    // grade NEVER populated by any source, so both of these were the same string
+    // — `psa:pokemon-game:charizard-holo:` — and the global cache served whichever
+    // grade was scanned first to every other grade of the card.
+    expect(clSourceKey("psa-544027", "g9")).not.toBe(clSourceKey("psa-544027", "g10"));
+    expect(clSourceKey("psa-544027", "g9")).toBe("psa-544027:g9");
+  });
+
+  it("different printings of the same card are different profileIds", () => {
+    // Card Ladder calls the 1999 Base Set "Pokemon Game" and reuses that set name
+    // across printings, so set+player+grade could not separate them either. Its
+    // own profileId does, by construction — which is the whole reason we ask the
+    // source for its id instead of rebuilding one out of the source's text.
+    // Live-verified 2026-08-31, three real Pokemon certs.
+    expect(clSourceKey("psa-544027", "g6")).not.toBe(clSourceKey("psa-5850773", "g6"));
+  });
+
+  it("parseResolve carries the grade the whole pipeline was missing", () => {
+    // The barcode is a cert number and nothing else, and PSA's cert page has been
+    // 403-walled since 2026-08-28, so this field is the ONLY grade the app gets.
+    expect(parseResolve(RESOLVE.result, "psa")).toMatchObject({ grade: "g9", gradeLabel: "9" });
+  });
+
+  it("displayGrade states a number or nothing — never a guess", () => {
+    expect(displayGrade("g9")).toBe("9");
+    expect(displayGrade("g10")).toBe("10");
+    expect(displayGrade("g9.5")).toBe("9.5");
+    // Authentic/altered codes have no numeric grade to show. The UI has a real
+    // em-dash state for that; inventing "0" or "AUTH" would be the grade version
+    // of fabricating a price.
+    expect(displayGrade("gAuth")).toBeUndefined();
+    expect(displayGrade("9")).toBeUndefined();
+    expect(displayGrade(undefined)).toBeUndefined();
   });
 });

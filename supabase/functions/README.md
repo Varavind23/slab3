@@ -54,6 +54,58 @@ curl -s localhost:54321/functions/v1/cardladder-price -H "Authorization: Bearer 
 The `worker/` vitest suite (`npm test`) already covers the shared client logic offline
 against live-captured fixtures (`worker/test/fixtures/cardladder-*.json`).
 
+## Courtyard scanner price (`courtyard-price`)
+
+The number Courtyard's own app shows for a scanned slab: `GET
+api.courtyard.io/scanner/card-details?cert=…&grader=…`. **Public and
+unauthenticated upstream** — no account, no secret, no per-user budget — so
+unlike Card Ladder there is no ToS gate and a cache hit is served to any
+signed-in Slabs user. Found by tearing down the Android app; see
+`spike/README.md` §2b.
+
+**Why it is server-side despite having no secret:** a global cache. A 200-slab
+bulk refresh from a phone would be 200 requests per device for cards other users
+have already fetched, and Courtyard 403s an IP that hammers it (observed on
+`/index/*` during the 2026-08-29 spike). One row per cert in `cy_scan_cache`,
+keyed `(grader, cert)` and shared by everyone, is the difference between polite
+and blocked.
+
+One upstream call returns price, identity **and** grade-split comps together,
+which is why they share one cache table rather than the three Card Ladder uses —
+see the migration `20260831120000_courtyard_scanner_cache.sql`.
+
+```sh
+supabase functions deploy courtyard-price
+```
+
+### Local smoke test
+
+```sh
+curl -s localhost:54321/functions/v1/courtyard-price -H "Authorization: Bearer $JWT" \
+  -H 'content-type: application/json' -d '{"cert":"96679812","grader":"psa"}'
+# -> status ok, priceCents 5080, confidence 2, identity.grade "10", 5 comp groups.
+#    That is THE acceptance bar: Courtyard's own app shows $50.80 / medium
+#    confidence for this slab (confirmed on device 2026-08-31).
+curl -s ... -d '{"cert":"154334127","grader":"psa"}'   # priceCents NULL — their app
+                                                       # says "not applicable". Never $0.
+curl -s ... -d '{"cert":"133653550","grader":"psa"}'   # status not_found (404 upstream)
+```
+
+Three response states that must stay distinct, and are asserted in
+`worker/test/courtyard-scanner.test.ts`:
+
+| upstream | stored | reply |
+|---|---|---|
+| price + confidence | `fetch_status ok`, `price_cents` set | `ok` |
+| `price: 0` / confidence `"0"` | `fetch_status ok`, `price_cents` NULL | `ok`, `priceCents: null` → em dash |
+| `404 card details not found` | `fetch_status not_found` | `not_found` |
+| `502 invalid response from gemrate` | **nothing** — transient | last good row as `stale: true`, else `source_error` |
+
+The `worker/` vitest suite covers the shared client offline against live-captured
+fixtures (`worker/test/fixtures/courtyard-scanner-*.json`). The function's own
+cache/stale branching is DB-coupled and is not in that suite — same as
+`cardladder-price`.
+
 ## PSA cert identity
 
 `psa-cert` returns the PSA subject, set, year, grade, and optional SecureScan image

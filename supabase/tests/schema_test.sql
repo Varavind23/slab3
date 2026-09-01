@@ -3,7 +3,7 @@
 -- RLS isolation between users, and worker-table deny-all to clients.
 
 begin;
-select plan(15);
+select plan(19);
 
 -- Extensions used by the tests
 create extension if not exists pgtap with schema extensions;
@@ -123,10 +123,41 @@ select is(
   'card_sales_cache is deny-all to authenticated clients (no policy)'
 );
 select throws_ok(
-  $$insert into card_sales_cache (card_key, source) values ('psa:x:1:psa-9', 'cardladder')$$,
+  $$insert into card_sales_cache (source_key, source) values ('psa-544027:g9', 'cardladder')$$,
   '42501',
   null,
   'authenticated client cannot write card_sales_cache'
+);
+-- cert -> Card Ladder profileId + grade (2026-08-31). Same trust model again: it
+-- holds Card Ladder's catalogue data, so a client that could read it would be
+-- reading CL data without a connected CL account — the ToS line the Edge
+-- Functions exist to draw.
+select is(
+  (select count(*)::int from cl_resolve_cache),
+  0,
+  'cl_resolve_cache is deny-all to authenticated clients (no policy)'
+);
+select throws_ok(
+  $$insert into cl_resolve_cache (grader, cert, profile_id, grade) values ('psa', '77286827', 'psa-544027', 'g6')$$,
+  '42501',
+  null,
+  'authenticated client cannot write cl_resolve_cache'
+);
+-- Courtyard's scanner cache (2026-08-31). Deny-all for a different reason than
+-- the Card Ladder tables: the upstream endpoint is public, so this is not a ToS
+-- line but a traffic one — clients go through the courtyard-price Edge Function
+-- so that one global cached row serves everyone, instead of every device
+-- fetching every cert and getting the IP blocked.
+select is(
+  (select count(*)::int from cy_scan_cache),
+  0,
+  'cy_scan_cache is deny-all to authenticated clients (no policy)'
+);
+select throws_ok(
+  $$insert into cy_scan_cache (grader, cert, source_key) values ('psa', '96679812', 'PSA_96679812')$$,
+  '42501',
+  null,
+  'authenticated client cannot write cy_scan_cache'
 );
 reset role;
 

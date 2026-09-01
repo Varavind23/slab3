@@ -86,11 +86,10 @@ enum PsaIdentityService {
                 title: cert.title.map(PsaDisplayName.format),
                 set: cert.set,
                 year: cert.year,
+                grade: GradeText.normalized(cert.grade),
                 cardNumber: cert.cardNumber,
                 from: .psa
             )
-            card.grade = cert.grade ?? card.grade
-            card.refreshCardKey()
             if card.name == nil, card.title == nil { card.lookupStatus = .needsConfirm }
 
             // Preserve whatever picture the card already has unless an official

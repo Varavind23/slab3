@@ -188,18 +188,9 @@ struct CourtyardClient {
     }
 
     /// "10 GEM MINT" / "PSA 9" / "9.5" → "10" / "9" / "9.5". Leading number only.
-    static func gradeNumber(_ grade: String?) -> String? {
-        guard let grade else { return nil }
-        var out = ""
-        for ch in grade {
-            if ch.isNumber || (ch == "." && !out.isEmpty) {
-                out.append(ch)
-            } else if !out.isEmpty {
-                break
-            }
-        }
-        return out.isEmpty ? nil : out
-    }
+    /// Lives in GradeText now — every source normalizes through the same rule, so
+    /// one card cannot occupy two card_keys depending on who answered first.
+    static func gradeNumber(_ grade: String?) -> String? { GradeText.normalized(grade) }
     // MARK: Sales (comps)
 
     /// Real recent sales of this card at this grade, newest first.

@@ -57,6 +57,13 @@ export interface ClSession {
 export interface ClCardIdentity {
   profileId: string; // e.g. "psa-299594"
   grade: string; // grade CODE, e.g. "g9" — REQUIRED as httpcardestimate's `condition`
+  /** The grade as a bare number for display — "9", "10", "9.5" — or undefined
+   *  when the code is not a plain numeric grade. See displayGrade.
+   *
+   *  This is the ONLY authoritative grade the pipeline gets. The slab's barcode
+   *  carries a cert number and nothing else, and PSA's cert page is 403-walled,
+   *  so without this field a card's grade stays null forever. */
+  gradeLabel?: string;
   grader: ClGrader;
   player?: string;
   set?: string;
@@ -213,13 +220,45 @@ export async function resolveCert(idToken: string, cert: string, grader: ClGrade
   return parseResolve(r, grader);
 }
 
+/** The key Card Ladder's own Value is actually defined by: its canonical card id
+ *  plus the grade code. `estimate()` takes profileId and `condition` as SEPARATE
+ *  arguments, which is the proof that profileId is card-level and grade-independent
+ *  — so this pair, and nothing else, identifies one priced thing at Card Ladder.
+ *
+ *  This replaced `card_key` as the cache key on 2026-08-31. card_key is
+ *  `{grader}:{set}:{name}:{grade}` rebuilt from text fields, and it was wrong in
+ *  two ways at once: `grade` was never populated by any source (PSA is walled and
+ *  Courtyard's matcher refuses to run without a grade), so every grade of a card
+ *  collapsed to ONE key ending in a bare ':' — and the caches are GLOBAL, so a
+ *  PSA 9 was served the PSA 10's price, identity, cert photograph and comps, and
+ *  never reached Card Ladder at all. Even with the grade fixed the key still
+ *  omitted year and card number, so it could not tell a 1999 Base Set Charizard
+ *  from a reprint sharing Card Ladder's set name. Reconstructing a source's
+ *  identity from its own text fields is the mistake; ask the source for its id. */
+export const clSourceKey = (profileId: string, gradeCode: string): string =>
+  `${profileId}:${gradeCode}`;
+
+/** PURE: grade CODE → the bare number a badge shows. "g9" → "9", "g10" → "10",
+ *  "g9.5" → "9.5".
+ *
+ *  Returns undefined for anything that is not a plain numeric grade (authentic,
+ *  altered, qualifier-only codes) rather than guessing at a label — the same rule
+ *  prices follow, where the UI has a real em-dash state for "we don't know". */
+export function displayGrade(code: unknown): string | undefined {
+  if (typeof code !== "string") return undefined;
+  const m = /^g(\d+(?:\.\d+)?)$/i.exec(code.trim());
+  return m ? m[1] : undefined;
+}
+
 /** PURE: shape httpbuildcollectioncard's result into a ClCardIdentity. Exported for
  *  fixture tests. Requires profileId + grade (the two fields the estimate needs). */
 export function parseResolve(result: any, grader: ClGrader): ClCardIdentity | null {
   if (!result || !result.profileId || !result.grade) return null;
+  const grade = String(result.grade); // e.g. "g9"
   return {
     profileId: String(result.profileId),
-    grade: String(result.grade), // e.g. "g9"
+    grade,
+    gradeLabel: displayGrade(grade),
     grader,
     player: result.player ?? undefined,
     set: result.set ?? undefined,
