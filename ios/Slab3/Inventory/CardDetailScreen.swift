@@ -107,44 +107,74 @@ struct CardDetailScreen: View {
         }
     }
 
-    /// This screen's ONE hero figure: Card Ladder Value — the number Card Ladder's
-    /// own app labels "Value" — with their Last Sold beneath it.
+    /// This screen's ONE hero figure: the value from the SELECTED source, with
+    /// that source's last sale beneath it.
     ///
-    /// Value leads because it is what a reseller is actually deciding against;
-    /// the last sale is the single hard data point behind it, and the comps panel
-    /// below shows the rest of the evidence. Nothing else on this screen may use
-    /// `.figure`. A missing number is an em dash, never $0 (caliperMoney).
+    /// It follows the header/comps toggle (owner decision 2026-08-31). It used to
+    /// be hardwired to Card Ladder, so selecting Courtyard changed the comps
+    /// underneath while the big number kept saying CL — two sources' figures
+    /// stacked on one screen with nothing marking the difference, which is the
+    /// misreading the source toggle exists to prevent. One source is selected;
+    /// the whole block speaks for it.
+    ///
+    /// Value leads because it is what a reseller decides against; the last sale is
+    /// the single hard data point behind it, and the comps panel shows the rest of
+    /// the evidence. Nothing else on this screen may use `.figure`. A missing
+    /// number is an em dash, never $0 (caliperMoney).
     private var valueBlock: some View {
-        VStack(alignment: .leading, spacing: Caliper.space3) {
+        let source = app.activeSource
+        let price = card.prices[source]
+        let confidence = card.confidences[source]
+        let stale = source == .cl ? card.cardLadderIsStale : card.courtyardIsStale
+
+        return VStack(alignment: .leading, spacing: Caliper.space3) {
             VStack(alignment: .leading, spacing: Caliper.space1) {
-                Text("CL Value").caliperLabel(Caliper.textTertiary)
-                Text(caliperMoney(cents: card.cardLadderPriceCents))
+                Text("\(source.rawValue) Value").caliperLabel(Caliper.textTertiary)
+                Text(caliperMoney(cents: price))
                     .font(.figure)
-                    .foregroundStyle(card.cardLadderPriceCents == nil ? Caliper.textTertiary : Caliper.srcCL)
+                    .foregroundStyle(price == nil ? Caliper.textTertiary : source.hue)
                     .minimumScaleFactor(0.6)
                     .lineLimit(1)
-                if card.cardLadderConfidence > 0 {
-                    ConfidenceMeter(value: card.cardLadderConfidence)
+                if confidence > 0 {
+                    ConfidenceMeter(value: confidence)
                 }
             }
 
             VStack(alignment: .leading, spacing: Caliper.space1) {
                 Text("Last sold").caliperLabel(Caliper.textTertiary)
-                Text(caliperMoney(cents: card.cardLadderLastSaleCents))
+                Text(caliperMoney(cents: lastSale(for: source)?.cents))
                     .font(.figureSmall)
-                    .foregroundStyle(card.cardLadderLastSaleCents == nil ? Caliper.textTertiary : Caliper.textPrimary)
+                    .foregroundStyle(lastSale(for: source) == nil ? Caliper.textTertiary : Caliper.textPrimary)
                     .minimumScaleFactor(0.6)
                     .lineLimit(1)
-                if let at = card.cardLadderLastSaleAt {
+                if let at = lastSale(for: source)?.at {
                     Text(at.formatted(.dateTime.month(.abbreviated).day().year()))
                         .caliperMeta(Caliper.textTertiary)
                 }
             }
 
-            if card.cardLadderIsStale {
+            if stale {
                 Text("Couldn\u{2019}t refresh — showing the last known value")
                     .caliperMeta(Caliper.textTertiary)
             }
+        }
+    }
+
+    /// The selected source's most recent sale.
+    ///
+    /// Card Ladder states one directly (it rides the estimate call). Courtyard
+    /// does not: its scanner response carries the sale HISTORY, already filtered
+    /// to this slab's grader and grade and sorted newest first, so the head of
+    /// that list IS its last sold. Deriving it beats storing a field that could
+    /// drift from the comps shown right below it.
+    private func lastSale(for source: PriceSource) -> (cents: Int, at: Date?)? {
+        switch source {
+        case .cl:
+            guard let cents = card.cardLadderLastSaleCents else { return nil }
+            return (cents, card.cardLadderLastSaleAt)
+        case .cy:
+            guard let newest = card.courtyardSales?.first else { return nil }
+            return (newest.priceCents, newest.soldAt)
         }
     }
 

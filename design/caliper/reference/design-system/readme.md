@@ -95,9 +95,21 @@ fixed string if it could carry a count.
 `Triumph 7/24`, `s`, `bricks`. Render them exactly as typed — never title-case,
 pluralize or reformat a group name.
 
-**Numbers.** Whole dollars with a comma separator, no cents (`$121,600`). Yen is
-abbreviated (`¥1.74M`, `¥264K`). Counts are bare. Missing data is an em dash `—`,
-never `$0` and never blank. Certs carry a leading `#`.
+**Numbers.** Money is shown TO THE CENT with a comma separator (`$50.80`,
+`$121,600.00`) — see the amendment below. Yen is abbreviated (`¥1.74M`, `¥264K`).
+Counts are bare. Missing data is an em dash `—`, never `$0` and never blank.
+Certs carry a leading `#`.
+
+> **Amended 2026-08-31 (owner decision). Was: whole dollars, no cents
+> (`$121,600`).** The original reasoning was that whole dollars are the only
+> precision a sourcer reads at arm's length, and as a glanceability argument it
+> still holds. It lost to a correctness one: both price sources state their number
+> to the cent, and Courtyard's own app shows `$50.80` for cert 96679812. Rounding
+> to `$51` made our figure disagree with theirs on the same slab, in a product
+> whose entire job is to be trusted about that number. Showing what the source
+> actually said beats reading a character faster. Implemented once, in
+> `caliperMoney(cents:)`, so every figure in the app moved together — rows, the
+> detail hero, comps, folder totals and export totals.
 
 **Punctuation.** `·` separates metadata on one line. `—` means missing. `→` appears
 inside instructions. `↗` prefixes Share. No emoji, ever.

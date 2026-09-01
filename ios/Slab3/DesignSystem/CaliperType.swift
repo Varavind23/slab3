@@ -128,18 +128,28 @@ extension View {
     }
 }
 
-/// Formats money the way the whole product does: whole dollars, comma separated,
-/// no cents. A missing value is an em dash — NEVER "$0" and never blank.
+/// Formats money the way the whole product does: comma separated, to the CENT.
+/// A missing value is an em dash — NEVER "$0" and never blank.
+///
+/// Cents, not whole dollars (owner decision 2026-08-31). This used to round,
+/// on the reasoning that whole dollars are the only precision a sourcer reads at
+/// arm's length. But both sources state their number to the cent — Courtyard's
+/// own app shows $50.80 for cert 96679812 — and rounding it made our figure
+/// disagree with theirs on the same slab, which is exactly the doubt this app
+/// exists to remove. Displaying what the source said is worth more than the
+/// glanceability.
 func caliperMoney(_ dollars: Int?) -> String {
     guard let dollars else { return "—" }
     return dollars.formatted(.number.precision(.fractionLength(0)).grouping(.automatic))
         .withDollarPrefix()
 }
 
-/// Same rule, from the integer cents the store actually keeps. Rounded to whole
-/// dollars because that is the only precision a sourcer reads at arm's length.
+/// The money formatter, from the integer cents the store actually keeps.
 func caliperMoney(cents: Int?) -> String {
-    caliperMoney(cents.map { Int((Double($0) / 100).rounded()) })
+    guard let cents else { return "—" }
+    return (Double(cents) / 100)
+        .formatted(.number.precision(.fractionLength(2)).grouping(.automatic))
+        .withDollarPrefix()
 }
 
 private extension String {
