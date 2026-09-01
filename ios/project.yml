@@ -20,8 +20,8 @@ targets:
         DEVELOPMENT_TEAM: 7BMY83MWA8
         CODE_SIGN_STYLE: Automatic
         PRODUCT_BUNDLE_IDENTIFIER: com.varunaravind.slabs
-        MARKETING_VERSION: "0.2"
-        CURRENT_PROJECT_VERSION: 2
+        MARKETING_VERSION: "0.3"
+        CURRENT_PROJECT_VERSION: 3
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_VERSION: "5.9"
         INFOPLIST_KEY_CFBundleDisplayName: "Slabs"
@@ -55,8 +55,8 @@ targets:
         DEVELOPMENT_TEAM: 7BMY83MWA8
         CODE_SIGN_STYLE: Automatic
         PRODUCT_BUNDLE_IDENTIFIER: com.varunaravind.slabs.dev
-        MARKETING_VERSION: "0.2"
-        CURRENT_PROJECT_VERSION: 2
+        MARKETING_VERSION: "0.3"
+        CURRENT_PROJECT_VERSION: 3
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_VERSION: "5.9"
         INFOPLIST_KEY_CFBundleDisplayName: "Slabs Dev"
