@@ -1,0 +1,25 @@
+{
+    "cert": "129123650",
+    "grader": "PSA",
+    "primaryImages": [
+        {
+            "imageSide": "Front",
+            "imageSize": "Thumbnail",
+            "imageUrl": "https://d1htnxwo4o0jhw.cloudfront.net/cert/188382772/thumbnail/P34tR9ia_kyiEP7-ZYGDJg.jpg"
+        },
+        {
+            "imageSide": "Front",
+            "imageUrl": "https://d1htnxwo4o0jhw.cloudfront.net/cert/188382772/small/P34tR9ia_kyiEP7-ZYGDJg.jpg"
+        },
+        {
+            "imageSide": "Back",
+            "imageSize": "Thumbnail",
+            "imageUrl": "https://d1htnxwo4o0jhw.cloudfront.net/cert/188382772/thumbnail/bbGY2q61W0ano5JvROqcjw.jpg"
+        },
+        {
+            "imageSide": "Back",
+            "imageUrl": "https://d1htnxwo4o0jhw.cloudfront.net/cert/188382772/small/bbGY2q61W0ano5JvROqcjw.jpg"
+        }
+    ],
+    "status": "OK"
+}

@@ -86,7 +86,9 @@ enum PriceService {
             if card.lookupStatus == .pending, card.name == nil, card.title == nil {
                 card.lookupStatus = .needsConfirm
             }
-            await fillCourtyardImage(card)
+            // A card Courtyard cannot price still has a slab photograph, and this is
+            // the row that needs one most — no price and no marketplace listing.
+            await fillCourtyardImage(card, scannerImageUrl: identity?.imageUrl)
             return .notListed
 
         case .ok(let price, let identity, let groups):
@@ -97,7 +99,7 @@ enum PriceService {
             card.courtyardConfidence = price.confidence ?? 5
             applyScannerIdentity(identity, to: card)
             applyScannerSales(groups, to: card)
-            await fillCourtyardImage(card)
+            await fillCourtyardImage(card, scannerImageUrl: identity.imageUrl)
             return .ok
         }
     }
@@ -130,12 +132,30 @@ enum PriceService {
             from: groups, grader: card.grader, grade: card.grade)
     }
 
-    /// The cert-keyed render, still from Algolia — the one thing the scanner
-    /// endpoint does not give us (its `primaryImages` came back empty on every
-    /// card sampled). Only fetched when the row has no better picture already, so
-    /// the marketplace search is no longer on the price path.
-    private static func fillCourtyardImage(_ card: Card) async {
+    /// The slab photograph.
+    ///
+    /// `scannerImageUrl` is Courtyard's OWN photo of this exact slab, from
+    /// `/scanner/card-grader-image` via the Edge Function. It is preferred over
+    /// everything else because it is cert-verified at the source — an unknown cert
+    /// returns no image rather than someone else's — so it clears the "official
+    /// image only on an exact cert match" rule by construction, with no matching
+    /// for us to get wrong.
+    ///
+    /// Algolia stays as the fallback only. Measured 2026-09-05: over four certs it
+    /// had an exact-cert hit on ONE, missing even cert 96679812, which prices
+    /// perfectly — the image gap was always far wider than the price gap. The
+    /// scanner route answered 9 of 9. See spike/README.md §2e.
+    private static func fillCourtyardImage(_ card: Card, scannerImageUrl: String? = nil) async {
         guard card.thumbnailData == nil || card.imageSource < .courtyard else { return }
+
+        if let raw = scannerImageUrl, let url = URL(string: raw) {
+            guard let (data, response) = try? await URLSession.shared.data(from: url),
+                  (response as? HTTPURLResponse)?.statusCode == 200
+            else { return }
+            card.setImage(ImageDownscale.normalized(data), url: url, from: .courtyard)
+            return
+        }
+
         guard case .match(let match) = await courtyard.lookup(
             grader: card.grader, certNumber: card.certNumber, name: card.name,
             set: card.set, grade: card.grade, year: card.year, cardNumber: card.cardNumber)

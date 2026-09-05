@@ -36,32 +36,45 @@ xcodebuild -project ios/Slab3.xcodeproj -scheme Slab3 \
   -destination 'platform=iOS Simulator,name=iPhone 17' test   # pick a simulator you actually have
 # single test: add -only-testing:Slab3Tests/CardKeyTests/matchesSqlNormalization
 # ios/Tests uses Swift Testing (@Test/#expect), NOT XCTest — match it.
-# suites: CardKey, CertParser, CourtyardClient, CSVExport, PriceSet,
+# suites: CardKey, CertParser, ConfidenceMeter, CourtyardClient, CSVExport,
 #         PriceWriteback, IdentityChain, ImageDownscale, RecentCertWindow,
-#         RecentSales, DetailScreenRender  (renders panels to PNG — layout bugs
+#         RecentSales, DetailScreenRender  (11 files)  (renders panels to PNG — layout bugs
 #                              shipped green three times because nothing
 #                              asserted on layout)
 # ios/project.yml also defines SlabsDev, a side-by-side test build (separate
 # bundle id) so a TestFlight build and a dev build coexist on one device.
 # Shipping version + build live ONLY in ios/project.yml (MARKETING_VERSION /
-# CURRENT_PROJECT_VERSION, currently 0.2 / 2 = "V2"); bump BOTH targets together
+# CURRENT_PROJECT_VERSION, currently 0.3 / 3 = "V3"); bump BOTH targets together
 # or the dev build stops matching the TestFlight build it exists to compare against.
+# Shipping to TestFlight: signing is MANUAL on purpose, and the exact archive +
+# exportArchive commands, the App Store Connect API-key role trap that broke the
+# ship twice, and the symptom strings it produces live in the header comment of
+# ios/ExportOptions.plist. Read that before touching signing; do not "fix" it
+# back to automatic.
 
 # supabase
 supabase db reset      # apply migrations locally
 supabase test db       # pgTAP (supabase/tests/schema_test.sql)
 supabase functions serve                       # all Edge Functions locally (needs Docker)
 supabase functions deploy cardladder-price     # deploy one
-# NOTE: cardladder-sales is a separate function — deploy it too.
+# Five functions: cardladder-connect, cardladder-price, cardladder-sales,
+# courtyard-price, psa-cert. cardladder-sales and courtyard-price are separate
+# deploys — deploying cardladder-price does NOT ship them.
 # Edge Function logic is covered offline by the worker/ vitest suite, not by a Deno suite.
 # Setup + curl smoke tests live in supabase/functions/README.md.
 
 # spike (rarely — verdicts are already recorded in spike/README.md)
 cd spike && npm install && npx playwright install chromium
 npm run courtyard -- "charizard base set psa 9"
+npm run cardladder               # the CL callable-flow probe (sign-in -> estimate)
 npm run courtyard:probe          # is api.courtyard.io reachable from THIS egress?
-CY_CAPTURE_ONLY=1 npm run courtyard:auth   # re-capture Privy client ids, sends no mail
-CY_CODE=123456 npm run courtyard:auth      # step 2 of the OTP relay (step 1 emails the code)
+# OTP relay, in the order that actually works. The bare command IS step 1 — it
+# sends the code, then exits cleanly when there is no TTY (an agent session).
+npm run courtyard:auth                     # step 1: EMAILS the code, prints next step
+CY_CODE=123456 npm run courtyard:auth      # step 2: skips init, uses that code
+# CY_CAPTURE_ONLY=1 is NOT step 1 — it re-captures the Privy app id and exits
+# BEFORE init, so it sends no mail and yields no code. Reaching for it first is
+# why a login "silently does nothing" (2026-09-05).
 cd spike/scan-harness && xcodegen generate  # on-device scanner harness; builds ios/Slab3's
                                             # scanner sources directly, so it drifts if they move
 ```
@@ -94,63 +107,89 @@ Every price/cert source is behind some bot protection, and the findings differ p
 source. `spike/README.md` is the authoritative record of what works — **read it
 before touching any adapter**; don't re-litigate an access path it already ruled out.
 
-- **Courtyard: solved, browserless.** Search is Algolia on `algolia.net` with a
-  public search-only key — queried directly, no Playwright. This is the one live
-  price source. Implemented twice, deliberately mirrored:
-  `worker/src/sources/courtyard-algolia.ts` and `ios/Slab3/Pricing/CourtyardClient.swift`.
-  Keep them in agreement. `courtyard.ts` is a *second, still-live* Courtyard
-  adapter, not dead code: it hits `api.courtyard.io` (Cloudflare-fingerprinted, so
-  browser transport) for per-asset detail — ask/bid/FMV — and its `lookup()`
-  degrades to `not_found` until card_key→assetID resolution (D10) lands.
-  Algolia = search/price; `courtyard.ts` = asset detail. Courtyard's displayed
-  number is `estimatedValueUsd` + `estimatedValueConfidence` (1–5, sent as a
-  STRING) — the same FMV its own scanner shows; the confidence is quoted only on
-  an exact cert match. `courtyard-sales.ts` gets real sale prices from
-  `/index/asset/{assetID}/transactions` (plain fetch, no browser; USDC 6-dec),
-  resolving the asset via `proofOfIntegrity` on a `marketplace_prod_recently_sold`
-  hit — which IS the assetID. Cert is neither facetable NOR searchable
-  (a bare cert query returns typo-tolerant near-misses of unrelated cards), and
-  the indices are recent-activity feeds that cards age out of — so a hit must
-  IDENTIFY the card (cert exact, or year + card number + grade) or we return
-  `not_found` and show an em dash. `identify()` is that bar, mirrored in Swift;
-  the old grade-only and top-hit tiers priced other people's cards and are gone.
-  This blanks Courtyard for most cards, which is correct until the scanner
-  endpoint their own app uses is found — see `spike/README.md` §2. Comps come
-  from `/index/asset/{id}/price-history` (unauthenticated; the CARD's sales split
-  by grade, with population), not the on-chain ledger.
-  **Active work — the scanner rebuild.** Courtyard's app prices cards it does NOT
-  vault, so the marketplace indices are the wrong product, not a mistuned query.
-  `spike/courtyard-plan.md` is the plan of record; read it *and* `spike/README.md`
-  §2 **and §2a** before touching any Courtyard code. What they already settle, so
-  don't redo it: the whole courtyard.io web API was enumerated (172 endpoints from
-  the bundle's generated client, re-verified) and has **no cert-lookup and no
-  price-by-card-identity route** — every pricing endpoint is per-vaulted-asset or
-  owner-scoped, `/pricing/instant-sell-offers` included (it takes assetIds and 403s
-  as "caller is not the asset owner"); the source is the **mobile app**, and the
-  agreed way in is an **Android APK teardown** of `io.courtyard.app`
-  (`spike/courtyard/capture-app.py` is the mitmproxy addon for the phone-proxy route
-  the owner **declined** — don't run it). The teardown is now a grep, not a
-  reverse-engineering job: the app is **Expo/React Native sharing the web codebase**,
-  so its bundle is plain JS in `assets/index.android.bundle`, and the web bundle
-  already ships the scanner's strings — including **"Failed to fetch scanner data
-  for cert: {{cert}}"**, proving the call is **cert-keyed**, the exact shape the web
-  API lacks.
-  **Auth is SOLVED and no longer speculative** (§2a, verified end to end on a real
-  account): Courtyard uses **Privy**, and there is no password by design. Two plain
-  client calls — `POST auth.privy.io/api/v1/passwordless/{init,authenticate}` — take
-  only the PUBLIC `privy-app-id`, so a server can drive login as an **OTP relay**
-  (init → the user reads their own inbox → authenticate), and the response carries a
-  **refresh_token**, which is what makes a server-side `courtyard-connect` viable.
-  The Privy access token IS the `api.courtyard.io` bearer (`OpenAPI.TOKEN =
-  getAccessToken`); there is no second Courtyard credential. Still open: whether that
-  bearer actually unlocks anything, untestable from this machine's egress.
-  **A 403 from here is INCONCLUSIVE, never a closed route** — this IP is
-  rate-limited on the `/index/*` and `/users/*` prefixes, and the same URLs answer
-  normally from a clean egress. Run `npm run courtyard:probe` before recording any
-  403 as a finding.
-  The acceptance bar is live, not a fixture — **cert 96679812 must read $50.80 at
-  confidence 2**, what their own app shows for that slab. Whatever the new source is,
-  it feeds the same `identify()` bar; a new source is not a licence to loosen it.
+- **Courtyard: SOLVED, browserless, and the price is cert-keyed.** Three adapters
+  are live and none is dead code — know which one you are in before editing:
+  - `worker/src/sources/courtyard-scanner.ts` — **THE price source.**
+    `GET api.courtyard.io/scanner/card-details?cert=&grader=`, unauthenticated,
+    no browser, no account. One call returns price + identity + grade-split comps.
+    Cert-keyed, so it cannot answer with a different card and the whole
+    `identify()` guessing problem does not apply here. Found by tearing down the
+    Android app (`io.courtyard.app` 1.7.00; Expo/RN but **Hermes bytecode** —
+    `strings`, not `grep`); the endpoint appears in none of the 172 web-API routes.
+    Logic lives in `supabase/functions/_shared/courtyard-scanner.ts` (cross-runtime,
+    like `cardladder.ts`); the worker file only adapts + re-exports it. Mirrored in
+    Swift by `CourtyardScannerClient.swift`, served by the `courtyard-price` Edge
+    Function over the global `cy_scan_cache` (24h TTL, keyed `(grader, cert)`).
+    **Acceptance bar, live not fixture: cert 96679812 = $50.80, confidence 2** —
+    what Courtyard's own app shows for that slab. `spike/README.md` §2b.
+  - `/scanner/card-grader-image` — the SLAB PHOTOGRAPH, front and back, cert-keyed
+    (`fetchGraderImages`). The image source of record since 2026-09-05: measured over
+    nine certs it answered 9/9 including cards Courtyard cannot price, where Algolia
+    hit 1 of 4 — it missed even cert 96679812, which prices perfectly. It verifies the
+    cert (an unknown one returns **200 with an EMPTY array**, so 200 is NOT a hit —
+    check the array), and the CDN URLs are unsigned and never expire, so we store the
+    URL and the phone fetches the bytes. Two traps: the full-size entries carry **no
+    `imageSize` key at all** (only thumbnails are labelled), and `fetchGraderImages`
+    deliberately **never throws** — a missing picture must never reach the
+    `source_error` path and blank a price.
+  - `courtyard-algolia.ts` / `CourtyardClient.swift` — marketplace search. **No
+    longer a price source** (2026-08-31), and since 2026-09-05 only the image
+    FALLBACK: those indices are recent-activity feeds
+    of *vaulted* inventory that cards age out of, and cert is neither facetable nor
+    searchable (a bare cert query returns typo-tolerant near-misses of unrelated
+    cards — that is how the wrong card got priced). Retained for the cert-keyed
+    render image ONLY, and only on an exact hit. `identify()` still governs it.
+  - `courtyard.ts` — per-vaulted-asset detail (ask/bid/FMV) via browser transport,
+    because `api.courtyard.io/index/*` is Cloudflare-fingerprinted. Not on the
+    price path. `courtyard-sales.ts` likewise (on-chain transactions).
+
+  **The grader we send is a GUESS, and a wrong one is a 400** (`spike/README.md`
+  §2d). Nothing in a slab barcode names the grader — `CertParser` infers it from
+  digit count — and GemRate answers a wrong (cert, grader) pairing with `400
+  InvalidArgument`, not 404, deterministically. `fetchCardDetails` therefore walks
+  `attemptsFor()`: the caller's guess, then the other grader, then zero-stripped
+  variants — but **only past a 400**; a 404 is authoritative and a 5xx is their
+  upstream, and retrying those would just multiply load. All-400 is the
+  `unresolvable` kind: authoritative, cached like a 404. Do not reclassify a 400 as
+  transient again — that is what left cards blank through every refresh, forever,
+  while Card Ladder priced them fine. Omitting the grader is NOT a universal
+  fallback (it resolves PSA certs, 400s CGC ones), and leading zeros are rejected
+  on their own.
+
+  **Scanner error semantics are load-bearing** and map straight onto the honesty
+  rules: `404 {"card details not found"}` is AUTHORITATIVE (cache it, show an em
+  dash); `502 {"invalid response from gemrate"}` is their upstream failing and is
+  TRANSIENT — never cached, never allowed to blank a price the user already saw.
+  `price: 0` + `priceConfidence: "0"` means **"not applicable"**, not $0 — map it
+  to the no-price state (`cyConfidence` returns undefined outside 1–5, which is
+  what keeps a fabricated $0 out of the UI). `priceHistory` groups are per
+  **(grader, grade)**, and every group repeats the SCANNED card's title, so keying
+  comps off the title reports other graders' sales as PSA's; comps may also be for
+  a grade the slab is not. Sale dates are UTC midnight and must render in LOCAL
+  time or we disagree with Courtyard's own app by a day.
+
+  Access model, two SEPARATE walls — don't conflate them (`spike/README.md` §2c):
+  `/scanner/*` is **User-Agent-walled** as of 2026-09-03. A blocklist of obvious
+  tool agents — `curl`, `python-requests`, `Go-http-client`, `node`, and an
+  **absent** UA — gets a bare-HTML 403; browsers, `Deno`, `undici`, `okhttp` and
+  our own truthful `SCANNER_UA` get 200. It is not an allowlist, so never
+  impersonate a browser or their app to get past it. **Every request to this
+  endpoint must set a User-Agent explicitly**; leaving it to the runtime default is
+  what made Courtyard fail intermittently for no visible reason, because a 403
+  lands on the same `source_error` path as a real GemRate outage. Separately,
+  `/index/*` and `/users/*` are IP-blocked from consumer networks and Courtyard
+  403s an IP that hammers it — which is why the app goes through the Edge Function
+  and a shared cache rather than calling from each phone. A 403 from this machine
+  on those prefixes is INCONCLUSIVE, never a closed route; run
+  `npm run courtyard:probe` before recording one as a finding, and check what UA
+  you sent before recording a `/scanner/*` one.
+
+  Retired, do not rebuild: **`courtyard-connect` is not needed for pricing.** The
+  scanner endpoint is public; anonymous and bearer responses are byte-identical.
+  The Privy OTP relay (`spike/README.md` §2a) still works and is still the right
+  design *if* a future feature needs a user session — nothing in the price path
+  does. `spike/courtyard-plan.md` is the plan that led here; §2b overturns its
+  premises, so read §2b first.
 - **Card Ladder: live (server-side, bring-your-own-account).** The web SPA and
   `search.cardladder.com` are Turnstile-walled, but the real data plane is Firebase
   Cloud Functions on Google hosts (not behind Cloudflare) that take a plain Bearer
@@ -199,8 +238,11 @@ before touching any adapter**; don't re-litigate an access path it already ruled
   constant-time `PSA_SCRAPER_TOKEN` bearer check, using the `BROWSER` Rendering
   binding. It reuses the same exported parsers as the vitest suite, so fixtures test
   the deployed code. The app never calls it directly — `psa-cert` does.
-- **CGC:** no public API, Turnstile-walled, source undecided. `cgc.ts` is a shell
-  that reports the wall as a distinct state.
+- **CGC: answered, via Courtyard's scanner endpoint.** It returns CGC identity,
+  price and comps from the same `/scanner/card-details` call (verified: cert
+  4260611176 = $111, confidence 5). CGC's own site is still Turnstile-walled with
+  no public API, so `cgc.ts` remains a shell that reports the wall as a distinct
+  state — nothing calls it on the price path.
 
 **Never fabricate a price or cert value to make a code path return something.**
 Adapters return a typed `SourceError` / `not_found` instead; the UI has a no-price
@@ -215,9 +257,9 @@ The same TypeScript runs in three places and the split is deliberate:
 purpose so Node can test what Deno ships — keep it dependency-free and Web-API-only.
 Nothing in `_shared/` is a function: the leading underscore is what excludes it.
 
-`_shared/` holds four files under **two different runtime contracts**, don't mix them:
-`cardladder.ts` and `crypto.ts` (AES-256-GCM under `CL_ENC_KEY`, Web Crypto only) are
-cross-runtime and vitest-tested from Node; `session.ts` (CL credential lifecycle —
+`_shared/` holds five files under **two different runtime contracts**, don't mix them:
+`cardladder.ts`, `courtyard-scanner.ts` and `crypto.ts` (AES-256-GCM under `CL_ENC_KEY`,
+Web Crypto only) are cross-runtime and vitest-tested from Node; `session.ts` (CL credential lifecycle —
 refresh-token first, full sign-in as fallback) and `http.ts` (JSON replies, caller
 identity from the JWT, service-role client for the deny-all tables) are **Deno-only** —
 `http.ts` reads `Deno.env` at module load and imports supabase-js from esm.sh, so
@@ -249,11 +291,15 @@ constructor, add fixtures.
 `supabase/migrations` splits tables in two:
 - **User tables** (`cards`, `folders`, `folder_cards`) — RLS scoped to `auth.uid()`.
 - **Worker tables** (`price_cache`, `card_sales_cache`, `cl_resolve_cache`,
-  `card_identity_map`, `worker_jobs`, `scrape_budget`, `cardladder_credentials`,
-  `psa_cert_cache`) — RLS enabled with **zero policies** = deny-all to clients;
+  `cy_scan_cache`, `card_identity_map`, `worker_jobs`, `scrape_budget`,
+  `cardladder_credentials`, `psa_cert_cache`) — RLS enabled with **zero policies** = deny-all to clients;
   reachable only via service role. `price_cache`, `card_sales_cache`,
   `cl_resolve_cache` and the 30-day `psa_cert_cache` are global, not per-user; the
-  budget is per-user. The first three key on `source_key` — the SOURCE's own id for
+  budget is per-user. `cy_scan_cache` is Courtyard's whole answer for one slab —
+  price, identity AND comps in one row, keyed `(grader, cert)`, because the source
+  returns all three in one response and they go stale together; a 404 is cached as
+  `fetch_status = 'not_found'` (authoritative), a 502 never is. The other caches key
+  on `source_key` — the SOURCE's own id for
   the thing it priced, not our `card_key`; `card_identity_map` is now reserved for
   Courtyard's D10 attribute-match work.
 
@@ -322,7 +368,14 @@ Comps (`RecentSale`) follow the same honesty rules as prices: stored per source,
 detail screen says something different for each), a failed fetch keeps the last
 list, and nothing is ever synthesized to fill the panel.
 
-Prices: a refresh **never blanks a value the user already saw**. Only an
+Prices come from two independent fetches per card (`PriceService.refresh`), so one
+source failing never blocks the other. Courtyard is `courtyard-price` (cache-first,
+`force` only from the detail screen's manual refresh); Card Ladder is only attempted
+when the user has connected an account, and `PriceRefresher` drops it for the rest of
+a bulk run the moment the connection reports gone. `PriceRefresher` paces itself off
+Card Ladder's ≤1 req/sec rule (1100 ms), and falls to 120 ms on a Courtyard-only run —
+that gap is the only thing between a big stack and Courtyard's per-IP 403.
+A refresh **never blanks a value the user already saw**. Only an
 authoritative answer clears a price (`PriceWriteback` holds that rule and is tested
 directly); a transient failure keeps the last value and marks the column stale.
 Bulk refresh is cache-first — forcing on every card burns the 200/day Card Ladder
@@ -342,7 +395,9 @@ is hairlines with **no elevation shadows**; exactly **one cyan primary action pe
 screen**; both price sources visible on every row, with the toggle changing
 emphasis and sort basis, never visibility; confidence is warm so a meter can never
 be misread as a source hue; **a missing price is an em dash — never `$0`, never
-blank**; copy states what happened without apology.
+blank**; a confidence meter draws as many segments as its SOURCE actually asserts
+(CL 5, CY 3 — Courtyard's own app says only low/medium/high) at one fixed width, so
+the toggle never moves a row's right edge; copy states what happened without apology.
 
 Two faces (Space Grotesk, JetBrains Mono) are Google Fonts with no .ttf in the
 handoff, so `CaliperType` falls back to system faces at the same sizes and weights
@@ -350,7 +405,7 @@ until the binaries are added to the target and registered under `UIAppFonts`.
 
 ## Where the prose evidence lives
 
-Five docs carry decisions that are not recoverable from the code; read the relevant
+Six docs carry decisions that are not recoverable from the code; read the relevant
 one before changing that area:
 
 | Doc | Holds |
@@ -359,7 +414,8 @@ one before changing that area:
 | `design/caliper/README.md` | Design source of truth; `reference/component-rules.md` + `prop-contracts.md` are the per-component rules. |
 | `supabase/functions/README.md` | Edge Function setup (`CL_ENC_KEY` generation, secrets) + curl smoke tests. |
 | `TODOS.md` | Deferred scope with rationale and the decision id that deferred it. |
-| `spike/courtyard-plan.md` | The Courtyard scanner-API rebuild: why Algolia is a dead end, the phased plan, and what must not be redone. |
+| `spike/courtyard-plan.md` | The Courtyard scanner-API rebuild — the plan that led to the endpoint. **Superseded by `spike/README.md` §2b**, which found it; read §2b first. |
+| `supabase/EMAIL.md` | Auth email via Google Workspace SMTP relay: admin setup, DNS, and why nothing sends until a confirmation or reset flow is turned on. |
 
 `design.md` is now only a record of what Caliper overturned, with retired v1 as an
 appendix — not current guidance.
@@ -376,8 +432,9 @@ appendix — not current guidance.
   credentials — gitignored, never commit or echo them. `spike/.state/` holds live
   sessions, likewise: `courtyard-session.json` is a LIVE Privy credential, not a fixture.
 - Commit messages record the test count (e.g. `83/83 tests` — the `worker/` vitest
-  total, currently 83 across 7 files; the iOS suite is a separate 74 in 11 suites,
-  and pgTAP is 17). Re-count before writing the message rather than copying the
+  total, currently 129 across 8 files; the iOS suite is a separate 80
+  across 11 files / 12 `@Suite` structs; pgTAP is 19, the `plan(19)` in
+  supabase/tests/schema_test.sql). Re-count before writing the message rather than copying the
   last commit's numbers — they have gone stale twice;
   tests are expected green before committing.
 - `TODOS.md` holds deferred scope with the rationale (currently: offline scan queue).

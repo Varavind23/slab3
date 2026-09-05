@@ -219,23 +219,44 @@ struct PriceRest: View {
 
 // MARK: - ConfidenceMeter
 
-/// Five segments, filled left to right. Warm tones ONLY — never a source hue, or
-/// the meter and the price it sits beside become confusable.
+/// Segments filled left to right. Warm tones ONLY — never a source hue, or the
+/// meter and the price it sits beside become confusable.
+///
+/// The segment COUNT is the source's, not ours (`PriceSource.confidenceSegments`):
+/// Card Ladder states five steps and shows five in its own UI; Courtyard's app
+/// only ever says low / medium / high, so five here would assert a precision
+/// Courtyard never gave us. The overall width is fixed at `totalWidth` either
+/// way, so a three-segment CY meter and a five-segment CL meter occupy the same
+/// space — they sit in the same right-aligned slot on a row and in a price panel
+/// that stacks both sources, and a ragged right edge there reads as a bug.
 struct ConfidenceMeter: View {
-    /// 0–5. 0 means we have no basis for a match at all.
+    /// The source's own raw 0–5. 0 means we have no basis for a match at all.
     let value: Int
+    let source: PriceSource
+
+    /// Five 7pt segments with 2pt gaps — the width the row was laid out around.
+    static let totalWidth: CGFloat = 43
+    static let gap: CGFloat = 2
+
+    static func segmentWidth(segments: Int) -> CGFloat {
+        (totalWidth - gap * CGFloat(segments - 1)) / CGFloat(segments)
+    }
+
+    private var segments: Int { source.confidenceSegments }
+    private var lit: Int { source.confidenceLevel(value) }
 
     var body: some View {
-        HStack(spacing: 2) {
-            ForEach(0..<5, id: \.self) { i in
+        HStack(spacing: Self.gap) {
+            ForEach(Array(0..<segments), id: \.self) { i in
                 Rectangle()
-                    .fill(i < value ? Caliper.confidence(value) : Caliper.line)
-                    .frame(width: 7, height: 4)
+                    .fill(i < lit ? Caliper.confidence(lit, of: segments) : Caliper.line)
+                    .frame(width: Self.segmentWidth(segments: segments), height: 4)
             }
         }
-        .modifier(HighConfidenceBloom(active: value >= 4))
+        .frame(width: Self.totalWidth)
+        .modifier(HighConfidenceBloom(active: Caliper.isHighConfidence(lit, of: segments)))
         .accessibilityElement()
-        .accessibilityLabel("Match confidence \(value) of 5")
+        .accessibilityLabel("Match confidence \(lit) of \(segments)")
     }
 }
 

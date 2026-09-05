@@ -94,6 +94,25 @@ struct DetailScreenRenderTests {
 
     /// Courtyard selected, with no comps — the empty state has to look
     /// deliberate rather than broken, since it is the common Courtyard case.
+    /// Both meters in one frame: CL's five segments above CY's three. What to look
+    /// at is the right edge — the meters end on the same pixel, because a source
+    /// toggle must not shift the row's geometry.
+    @Test func rendersBothConfidenceScales() throws {
+        let card = card(in: store.mainContext)
+        card.courtyardPriceCents = 5_071
+        card.courtyardConfidence = 2
+        let url = try render(
+            VStack(spacing: Caliper.rowGap) {
+                CardRow(card: card, source: .cl)
+                CardRow(card: card, source: .cy)
+            }
+            .padding(Caliper.gutter)
+            .background(Caliper.bg),
+            named: "confidence-scales", height: 260
+        )
+        #expect(FileManager.default.fileExists(atPath: url.path))
+    }
+
     @Test func rendersCourtyardEmptyState() throws {
         let card = card(in: store.mainContext)
         card.courtyardSales = []

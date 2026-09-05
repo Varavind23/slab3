@@ -84,12 +84,24 @@ sources stay visible on the row no matter which one is active.
 How sure the match is. Sits right-aligned on the card row's second line.
 
 ```jsx
-<ConfidenceMeter value={5} />
-<ConfidenceMeter value={1} />
+<ConfidenceMeter value={5} source="CL" />
+<ConfidenceMeter value={2} source="CY" />
 ```
 
 Never color it with a price-source hue — the whole point is that a meter and a source
 can't be confused.
+
+**The segment count belongs to the source, not to us** (2026-09-03). Card Ladder
+publishes a 1–5 confidence and shows five steps in its own UI, so CL draws five.
+Courtyard's API carries a 1–5 as well, but its app only ever renders low / medium /
+high beside the price — drawing five there claims a resolution Courtyard never
+stated, which is the no-fabricated-numbers rule applied to a match figure. CY draws
+three: 1 low, 2–3 medium, 4–5 high, the same split the tones already use.
+
+Both meters are the **same overall width** (43pt: five 7pt segments, or three 13pt
+ones, on 2pt gaps). They share one right-aligned slot on the card row and stack in
+the detail screen's price panel, so a scale that changed the width would make the
+row's right edge jump when the source toggle flips.
 
 ---
 

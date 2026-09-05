@@ -61,9 +61,18 @@ enum Caliper {
         hex(0xE5B65C), hex(0xFF8FD0), hex(0x7FA6FF),
     ]
 
-    /// Confidence 0–5 → its tone. 0–1 red, 2–3 amber, 4–5 green.
-    static func confidence(_ value: Int) -> Color {
-        value <= 1 ? confLow : value <= 3 ? confMid : confHigh
+    /// Tone for a meter that is `lit` of `segments` full. Expressed as a fraction
+    /// rather than a raw 0–5 because the meter is not always five wide: Courtyard
+    /// draws three. The buckets are unchanged for a five-segment meter (0–1 red,
+    /// 2–3 amber, 4–5 green) and land on low/medium/high for a three-segment one.
+    static func confidence(_ lit: Int, of segments: Int) -> Color {
+        let fraction = Double(lit) / Double(max(segments, 1))
+        return fraction <= 0.34 ? confLow : fraction <= 0.7 ? confMid : confHigh
+    }
+
+    /// Whether a meter that full sits in the top band — the only state that blooms.
+    static func isHighConfidence(_ lit: Int, of segments: Int) -> Bool {
+        Double(lit) / Double(max(segments, 1)) > 0.7
     }
 
     // MARK: - Spacing
@@ -124,6 +133,33 @@ enum PriceSource: String, CaseIterable, Identifiable {
 }
 
 extension PriceSource {
+    /// How many segments the confidence meter draws for this source.
+    ///
+    /// The precision the SOURCE actually asserts, not a house style. Card Ladder
+    /// publishes a 1–5 confidence and its own UI shows five steps, so five is
+    /// honest there. Courtyard's API carries a 1–5 too, but its app renders only
+    /// low / medium / high beside the price — five segments would claim a
+    /// resolution Courtyard never states, which is the price-fabrication rule
+    /// applied to a match figure. Three segments say exactly what it says.
+    var confidenceSegments: Int {
+        switch self {
+        case .cl: return 5
+        case .cy: return 3
+        }
+    }
+
+    /// A source's raw 0–5 confidence → how many segments light up. 0 stays 0: no
+    /// basis for a match at all, and the detail screen hides the meter entirely.
+    /// Courtyard buckets the way its own app does — 1 low, 2–3 medium, 4–5 high —
+    /// which is the same split `Caliper.confidence(_:of:)` already colours by.
+    func confidenceLevel(_ value: Int) -> Int {
+        let v = min(max(value, 0), 5)
+        switch self {
+        case .cl: return v
+        case .cy: return v == 0 ? 0 : v <= 1 ? 1 : v <= 3 ? 2 : 3
+        }
+    }
+
     /// Spoken name — "CL" is unreadable to VoiceOver.
     var accessibilityName: String {
         switch self {

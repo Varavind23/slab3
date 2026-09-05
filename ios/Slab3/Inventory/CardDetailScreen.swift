@@ -136,7 +136,7 @@ struct CardDetailScreen: View {
                     .minimumScaleFactor(0.6)
                     .lineLimit(1)
                 if confidence > 0 {
-                    ConfidenceMeter(value: confidence)
+                    ConfidenceMeter(value: confidence, source: source)
                 }
             }
 
@@ -198,7 +198,7 @@ struct CardDetailScreen: View {
                     Circle().fill(source.hue).frame(width: 6, height: 6)
                     Text(source.accessibilityName).font(.calBody).foregroundStyle(Caliper.textPrimary)
                     Spacer(minLength: Caliper.space4)
-                    ConfidenceMeter(value: card.confidences[source])
+                    ConfidenceMeter(value: card.confidences[source], source: source)
                     Text(caliperMoney(cents: card.prices[source]))
                         .font(.price)
                         .foregroundStyle(card.prices[source] == nil ? Caliper.textTertiary : source.hue)

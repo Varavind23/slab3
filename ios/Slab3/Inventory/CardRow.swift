@@ -55,7 +55,7 @@ struct CardRow: View {
             Text("·").caliperMeta(Caliper.textTertiary)
             Text(card.metaLine).caliperMeta(Caliper.textTertiary).lineLimit(1)
             Spacer(minLength: Caliper.space3)
-            ConfidenceMeter(value: card.confidences[source])
+            ConfidenceMeter(value: card.confidences[source], source: source)
         }
     }
 

@@ -17,84 +17,145 @@ pending-op queue with sync on reconnect.
 
 **Blocked by:** v1 local store shape shipping first.
 
-## Courtyard scanner API — the real price source (opened 2026-08-29)
+## Courtyard scanner API — RESOLVED 2026-08-31, shipped in 0.3 (build 3)
 
-**Goal:** show what Courtyard's own app shows when it scans a slab — market value
-+ confidence — for any card, not just ones sitting in their vault.
+Phases 1-3 are done. The endpoint is
+`GET api.courtyard.io/scanner/card-details?cert=&grader=` — unauthenticated,
+cert-keyed, one call for price + identity + grade-split comps. Found by tearing
+down the Android app (Hermes bytecode: `strings`, not `grep`). The acceptance bar
+is met live: cert 96679812 = $50.80 / confidence 2, what their own app shows.
+Full record: `spike/README.md` §2b. Code: `_shared/courtyard-scanner.ts`,
+`courtyard-price`, `CourtyardScannerClient.swift`.
 
-**Where we are.** Slabs sources Courtyard from its Algolia MARKETPLACE indices,
-which describe vaulted inventory. Their app prices cards they do NOT hold: cert
-96679812 (2022 Optic Splash! #10 Curry PSA 10) reads **$50.80 / confidence 2** in
-their app and is absent from the index entirely, so we had nothing and were
-showing an unrelated Curry's $18. Matching now refuses rather than guesses, which
-is honest but leaves Courtyard blank on most cards.
+**Phase 2 (account connect) is retired, not deferred** — the endpoint is public,
+and anonymous and bearer responses are byte-identical. Do NOT build
+`courtyard-connect` for pricing. The Privy OTP relay (§2a) still works if some
+future feature needs a user session.
 
-**Why the current path is a dead end, not a tuning problem** (verified 2026-08-29,
-spike/README.md §2): cert is neither facetable nor searchable, and a bare cert
-query returns typo-tolerant near-misses of unrelated cards; the indices are
-recent-activity feeds that cards age out of; no query shape surfaced a
-known-indexed card within 40 hits; and **the entire web API was enumerated — 172
-endpoints from the generated client in their bundle — with NO cert-lookup and NO
-price-by-card-identity route.** Every pricing endpoint is per-vaulted-asset. The
-scanner exists only in the mobile app.
-
----
-
-### Phase 1 — find the endpoint (BLOCKING; everything below depends on it)
-
-Proxy-capturing the iOS app is **rejected** (owner declined connecting the phone).
-The replacement needs no device:
-
-1. **Android APK teardown.** `io.courtyard.app` on Google Play, ~140 MB, listing
-   advertises "instantly identify graded cards with a quick scan" + "real-time
-   market pricing" — the exact feature. Pull the APK, unzip, and grep for API
-   hosts/paths. If it is React Native, `assets/index.android.bundle` holds every
-   URL in plain JS; if native, strings over `lib/` and `classes*.dex`.
-   Deliverable: the pricing endpoint's host, path, method, request shape, and
-   **whether it requires auth**.
-2. **In parallel, email Courtyard for API access.** They run a vaulting/partner
-   business and the ask is cheap. This is the only path that stays legitimate if
-   the endpoint turns out to be locked behind attestation.
-
-**Risk to name honestly:** Phase 1 may fail. If the pricing call is gated by
-device attestation or a signed app token, no amount of client work reaches it and
-Courtyard stays as it is until they grant access.
-
-### Phase 2 — account connect (SHAPE UNKNOWN until Phase 1)
-
-Do NOT build this speculatively. Courtyard auth is **Privy** (1210 refs in the
-bundle), which typically means email-OTP or wallet signature rather than a
-password — so Card Ladder's "store email+password, sign in server-side" pattern
-may not port. `/users/login`, `/users/register` and `/users/refresh` do exist and
-take JSON bodies, so a native session may be obtainable; the APK will say.
-
-Only once the auth shape is known:
-* `courtyard-connect` Edge Function mirroring `cardladder-connect` — credentials
-  or session encrypted with `CL_ENC_KEY`'s sibling, stored in a deny-all table.
-* Session lifecycle in `_shared/` alongside `session.ts`.
-* iOS `CourtyardConnectView` mirroring `CardLadderConnectView`.
-* The iOS client never holds a Courtyard secret, same rule as Card Ladder.
-
-If the endpoint needs **no** auth, skip this phase entirely — that is the good case.
-
-### Phase 3 — adapter + integration
-
-* New source in `worker/src/sources/` behind the existing transport seam, with
-  fixtures captured from real calls; mirrored in `CourtyardClient.swift`.
-* Feeds the SAME `identify()` bar — a price still has to be this card's.
-* Comps continue to come from `/index/asset/{id}/price-history` (unauthenticated,
-  the CARD's sales split by grade with population) where an asset resolves.
-* Record the access model in the adapter header and `spike/README.md`, per repo
-  convention.
-
-### Phase 4 — simulator QA (independent; can run any time)
-
-Slabs test account is in `spike/.env` (`SLABS_EMAIL`/`SLABS_PASSWORD`). Lets UI be
-checked in the simulator without the owner's phone. Pairs with
+**Phase 4 (simulator QA) is still open** and independent. Slabs test account is in
+`spike/.env` (`SLABS_EMAIL`/`SLABS_PASSWORD`), so the UI can be driven in the
+simulator without the owner's phone — **but those credentials no longer work**:
+`/auth/v1/token?grant_type=password` returned `invalid_credentials` on 2026-09-03.
+The account needs recreating or the password resetting before Phase 4 can run, and
+before any Edge Function can be smoke-tested end to end from this machine (see
+`supabase/EMAIL.md` — nothing sends until a confirmation flow is turned on). Pairs with
 `ios/Tests/DetailScreenRenderTests.swift`, which renders panels to PNG — layout
 bugs shipped green three times because nothing asserted on layout.
 
-### Phase 5 — ship V2
+## Courtyard cleanup — three known gaps (deferred 2026-09-03)
 
-Card Ladder Value + last sold + real comps are DONE and verified on device. This
-does not wait for Courtyard.
+Found while fixing the User-Agent wall (`spike/README.md` §2c). All three were
+assessed and **none blocks basic workability**, which is why they are here and not
+in that fix. Listed most-worth-doing first.
+
+### 1. `loadSales` still falls back to the legacy Algolia comps path
+
+`PriceService.loadSales` (`ios/Slab3/Pricing/PriceService.swift:284`) calls
+`courtyard.recentSales(...)`, the pre-scanner Algolia path, which hits
+`api.courtyard.io/index/*` **directly from the phone** — the prefix that is
+IP-blocked on consumer networks. The scanner already returns comps, and
+`applyScannerSales` stores them on both the `.ok` and `.noPrice` paths.
+
+**Why it is not urgent:** dormant in practice. `loadSales` is only called from
+`CardDetailScreen.swift:63`, always with the default `force: false`, so the legacy
+branch runs only when `card.courtyardSales == nil` — which now happens only on the
+`.unavailable` path. Worst case it returns `[]` and the user sees an empty comps
+panel, never another card's sales.
+
+**Why to do it anyway:** it is dead weight on a wrong-source path, and it would
+wake up if anyone ever calls `loadSales(force: true)` — which WOULD overwrite good
+scanner comps with the Algolia answer. Delete the fallback and let the scanner own
+Courtyard comps outright.
+
+### 2. The server's `stale` flag never reaches the app
+
+`courtyard-price` returns `stale: true` when it serves a cached row because the
+source is failing right now (`supabase/functions/courtyard-price/index.ts`), but
+`CourtyardScannerClient.Reply` does not decode the field, so the app cannot tell a
+live number from a last-known one and shows both as current.
+
+**Why it is not urgent:** the number displayed is real, just possibly up to 24h
+old. Nothing is wrong-valued.
+
+**Why to do it anyway:** the price rules say a transient failure "keeps the last
+value and marks the column stale" — the marking half is currently missing, and
+this codebase holds itself to that line explicitly.
+
+### 3. No retry on a transient 502
+
+`fetchCardDetails` is single-attempt. A 502 from Courtyard's GemRate upstream on a
+**freshly scanned** card — one with no cached row and no last value — shows an em
+dash until the user manually refreshes.
+
+**Why it is not urgent:** the 24h cache and the never-blank rule already cover any
+card priced once, and this is pre-existing behaviour, not a regression.
+
+**Why to do it anyway:** one bounded retry with a short backoff would close the
+worst case, which is the first impression of a brand-new scan. Keep it bounded —
+Courtyard 403s an IP that hammers it.
+
+### 4. CGC qualifier grades collapse, and show the WRONG comps (found by codex review, 2026-09-05)
+
+**Verified against the checked-in fixture, not theory.** `gradeLabel()` reduces any
+grade to its first number, so CGC's `g10pristine` becomes `"10"` — identical to an
+ordinary CGC 10. `worker/test/fixtures/courtyard-scanner-cgc.json` contains BOTH
+groups:
+
+```
+grader=CGC raw_grade='10'          -> "10"   pop=97  9 sales
+grader=CGC raw_grade='10pristine'  -> "10"   pop=0   3 sales
+```
+
+`salesForGrade` selects with `.find()`, so a **Pristine 10 slab is shown the ordinary
+CGC 10 sales and population 97** — another grade's numbers presented as this card's.
+That is the same class of error as pricing the wrong card, which this codebase treats
+as the cardinal sin. `card_key` collapses the two grades too, so the sale-limit rule
+counts a Pristine 10 and a regular 10 as the same card.
+
+**Pre-existing** — not introduced by the grader-fallback work — and it affects only
+CGC qualifier grades (pristine/perfect), which is why it has gone unnoticed.
+
+**Why it is not a one-line fix, and needs a decision:** the app only ever receives the
+NORMALIZED grade, so the qualifier has to survive the whole path — a `gradeRaw` on
+both `CyIdentity` and `CySaleGroup`, a column on `cy_scan_cache`, the `courtyard-price`
+reply, and `CourtyardScannerClient`. Changing `gradeLabel` itself is the wrong fix:
+it is one of the three byte-identical `card_key` implementations
+(SQL / Swift / TypeScript), so touching it changes every existing key.
+
+### 5. Use `/scanner/card-grader-image` for slab photos — DONE 2026-09-05
+
+**The opportunity, found while replaying two production certs** (`spike/README.md`
+§2e): Courtyard has a THIRD scanner endpoint that returns real front AND back slab
+photographs, cert-keyed, and it answers 200 even for certs whose pricing 404s.
+
+Today `fillCourtyardImage` sources Courtyard imagery from ALGOLIA — the marketplace
+index — so it misses precisely the cards Courtyard cannot price, and those rows fall
+back to the camera capture. PSA's cert page is 403-walled (§4a) and carries no photo
+without SecureScan, so for many slabs there is no official image at all.
+
+Because it is cert-keyed it clears the standing "official image only on an exact cert
+match" rule by construction. It also returns the BACK of the slab, which no current
+source does.
+
+**Worth doing because it is the difference between a demo row that looks empty and one
+that looks right**, even when Courtyard has no price for the card.
+
+**SHIPPED.** `fetchGraderImages` in `_shared/courtyard-scanner.ts`, wired into
+`courtyard-price` on BOTH the priced and the 404 paths (and passed through on a
+cached 404, or a cache hit would be worse than a miss), consumed by
+`PriceService.fillCourtyardImage`, which now prefers the cert-exact URL and keeps
+Algolia only as a fallback. Fixtures captured from the live endpoint. Still open: the
+BACK of the slab is fetched and parsed but has nowhere to go in the UI, and is not
+persisted — `cy_scan_cache.image_url` holds the front only. Adding it is a migration
+plus a place to put it, so it waits for a design decision.
+
+### Also unresolved from the same investigation
+
+* **`PriceRefresher.fastGap` is 120 ms** on a Courtyard-only bulk run
+  (`ios/Slab3/Pricing/PriceRefresher.swift:26`). Whether the `/scanner/*` wall is
+  also rate-scored on top of the UA rule is **unknown** — worth settling before a
+  user runs a 200-slab stack.
+* **The deployed function's outbound User-Agent was never observed.** The CLI here
+  (2.98.2) has no `functions logs`, and reading the PAT was blocked. Upgrading the
+  CLI would let us confirm the 403 rate before/after the fix, i.e. whether the UA
+  wall was *the* bug or merely *a* bug.

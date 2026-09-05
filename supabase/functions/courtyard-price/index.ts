@@ -18,7 +18,12 @@
 // See spike/README.md §2b for the endpoint, and the migration
 // 20260831120000_courtyard_scanner_cache.sql for why the cache is one table.
 
-import { fetchCardDetails, CyError, type CyScanResult } from "../_shared/courtyard-scanner.ts";
+import {
+  fetchCardDetails,
+  fetchGraderImages,
+  CyError,
+  type CyScanResult,
+} from "../_shared/courtyard-scanner.ts";
 import { admin, callerId, json } from "../_shared/http.ts";
 
 /** Same 24h TTL as the Card Ladder price cache. The identity half barely changes,
@@ -134,7 +139,15 @@ Deno.serve(async (req) => {
 
   const fresh = cached && Date.now() - new Date(cached.fetched_at).getTime() < CACHE_TTL_MS;
   if (cached && fresh && !force) {
-    if (cached.fetch_status === "not_found") return json({ status: "not_found", cached: true });
+    if (cached.fetch_status === "not_found") {
+      // No price, but the row may still hold a slab photograph — pass it on, or a
+      // cache hit would silently be worse than a miss.
+      return json({
+        status: "not_found",
+        cached: true,
+        identity: { imageUrl: cached.image_url ?? undefined },
+      });
+    }
     return json(okReply(cached, true));
   }
 
@@ -145,18 +158,45 @@ Deno.serve(async (req) => {
   } catch (e) {
     const kind = e instanceof CyError ? e.kind : "network";
 
-    if (kind === "not_found") {
-      // AUTHORITATIVE: Courtyard's catalog has no such cert. Cache it — this is an
-      // answer, not a failure — and the app shows an em dash.
+    // An `unresolvable` 400 NEVER overwrites a price we already hold.
+    //
+    // 400 and 404 are not equally trustworthy. A 404 is Courtyard's catalog saying
+    // it does not know this cert — an answer about the CARD. A 400 is GemRate
+    // refusing the QUERY, and we classify it from the status code alone; if their
+    // upstream, the WAF, or a deploy ever answers 400 broadly, caching it as
+    // not_found would blank good prices across the board for 24h. That is precisely
+    // the failure the never-blank rule exists to prevent, so a slab with a stored
+    // `ok` row keeps serving it, marked stale, exactly like a 5xx.
+    //
+    // A 400 is still cached when we hold NOTHING — there is no value to protect,
+    // and caching is what stops the request being re-sent on every single refresh
+    // forever, which is the bug this whole change set is fixing.
+    if (kind === "unresolvable" && cached && cached.fetch_status === "ok") {
+      return json(okReply(cached, true, true));
+    }
+
+    if (kind === "not_found" || kind === "unresolvable") {
+      // AUTHORITATIVE ENOUGH TO CACHE: the catalog does not know the cert (404), or
+      // GemRate refused every pairing (400) and we hold no previous answer to keep.
+      // Cache it — this is an answer, not a failure — and the app shows an em dash.
+      // A card Courtyard cannot PRICE still has a slab photograph, and this is
+      // exactly the row that needs one: no price, no marketplace listing, so
+      // without this the app falls back to the camera capture. Never throws.
+      const imgs = await fetchGraderImages(cert, grader);
       await db.from("cy_scan_cache").upsert({
         grader,
         cert,
         source_key: `${grader.toUpperCase()}_${cert}`,
         comps: [],
+        image_url: imgs.frontUrl ?? imgs.frontThumbUrl ?? null,
         fetch_status: "not_found",
         fetched_at: new Date().toISOString(),
       });
-      return json({ status: "not_found", cached: false });
+      return json({
+        status: "not_found",
+        cached: false,
+        identity: { imageUrl: imgs.frontUrl ?? imgs.frontThumbUrl ?? undefined },
+      });
     }
 
     // TRANSIENT (5xx — typically their GemRate upstream — or a transport failure).
@@ -171,6 +211,16 @@ Deno.serve(async (req) => {
   //    is cached as fetch_status 'ok' with price_cents NULL — Courtyard knows the
   //    card, it simply has no number for it, which the UI renders as an em dash.
   const row = rowOf(grader, cert, result);
+
+  // card-details' own `primaryImages` has come back empty on every card sampled, so
+  // the photograph comes from the sibling route. Only when we do not already have
+  // one: the URL is stable and unsigned, so a stored one never goes bad, and this
+  // keeps it to ONE extra upstream call per cert for the life of the row.
+  if (!row.image_url) {
+    const imgs = await fetchGraderImages(cert, grader);
+    row.image_url = imgs.frontUrl ?? imgs.frontThumbUrl ?? null;
+  }
+
   await db.from("cy_scan_cache").upsert({ grader, cert, ...row });
   return json(okReply(row, false));
 });

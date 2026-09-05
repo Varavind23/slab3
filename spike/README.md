@@ -471,6 +471,299 @@ which the app handles by labelling the grade — so must we.
 to the block that hits `/index/*` and `/users/*` from consumer networks (see §2a)
 — it answered plain curl from a mobile hotspot throughout. It is also not
 Cloudflare-fingerprinted: no browser transport needed.
+**Superseded in one respect — see §2c: plain curl is now 403, and the reason is
+the User-Agent.** Everything else in this section still holds.
+
+### 2c. `/scanner/*` is now User-Agent-walled — 2026-09-03
+
+**The endpoint is unchanged; getting to it is not.** Sometime after 2026-08-31 a
+WAF appeared in front of `api.courtyard.io/scanner/*` that **blocks by
+User-Agent**. This is what §2b's "it answered plain curl throughout" no longer
+describes.
+
+Measured from one machine, within one minute, same URL
+(`/scanner/card-details?cert=96679812&grader=PSA`), varying ONLY the UA:
+
+| User-Agent | result |
+|---|---|
+| `curl/8.7.1` | **403** |
+| `python-requests/2.32.3` | **403** |
+| `Go-http-client/2.0` | **403** |
+| `node` | **403** |
+| **empty / absent** | **403** |
+| `Mozilla/5.0 …Chrome/126…` | 200 |
+| `Deno/1.45.5` | 200 |
+| `supabase-edge-runtime-1.69.12 (compatible; Deno/1.45.5)` | 200 |
+| `undici` | 200 |
+| `okhttp/4.9.2` | 200 |
+| `Slabs/1.0 (graded-card inventory)` | 200 |
+
+**It is a blocklist of obvious tool agents, not an allowlist of browsers** — a
+plain custom string passes. So there is nothing to gain by impersonating a
+browser or Courtyard's own app, and the adapter deliberately sends a truthful
+`SCANNER_UA` instead (`supabase/functions/_shared/courtyard-scanner.ts`).
+
+**How to tell this wall from the §2a one:** the 403 here is bare HTML with every
+header stripped — no `server: Google Frontend`, no `via: 1.1 google`, which a 200
+from this host does carry. It sits in FRONT of their stack, and it is not IP-based:
+the 403 and a 200 were obtained from the same IP seconds apart. `npm run
+courtyard:probe` gets a 200 on this endpoint because it happens to set a browser
+UA — that is why the wall was invisible until the two were compared directly.
+
+**Why it read as an intermittent app bug.** `fetchCardDetails` sent no User-Agent
+at all, leaving it to whatever the runtime defaults to — and this module runs under
+three runtimes on purpose. An absent UA is a 403, a 403 is `!res.ok`, and that
+lands on `CyError("source_error")`, the SAME path a genuine GemRate 502 takes. The
+app then keeps the last value and marks it stale, or shows an em dash on a card it
+has never priced. Nothing anywhere says "blocked" — it looks exactly like
+"Courtyard sometimes doesn't work for no reason".
+
+**Verified after the fix** (2026-09-03), live, with the UA the code actually sends
+— the same four certs §2b recorded, all unchanged:
+
+| cert | grader | result |
+|---|---|---|
+| 96679812 | PSA | 200, `price: 50.8`, conf `"2"`, g10, pop 38, 5 groups — **the bar** |
+| 154334127 | PSA | 200, `price: 0`, conf `"0"` ("not applicable"), g9, 1 group |
+| 4260611176 | CGC | 200, `price: 111`, conf `"5"`, `g10pristine`, pop 380, 9 groups |
+| 133653550 | PSA | 404 not found (authoritative) |
+
+**Standing rule:** before recording any Courtyard 403 as a finding, check the UA
+you sent. A 403 on `/scanner/*` from a tool agent says nothing about access; a 403
+on `/index/*` or `/users/*` is the separate IP block of §2a and is likewise
+inconclusive from this machine.
+
+### 2d. A wrong GRADER is a 400, and 400 was being retried forever — 2026-09-05
+
+**This is the cause of "some cards never show a Courtyard value, and refreshing
+does nothing", reported while Card Ladder priced the same slabs fine.**
+
+The grader is a GUESS. Nothing in a slab barcode identifies the grader —
+`CertParser` infers it from digit count (10 -> CGC, 7-9 -> PSA). Send GemRate a
+cert with the wrong grader and it does NOT say "not found"; it says:
+
+```
+400 {"message":"unable to query gemrate for cert: rpc error:
+     code = InvalidArgument desc = gemrate cert lookup ..."}
+```
+
+Verified live 2026-09-05, same minute, same UA:
+
+| request | result |
+|---|---|
+| `cert=96679812&grader=PSA` | 200 — $50.80, conf 2 |
+| `cert=96679812&grader=CGC` | **400** |
+| `cert=96679812` (grader omitted) | 200 — $50.80 |
+| `cert=4260611176&grader=CGC` | 200 — $111, conf 5 |
+| `cert=4260611176&grader=PSA` | **400** |
+| `cert=4260611176` (grader omitted) | **400** |
+| `cert=0096679812&grader=PSA` (zero-padded) | **400** |
+| `cert=133653550&grader=PSA` (unknown cert) | 404 |
+| `grader=psa` (lowercase) | 200 — case does not matter |
+
+**Why it was permanent and silent.** `fetchCardDetails` mapped everything that was
+not 404 to `source_error`, which `courtyard-price` treats as TRANSIENT: never
+cached, serve the last value if any. So every refresh re-sent the identical doomed
+request, got the identical 400, and wrote nothing. The card showed an em dash
+forever. Card Ladder resolves the same slab through its own cert lookup, so it kept
+working — which is exactly why the failure looked card-specific and random rather
+than systemic.
+
+**Note the two asymmetries**, both counter-intuitive and both load-bearing:
+1. **Omitting the grader is NOT a universal fallback.** It resolves the PSA cert
+   and 400s the CGC one. So the recovery flips the grader rather than dropping it.
+2. **Leading zeros are rejected on their own** — and a zero-padded barcode read
+   also changes the digit count, which flips the grader guess. Hence a
+   zero-stripped attempt as well.
+
+**The fix** (`_shared/courtyard-scanner.ts`): `attemptsFor()` produces the pairings
+to try — the caller's guess first, then the other grader, then zero-stripped
+variants when the cert has leading zeros — and `fetchCardDetails` walks them, but
+ONLY past a 400. A 404 is authoritative about the cert and a 5xx is their upstream;
+neither is improved by different parameters, and retrying them would multiply load
+on an endpoint that 403s an IP which hammers it. The result is parsed against the
+pairing that ANSWERED, so `sourceKey` and `identity.grader` describe the real slab.
+If every pairing 400s, that is the new `unresolvable` kind — authoritative, cached
+like a 404, so it stops being re-asked.
+
+Verified live through the real client after the fix: cert 96679812 scanned as CGC
+returns `PSA_96679812` $50.80 conf 2; cert 4260611176 scanned as PSA returns
+`CGC_4260611176` $111 conf 5; `0096679812` scanned as CGC returns
+`PSA_96679812` $50.80. A correct guess still costs exactly one request.
+
+**Two guards the fallback cannot ship without** (added after an independent review,
+2026-09-05):
+1. **The response must be about the slab we asked for.** Retrying under a different
+   grader means nothing proves the PSA and CGC cert namespaces are disjoint — a
+   number valid for both would let the fallback price a DIFFERENT card, the exact
+   failure `identify()` exists to prevent, reintroduced by the back door. Courtyard
+   echoes `graderData.cert` and `graderData.grader`, so both are checked; only a
+   PRESENT-and-disagreeing value is rejected, so a response-shape change cannot
+   blank every card at once. Verified live: all three sample certs echo exactly.
+2. **A 400 never overwrites a price we already hold.** 400 and 404 are not equally
+   trustworthy — a 404 is the catalog speaking about the CARD, a 400 is GemRate
+   refusing the QUERY, classified from a status code alone. If their upstream or the
+   WAF ever answers 400 broadly, caching it as `not_found` would blank good prices
+   for 24h. A slab with a stored `ok` row keeps serving it, marked stale, exactly
+   like a 5xx; a 400 is cached only when there is no value to protect.
+
+**Still open:** the app is never told the grader was wrong. `identityOf` in
+`courtyard-price` does not return `grader`, so `Card.grader` keeps the bad guess —
+and `grader` is a `card_key` segment, so the key stays wrong even though the price
+is now right.
+
+### 2e. Two certs their app prices that `/scanner/card-details` 404s — OPEN — 2026-09-05
+
+**STATUS: UNRESOLVED. Do not read this as a closed finding.** The first version of
+this section concluded "Courtyard has no data, the em dash is correct". The OWNER
+then scanned both slabs in Courtyard's own app and **both displayed values**. So the
+data exists and we are asking for it wrongly — the same shape as §2b, where the
+answer was an endpoint the web API did not have.
+
+Two production certs reported as "Card Ladder shows a value, Courtyard shows an em
+dash" were replayed live. Both 404 with the CORRECT grader, from this egress, on
+every parameter shape tried.
+
+| cert | card | Courtyard `card-details` |
+|---|---|---|
+| 129123650 | 2025 Pokemon Destined Rivals #190 Ethan's Typhlosion, Illustration Rare, PSA 9 | **404** |
+| 110578584 | 2023 Pokemon SWSH Crown Zenith #GG45 FA/Deoxys VMAX, PSA 10 | **404** |
+
+Ruled out, each by live probe: the grader guess is right (both 9-digit -> PSA, and
+PSA is what the slab says); omitting the grader still 404s; `SGC`/`BGS` 400; the
+control cert 96679812 returned 200 in the same run, so no wall was active.
+
+**It is NOT a Pokemon gap, and NOT a PSA gap.** Three PSA Pokemon certs from §1b
+price fine:
+
+| cert | card | result |
+|---|---|---|
+| 98881872 | 2021 Celebrations Classic Collection #4 Charizard-Holo | 200, $513.10 conf 5 |
+| 77286827 | 1999 Pokemon Game #4 Charizard-Holo (PSA 6) | 200, $538.70 conf 5 |
+| 51203633 | 2002 Expedition #40 Charizard-Reverse Foil | 200, $6255 conf 3 |
+| 96679812 | 2022 Donruss Optic Curry (basketball-cards) | 200, $50.80 conf 2 |
+| 154334127 | 2022 Topps Chrome F1 Sapphire Hamilton (misc) | 200, price 0 = n/a |
+
+**RULED OUT so far** (all live, 2026-09-05, control cert 96679812 returned 200 in the
+same runs so no wall was active):
+* Grader guess — both are 9-digit -> PSA, and the slab labels confirm PSA.
+* `grader` omitted, lowercase, trailing-space, `SGC`, `BGS`, `PSA_`-prefixed cert,
+  zero-padded cert, `certNumber=`/`number=`/`gemrateId=` param names.
+* POST to `/card-details` (405) and OPTIONS (405).
+* **Route enumeration:** `/scanner/*` has exactly TWO routes. Express answers a
+  missing route with `Cannot GET /scanner/x` and a missing RECORD with
+  `{"message":"card details not found"}`, which separates the two cleanly. Probed and
+  absent: `card`, `cards`, `lookup`, `scan`, `price`, `card-price`, `v2/card-details`,
+  `card-market-value`, `card-sales`, `card-grader-data`, `/scanner` root,
+  `/pricing/card-estimate`, `/pricing/estimate`.
+* **Auth** — replayed with the stored Privy bearer from `.state/courtyard-session.json`:
+  identical 404. **CAVEAT: that token was captured 2026-08-29 and is probably expired,
+  so this rules out nothing.** A fresh session via the OTP relay is the real test.
+* **Lazy backfill** — re-queried after the owner's app scan; still 404. Their scan does
+  not populate the record we read.
+
+**A warning that came out of this probing:** the CDN path in `card-grader-image`
+exposes a second id (`/cert/188382772/` for cert 129123650). Querying THAT as a cert
+returned **a valid 200 for a completely different card** (1979 O-Pee-Chee Willie).
+Cert numbers are dense — a plausible 9-digit number is often somebody else's real
+cert. Any lookup that retries with a mutated cert MUST verify the echoed
+`graderData.cert`, which is why `attempt()` does.
+
+**CONFIRMED BY SCREENSHOT — their app prices BOTH of these certs** (owner's device,
+2026-09-05):
+
+| cert | their app shows | confidence | our anonymous call |
+|---|---|---|---|
+| 129123650 | **$36.90** | 3 dots | 404 |
+| 110578584 | **$172.30** | 3 dots | 404 |
+
+The row thumbnails in that screenshot are the SAME `card-grader-image` photographs,
+and the app also shows catalog identity (`Dri EN-Destined...`, `Sword and Shiel...`)
+— fields that live in `card-details.graderData`, the call that 404s for us. So the
+data exists, keyed by these certs, and we are being refused it.
+
+**Also eliminated, live 2026-09-05** (control 96679812 returned 200 throughout):
+* **Alternate hosts.** `scanner.`/`api2.`/`mobile.`/`api-mobile.courtyard.io` are all
+  NXDOMAIN. `app.courtyard.io` resolves but fails TLS verification for this path.
+* **Versioned/prefixed paths.** `/v1/`, `/v2/`, `/api/`, `/mobile/` prefixes and
+  `/scanner/v1/`, `/scanner/card-details/full` all answer `Cannot GET` — route absent.
+* **Client headers.** `x-platform: ios`, `x-app-version: 1.7.00`, `x-client: mobile`,
+  `Origin: https://courtyard.io`, an Expo/CFNetwork UA, an okhttp UA, and all of them
+  together: still 404.
+
+**That leaves AUTHENTICATION as the only untested variable, and it is now the leading
+hypothesis** — with a mechanism that makes commercial sense: a GemRate cert lookup
+costs Courtyard money, so a signed-in app user triggers a live (paid) lookup while an
+anonymous caller is served only from what Courtyard already holds. The certs that
+answer us anonymously are ones already in that store; these two are not. Note this
+would REVERSE §2b's "anonymous and bearer responses are byte-identical" — which was
+only ever tested on a cert already in the store, where both paths hit the same cache.
+
+**The one experiment that settles it, and it needs the owner's inbox:**
+```sh
+cd spike && CY_CAPTURE_ONLY=1 npm run courtyard:auth   # emails a code
+CY_CODE=123456 npm run courtyard:auth                  # completes, writes .state
+```
+then replay cert 129123650 with the FRESH bearer. The stored session in
+`.state/courtyard-session.json` was captured 2026-08-29 and Privy access tokens live
+about an hour, so the earlier "authed 404" result proves nothing at all.
+
+**If auth turns out to be the unlock, the product consequence is large**: pricing
+would require every user to connect a Courtyard account, exactly the
+`courtyard-connect` work §2b retired. The Privy OTP relay in §2a is the design for
+it and still works.
+
+**What the two misses have in common** (n=2, a lead only): both are MODERN
+SPECIAL-SUBSET Pokemon — a Galarian Gallery card (`GG45`) and an
+Illustration Rare numbered `#190` in a 182-card set. Both carry numbering outside the
+base set, which is exactly what a catalog keyed on set+number would fail to match.
+Everything that priced is conventionally numbered. Collect more failing certs before
+treating this as the rule.
+
+**`/scanner/card-grader-image` is a THIRD scanner endpoint, and it answers when
+pricing does not.** For both 404 certs it returns 200 with real front AND back slab
+photographs:
+
+```
+GET /scanner/card-grader-image?cert=129123650&grader=PSA
+{ "cert","grader","status":"OK",
+  "primaryImages":[ {imageSide:Front|Back, imageSize:Thumbnail|None, imageUrl} x4 ] }
+```
+
+Images only — no price, no identity beyond cert+grader — and the CDN path carries a
+DIFFERENT internal id (`/cert/188382772/`) than the cert.
+
+**Validated and SHIPPED 2026-09-05.** Measured before building, which is the only
+reason it was worth building:
+
+| | `card-grader-image` | Algolia (what it replaces) |
+|---|---|---|
+| certs answered | **9 of 9** (PSA + CGC, priced and unpriced, incl. one `card-details` 404s) | **1 of 4** exact-cert |
+| cert 96679812 (prices fine) | front + back | **no image at all** |
+
+The image gap was always far wider than the price gap — Algolia indexes the
+MARKETPLACE, so it misses any card Courtyard has not vaulted, which is most of them.
+
+**Behaviour that the implementation depends on, all measured:**
+* **It verifies the cert.** A made-up cert returns `200` with `primaryImages: []` and
+  `status: "ERROR"`; cert+1 returns a different card's images. So it clears the
+  "official image only on an exact cert match" bar by construction — but **200 is NOT
+  a hit**, the array length is the only thing that decides.
+* **The full-size entries carry NO `imageSize` key.** Only thumbnails are labelled
+  `"Thumbnail"`. Matching on the string `"None"` finds nothing and silently leaves
+  every card thumbnail-only. There is a regression test for exactly this.
+* **The URLs are free to serve**: no query string, no signature, no expiry, and they
+  fetch anonymously with no User-Agent (CloudFront, not api.courtyard.io). So we store
+  the URL and the phone fetches the bytes — ONE api.courtyard.io call per cert, ever,
+  on an endpoint that 403s an IP which hammers it.
+* Sizes: `/thumbnail/` ~21KB, `/small/` ~74KB (the one returned unlabelled and the one
+  we show). `/large/` ~530KB resolves by path substitution but is NOT in the response,
+  so we do not synthesise it; `/original/` 404s, which is the reminder why.
+* The slab photo has the cert number printed on the label, so an exact-cert match here
+  is verifiable by eye — rare, and worth using when checking this by hand.
+
+`fetchGraderImages` **never throws**: a missing picture must never reach the
+`source_error` path and blank a price.
 
 **The account theory is retired, with evidence.** Connecting a Courtyard account
 is NOT required for pricing — the endpoint is public. The Privy OTP relay in

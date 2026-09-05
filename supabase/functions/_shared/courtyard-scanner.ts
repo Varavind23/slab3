@@ -2,6 +2,8 @@
 //
 // GET https://api.courtyard.io/scanner/card-details?cert={cert}&grader={PSA|CGC}
 // No auth. No account. No browser. Verified 2026-08-31; see spike/README.md §2b.
+// It IS User-Agent-walled as of 2026-09-03 — see SCANNER_UA below. That is the one
+// header this request cannot go out without.
 //
 // Why this exists, when courtyard-algolia.ts already prices Courtyard: Algolia
 // indexes the MARKETPLACE — the slabs Courtyard has vaulted — and cards age out
@@ -21,6 +23,31 @@
 
 const SCANNER_BASE = "https://api.courtyard.io/scanner";
 
+/** The User-Agent every request MUST carry. `/scanner/*` is now behind a WAF that
+ *  blocks requests by User-Agent, added some time after this endpoint was found
+ *  (spike/README.md §2b records plain curl working throughout 2026-08-31; it 403s
+ *  now). Measured 2026-09-03, same machine, same minute:
+ *
+ *    403  curl/8.7.1 · python-requests · Go-http-client · node · EMPTY/absent
+ *    200  browsers · Deno/1.45.5 · supabase-edge-runtime · undici · okhttp · this
+ *
+ *  It is a blocklist of obvious tool agents, and the 403 comes from in front of
+ *  their stack — bare HTML, every header stripped, no `server: Google Frontend`.
+ *
+ *  Why this is set EXPLICITLY rather than left to the runtime: this module runs
+ *  under three runtimes on purpose (Deno on the Edge Function, Node under vitest,
+ *  and whatever a future caller brings), each with a different default, and an
+ *  ABSENT User-Agent is a 403. Inheriting the default made reachability depend on
+ *  where the code happened to be running — which is exactly the shape of an
+ *  intermittent, unexplained blank price, since a 403 lands on the same
+ *  `source_error` path as a genuine GemRate outage.
+ *
+ *  Deliberately truthful rather than a copied browser or Courtyard-app string: a
+ *  custom agent passes the wall (verified above), so there is nothing to gain by
+ *  claiming to be someone else. Not tied to MARKETING_VERSION — it identifies the
+ *  client, not the release, and must not need a bump to keep working. */
+export const SCANNER_UA = "Slabs/1.0 (graded-card inventory)";
+
 export type CyGrader = "psa" | "cgc";
 
 export type FetchLike = typeof fetch;
@@ -32,6 +59,7 @@ const f = (d?: Deps): FetchLike => d?.fetch ?? fetch;
 // ── Typed failures, mapped by callers onto the pipeline's SourceError kinds. ───
 export type CyErrorKind =
   | "not_found" // 404: Courtyard's catalog has no such cert. AUTHORITATIVE.
+  | "unresolvable" // 400: no (cert, grader) pairing we can form is valid. AUTHORITATIVE.
   | "source_error" // 5xx, incl. 502 "invalid response from gemrate". TRANSIENT.
   | "network"; // transport/parse failure
 
@@ -182,26 +210,109 @@ export function parseCardDetails(raw: any, grader: CyGrader, cert: string): CySc
   };
 }
 
-/** Fetch one slab's scanner record. `grader` is optional to Courtyard (the cert
- *  alone resolves) but we always send it — it is free precision. */
-export async function fetchCardDetails(
+// ── /scanner/card-grader-image — the slab photograph ──────────────────────────
+//
+// The SECOND scanner route, and the only source of a real slab photo we have.
+// Found while chasing the two certs in spike/README.md §2e. Why it earns its place:
+//
+//   * COVERAGE. Measured 2026-09-05 over nine certs — PSA and CGC, priced and
+//     unpriced, including one `card-details` has never heard of — it returned front
+//     AND back on 9/9. The image source it replaces (Algolia, the MARKETPLACE index)
+//     had an exact-cert hit on 1 of 4, missing even cert 96679812, the card that
+//     prices perfectly. The image gap was always far wider than the price gap.
+//   * IT VERIFIES THE CERT, so it clears the standing "official image only on an
+//     exact cert match" rule by construction: an unknown cert returns 200 with an
+//     EMPTY primaryImages, and cert+1 returns a different card's images. The one
+//     handling rule that matters: **200 does not mean there is an image — check the
+//     array.** Never treat the empty case as an error.
+//   * THE URLS ARE FREE TO SERVE. No query string, no signature, no expiry, and they
+//     fetch anonymously with no User-Agent (CloudFront, not api.courtyard.io). So we
+//     store the URL only; the phone pulls the bytes itself. That keeps this to ONE
+//     api.courtyard.io call per cert ever, which matters on an endpoint that 403s an
+//     IP that hammers it.
+//
+// Sizes: the response carries `Thumbnail` (~21KB) and `None` (~74KB, the one to
+// show). A `/large/` path substitution also resolves (~530KB) but is NOT in the
+// response, so we do not synthesise it — `/original/` 404s, which is the reminder
+// that guessing at their CDN layout is not ours to do.
+export interface CyGraderImages {
+  /** imageSize "None" — the ~74KB render. The one to display. */
+  frontUrl?: string;
+  frontThumbUrl?: string;
+  backUrl?: string;
+  backThumbUrl?: string;
+}
+
+/** PURE: the card-grader-image response → our shape. Exported for fixture tests. */
+export function parseGraderImages(raw: any): CyGraderImages {
+  const imgs: any[] = Array.isArray(raw?.primaryImages) ? raw.primaryImages : [];
+  const pick = (side: string, thumb: boolean): string | undefined => {
+    const hit = imgs.find(
+      (i) =>
+        typeof i?.imageUrl === "string" &&
+        String(i?.imageSide ?? "").toLowerCase() === side &&
+        (String(i?.imageSize ?? "") === "Thumbnail") === thumb,
+    );
+    return hit?.imageUrl;
+  };
+  return {
+    frontUrl: pick("front", false),
+    frontThumbUrl: pick("front", true),
+    backUrl: pick("back", false),
+    backThumbUrl: pick("back", true),
+  };
+}
+
+/** Fetch the slab photograph URLs. NEVER THROWS.
+ *
+ *  A missing picture must never cost a price. This runs alongside a price lookup,
+ *  and every failure mode here — the cert has no images, their CDN is unhappy, the
+ *  network blinked — has the same correct answer: no image, carry on. Returning `{}`
+ *  rather than throwing is what stops an image problem from reaching the
+ *  `source_error` path and blanking a number. */
+export async function fetchGraderImages(
   cert: string,
   grader: CyGrader,
   deps?: Deps,
-): Promise<CyScanResult> {
+): Promise<CyGraderImages> {
+  const url = `${SCANNER_BASE}/card-grader-image?cert=${encodeURIComponent(cert)}&grader=${grader.toUpperCase()}`;
+  try {
+    const res = await f(deps)(url, {
+      headers: { Accept: "application/json", "User-Agent": SCANNER_UA },
+    });
+    if (!res.ok) return {};
+    return parseGraderImages(await res.json());
+  } catch {
+    return {};
+  }
+}
+
+/** ONE request. Returns the parsed result, or throws the kind the status maps to.
+ *
+ *  Status semantics, all verified live 2026-09-05:
+ *    200  the answer.
+ *    404  {"message":"card details not found"} — AUTHORITATIVE. This cert is not
+ *         in the catalog. Cache it; the UI shows an em dash.
+ *    400  {"message":"unable to query gemrate for cert: … InvalidArgument …"} —
+ *         GemRate REFUSED THE QUERY. Not "no such card": the (cert, grader) pair
+ *         we sent is not one it will accept. Deterministic — the identical request
+ *         fails identically forever.
+ *    5xx  {"message":"invalid response from gemrate"} — their upstream. TRANSIENT.
+ */
+async function attempt(cert: string, grader: CyGrader, deps?: Deps): Promise<CyScanResult> {
   const url = `${SCANNER_BASE}/card-details?cert=${encodeURIComponent(cert)}&grader=${grader.toUpperCase()}`;
   let res: Response;
   try {
-    res = await f(deps)(url, { headers: { Accept: "application/json" } });
+    res = await f(deps)(url, {
+      // User-Agent is load-bearing, not decoration — see SCANNER_UA. Absent = 403.
+      headers: { Accept: "application/json", "User-Agent": SCANNER_UA },
+    });
   } catch (e) {
     throw new CyError("network", String(e));
   }
 
-  // 404 {"message":"card details not found"} is AUTHORITATIVE — Courtyard has no
-  // such card, so the UI shows an em dash. 502 {"message":"invalid response from
-  // gemrate"} is their upstream failing and must NOT blank a price the user has
-  // already seen (PriceWriteback holds that rule).
   if (res.status === 404) throw new CyError("not_found");
+  if (res.status === 400) throw new CyError("unresolvable", `HTTP 400 for ${grader}/${cert}`);
   if (!res.ok) throw new CyError("source_error", `HTTP ${res.status}`);
 
   let raw: unknown;
@@ -210,5 +321,95 @@ export async function fetchCardDetails(
   } catch (e) {
     throw new CyError("network", String(e));
   }
+
+  // GUARD: the answer must be about the slab we asked for.
+  //
+  // This matters because `fetchCardDetails` retries under a DIFFERENT grader, and
+  // nothing proves the PSA and CGC cert namespaces are disjoint. If some number is
+  // a valid cert for both graders, an unguarded fallback would accept a completely
+  // different card and price it as this one — the exact failure the `identify()`
+  // bar exists to prevent on the Algolia side, reintroduced through the back door.
+  //
+  // Courtyard echoes `graderData.cert` and `graderData.grader`, so we check them.
+  // Only a PRESENT-and-disagreeing value is rejected: a missing echo is not treated
+  // as a mismatch, or a response shape change would blank every card at once.
+  const gd = (raw as any)?.graderData ?? {};
+  const echoedCert = typeof gd.cert === "string" ? gd.cert.replace(/^0+/, "") : undefined;
+  const echoedGrader = typeof gd.grader === "string" ? gd.grader.toUpperCase() : undefined;
+  if (echoedCert !== undefined && echoedCert !== cert.replace(/^0+/, "")) {
+    throw new CyError("unresolvable", `cert echo ${gd.cert} != requested ${cert}`);
+  }
+  if (echoedGrader !== undefined && echoedGrader !== grader.toUpperCase()) {
+    throw new CyError("unresolvable", `grader echo ${gd.grader} != requested ${grader}`);
+  }
+
   return parseCardDetails(raw, grader, cert);
+}
+
+/** PURE: the (cert, grader) pairs to try, in order, for one scanned slab.
+ *
+ *  WHY THERE IS MORE THAN ONE. The grader is a GUESS. Nothing in a slab barcode
+ *  says who graded it — `CertParser` infers it from digit count (10 -> CGC, 7-9 ->
+ *  PSA), and when that guess is wrong GemRate answers 400, forever. Courtyard
+ *  itself does not care: it resolves a PSA cert with the grader omitted entirely.
+ *  So a 400 is a statement about OUR parameters, not about the card, and the
+ *  honest response is to try the other reading before reporting no answer.
+ *
+ *  Verified live 2026-09-05, and this is the whole bug in one table:
+ *    cert 96679812   grader=PSA -> 200 $50.80   grader=CGC -> 400
+ *    cert 4260611176 grader=CGC -> 200 $111     grader=PSA -> 400
+ *    cert 0096679812 grader=PSA -> 400 (leading zeros are not tolerated)
+ *  Omitting the grader is NOT a universal fallback — it resolves the PSA cert but
+ *  400s the CGC one — which is why this flips the grader rather than dropping it.
+ *
+ *  Leading zeros get their own attempt because a zero-padded barcode read changes
+ *  the digit count, which flips the grader guess AND is rejected on its own. */
+export function attemptsFor(cert: string, grader: CyGrader): Array<{ cert: string; grader: CyGrader }> {
+  const other: CyGrader = grader === "psa" ? "cgc" : "psa";
+  const out = [
+    { cert, grader },
+    { cert, grader: other },
+  ];
+  const trimmed = cert.replace(/^0+/, "");
+  if (trimmed && trimmed !== cert) {
+    out.push({ cert: trimmed, grader }, { cert: trimmed, grader: other });
+  }
+  return out;
+}
+
+/** Fetch one slab's scanner record, recovering from a mis-guessed grader.
+ *
+ *  Tries the pairings in `attemptsFor` until one answers, and ONLY walks past a
+ *  400 — a 404 is authoritative about the cert itself, and a 5xx is their upstream
+ *  having a bad minute; neither is improved by asking again with different
+ *  parameters, and retrying them would multiply load on an endpoint that 403s an
+ *  IP which hammers it.
+ *
+ *  The result is parsed against the pairing that actually ANSWERED, not the one we
+ *  were asked for, so `sourceKey` and `identity.grader` describe the real slab.
+ *
+ *  If every pairing 400s, that is authoritative — the caller caches it, exactly
+ *  like a 404. Before this existed, a 400 was classified `source_error`, which the
+ *  Edge Function treats as transient: never cached, so every refresh re-sent the
+ *  same doomed request and the card showed an em dash forever with nothing
+ *  anywhere saying why. Card Ladder resolves the same slab independently, which is
+ *  why the failure looked like "some cards just don't have Courtyard values". */
+export async function fetchCardDetails(
+  cert: string,
+  grader: CyGrader,
+  deps?: Deps,
+): Promise<CyScanResult> {
+  const tries = attemptsFor(cert, grader);
+  let last: CyError | undefined;
+
+  for (const t of tries) {
+    try {
+      return await attempt(t.cert, t.grader, deps);
+    } catch (e) {
+      const err = e instanceof CyError ? e : new CyError("network", String(e));
+      if (err.kind !== "unresolvable") throw err; // 404 / 5xx / network: stop here.
+      last = err;
+    }
+  }
+  throw last ?? new CyError("unresolvable");
 }

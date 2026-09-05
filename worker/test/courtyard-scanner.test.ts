@@ -3,6 +3,10 @@ import { readFileSync } from "node:fs";
 import {
   parseCardDetails,
   fetchCardDetails,
+  SCANNER_UA,
+  attemptsFor,
+  fetchGraderImages,
+  parseGraderImages,
   cySourceKey,
   gradeLabel,
   cyConfidence,
@@ -181,5 +185,291 @@ describe("fetchCardDetails error semantics", () => {
     const r = await fetchCardDetails("96679812", "psa", { fetch: stub(PSA) });
     expect(r.priceCents).toBe(5080);
     expect(r.sourceKey).toBe("PSA_96679812");
+  });
+});
+
+// The WAF in front of api.courtyard.io/scanner/* blocks by User-Agent (measured
+// 2026-09-03: curl/node/python/Go and an ABSENT agent all 403; Deno, undici,
+// okhttp, browsers and our own string all 200). This module runs under three
+// runtimes with three different defaults, so the header has to be explicit — and
+// asserted, because losing it fails in exactly the way that is hardest to read:
+// a 403 becomes `source_error`, which is the same path a genuine GemRate outage
+// takes, so the app blanks the price and nothing says why.
+describe("every request carries a User-Agent — the /scanner/* WAF blocks without one", () => {
+  const spy = () => {
+    const seen: RequestInit[] = [];
+    const fetchSpy = (async (_url: string, init: RequestInit) => {
+      seen.push(init);
+      return new Response(JSON.stringify(PSA), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    return { seen, fetchSpy };
+  };
+
+  it("sends one, and it is not empty", async () => {
+    const { seen, fetchSpy } = spy();
+    await fetchCardDetails("96679812", "psa", { fetch: fetchSpy });
+    const headers = seen[0].headers as Record<string, string>;
+    expect(headers["User-Agent"]).toBe(SCANNER_UA);
+    expect(SCANNER_UA.length).toBeGreaterThan(0);
+  });
+
+  it("does not identify as a blocked tool agent", () => {
+    // Substrings the wall 403s. A future edit that reaches for a runtime default
+    // or a copied curl string trips this rather than silently blanking prices.
+    for (const blocked of ["curl", "python-requests", "Go-http-client", "node"]) {
+      expect(SCANNER_UA.toLowerCase()).not.toContain(blocked.toLowerCase());
+    }
+  });
+
+  it("still asks for JSON", async () => {
+    const { seen, fetchSpy } = spy();
+    await fetchCardDetails("96679812", "psa", { fetch: fetchSpy });
+    expect((seen[0].headers as Record<string, string>).Accept).toBe("application/json");
+  });
+});
+
+// A mis-guessed grader is the failure this suite exists for. Nothing in a slab
+// barcode says who graded it — CertParser infers it from digit count — and GemRate
+// answers a wrong pairing with 400, deterministically, forever. Verified live
+// 2026-09-05: cert 96679812 is 200 as PSA and 400 as CGC; 4260611176 is the mirror
+// image. Until this fallback existed a 400 was classed `source_error` (transient),
+// so it was never cached and every refresh re-sent the same doomed request: the
+// card showed an em dash indefinitely while Card Ladder priced it fine.
+describe("a mis-guessed grader recovers instead of failing forever", () => {
+  /** Routes by the (cert, grader) in the URL, like the real endpoint does. */
+  const router = (ok: Array<{ cert: string; grader: string }>, otherwise = 400) => {
+    const calls: string[] = [];
+    const fetchStub = (async (url: string) => {
+      calls.push(url);
+      const hit = ok.some((o) => url.includes(`cert=${o.cert}&`) && url.includes(`grader=${o.grader}`));
+      return hit
+        ? new Response(JSON.stringify(PSA), { status: 200, headers: { "content-type": "application/json" } })
+        : new Response(JSON.stringify({ message: "unable to query gemrate for cert" }), {
+            status: otherwise,
+            headers: { "content-type": "application/json" },
+          });
+    }) as unknown as typeof fetch;
+    return { calls, fetchStub };
+  };
+
+  it("flips the grader when the guess was wrong, and answers", async () => {
+    // Scanned as CGC (10-digit guess), actually PSA.
+    const { calls, fetchStub } = router([{ cert: "96679812", grader: "PSA" }]);
+    const r = await fetchCardDetails("96679812", "cgc", { fetch: fetchStub });
+    expect(r.priceCents).toBe(5080);
+    // Keyed by the pairing that ANSWERED, not the one we guessed.
+    expect(r.sourceKey).toBe("PSA_96679812");
+    expect(calls).toHaveLength(2);
+  });
+
+  it("tries the guess FIRST, so a correct guess still costs one request", async () => {
+    const { calls, fetchStub } = router([{ cert: "96679812", grader: "PSA" }]);
+    await fetchCardDetails("96679812", "psa", { fetch: fetchStub });
+    expect(calls).toHaveLength(1);
+  });
+
+  it("recovers a zero-padded cert, which flips the digit-count guess too", async () => {
+    const { calls, fetchStub } = router([{ cert: "96679812", grader: "PSA" }]);
+    const r = await fetchCardDetails("0096679812", "cgc", { fetch: fetchStub });
+    expect(r.priceCents).toBe(5080);
+    expect(r.sourceKey).toBe("PSA_96679812");
+    expect(calls.length).toBeLessThanOrEqual(4);
+  });
+
+  it("reports `unresolvable` — an ANSWER, cached — when no pairing works", async () => {
+    const { fetchStub } = router([]);
+    await expect(fetchCardDetails("12345678", "psa", { fetch: fetchStub })).rejects.toMatchObject({
+      kind: "unresolvable",
+    });
+  });
+
+  it("does NOT walk the fallbacks on a 404 — that is authoritative about the cert", async () => {
+    const calls: string[] = [];
+    const stub404 = (async (url: string) => {
+      calls.push(url);
+      return new Response(JSON.stringify(NOTFOUND), { status: 404 });
+    }) as unknown as typeof fetch;
+    await expect(fetchCardDetails("133653550", "psa", { fetch: stub404 })).rejects.toMatchObject({
+      kind: "not_found",
+    });
+    expect(calls).toHaveLength(1);
+  });
+
+  it("does NOT walk the fallbacks on a 5xx — their upstream, not our parameters", async () => {
+    const calls: string[] = [];
+    const stub502 = (async (url: string) => {
+      calls.push(url);
+      return new Response(JSON.stringify({ message: "invalid response from gemrate" }), { status: 502 });
+    }) as unknown as typeof fetch;
+    await expect(fetchCardDetails("96679812", "psa", { fetch: stub502 })).rejects.toMatchObject({
+      kind: "source_error",
+    });
+    expect(calls).toHaveLength(1);
+  });
+});
+
+describe("attemptsFor", () => {
+  it("puts the caller's own guess first, then the other grader", () => {
+    expect(attemptsFor("96679812", "psa")).toEqual([
+      { cert: "96679812", grader: "psa" },
+      { cert: "96679812", grader: "cgc" },
+    ]);
+  });
+
+  it("adds zero-stripped variants only when there are leading zeros", () => {
+    expect(attemptsFor("0096679812", "cgc")).toEqual([
+      { cert: "0096679812", grader: "cgc" },
+      { cert: "0096679812", grader: "psa" },
+      { cert: "96679812", grader: "cgc" },
+      { cert: "96679812", grader: "psa" },
+    ]);
+  });
+
+  it("never proposes an empty cert", () => {
+    expect(attemptsFor("000", "psa").every((a) => a.cert.length > 0)).toBe(true);
+  });
+});
+
+// The fallback retries under a DIFFERENT grader, and nothing proves the PSA and
+// CGC cert namespaces are disjoint. Without this guard, a number that is a valid
+// cert for BOTH graders would let the fallback accept a different card and price
+// it as this slab — the same class of error the `identify()` bar prevents on the
+// Algolia side. Courtyard echoes graderData.cert/grader, so we verify them.
+describe("a fallback can never accept a different card", () => {
+  const withEcho = (cert: string, grader: string) => {
+    const body = JSON.parse(JSON.stringify(PSA));
+    body.graderData.cert = cert;
+    body.graderData.grader = grader;
+    return (async () =>
+      new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })) as unknown as typeof fetch;
+  };
+
+  it("rejects a 200 whose echoed cert is a different card", async () => {
+    await expect(
+      fetchCardDetails("96679812", "psa", { fetch: withEcho("11112222", "PSA") }),
+    ).rejects.toMatchObject({ kind: "unresolvable" });
+  });
+
+  it("refuses a grader-mismatched 200 when the other grader has no answer either", async () => {
+    // The PSA attempt comes back labelled CGC; the CGC attempt then 400s. Neither
+    // pairing is self-consistent, so there is no answer — rather than accepting a
+    // response about a grader we did not ask for.
+    //
+    // NOTE the deliberate non-case: if the CGC attempt HAD returned a CGC-labelled
+    // 200, accepting it as CGC is correct, not a leak. That is the fallback working
+    // — the slab really is CGC and our digit-count guess was wrong. The guard exists
+    // to stop a response describing a DIFFERENT CARD, which the cert echo catches.
+    const fetchStub = (async (url: string) => {
+      const body = JSON.parse(JSON.stringify(PSA));
+      body.graderData.cert = "96679812";
+      body.graderData.grader = "CGC";
+      return url.includes("grader=PSA")
+        ? new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } })
+        : new Response(JSON.stringify({ message: "unable to query gemrate for cert" }), { status: 400 });
+    }) as unknown as typeof fetch;
+    await expect(
+      fetchCardDetails("96679812", "psa", { fetch: fetchStub }),
+    ).rejects.toMatchObject({ kind: "unresolvable" });
+  });
+
+  it("accepts the matching echo, ignoring leading zeros on our side", async () => {
+    const r = await fetchCardDetails("0096679812", "psa", { fetch: withEcho("96679812", "PSA") });
+    expect(r.priceCents).toBe(5080);
+  });
+
+  it("does NOT reject when the echo is absent — a shape change must not blank everything", async () => {
+    const body = JSON.parse(JSON.stringify(PSA));
+    delete body.graderData.cert;
+    delete body.graderData.grader;
+    const noEcho = (async () =>
+      new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } })) as unknown as typeof fetch;
+    const r = await fetchCardDetails("96679812", "psa", { fetch: noEcho });
+    expect(r.priceCents).toBe(5080);
+  });
+});
+
+// The slab photograph, from /scanner/card-grader-image. Fixtures are captured from
+// the live endpoint (cert 129123650, and a made-up cert for the empty case), so the
+// shape below is real, not imagined — including the two traps in it.
+const IMAGES = load("courtyard-grader-image.json");
+const IMAGES_EMPTY = load("courtyard-grader-image-empty.json");
+
+describe("parseGraderImages", () => {
+  it("reads front and back at both sizes", () => {
+    const r = parseGraderImages(IMAGES);
+    expect(r.frontUrl).toContain("/small/");
+    expect(r.frontThumbUrl).toContain("/thumbnail/");
+    expect(r.backUrl).toContain("/small/");
+    expect(r.backThumbUrl).toContain("/thumbnail/");
+    expect(r.frontUrl).not.toBe(r.backUrl);
+  });
+
+  it("treats an ABSENT imageSize as the full-size entry", () => {
+    // TRAP: the full-size images carry no `imageSize` key at all — only the
+    // thumbnails are labelled. Matching on the string "None" would find nothing and
+    // silently leave every card thumbnail-only.
+    const full = IMAGES.primaryImages.filter((i: any) => i.imageSize === undefined);
+    expect(full.length).toBe(2);
+    expect(parseGraderImages(IMAGES).frontUrl).toBeDefined();
+  });
+
+  it("returns nothing for a cert with no images — 200 is NOT a hit", () => {
+    // The endpoint answers an unknown cert with 200 + an empty array (and
+    // status:"ERROR"). Treating 200 as success is how a card would get no image and
+    // no explanation. The array length is the only thing that decides.
+    expect(IMAGES_EMPTY.primaryImages).toEqual([]);
+    expect(parseGraderImages(IMAGES_EMPTY)).toEqual({
+      frontUrl: undefined, frontThumbUrl: undefined, backUrl: undefined, backThumbUrl: undefined,
+    });
+  });
+
+  it("survives junk without throwing", () => {
+    for (const junk of [null, {}, { primaryImages: null }, { primaryImages: [{}, 1, "x"] }]) {
+      expect(() => parseGraderImages(junk)).not.toThrow();
+    }
+  });
+});
+
+describe("fetchGraderImages never costs a price", () => {
+  // A missing picture must never blank a number. Every failure here has the same
+  // right answer — no image, carry on — so this function does not throw at all. If
+  // it did, the throw would land on the `source_error` path beside the price.
+  const failing = (status: number) =>
+    (async () => new Response("boom", { status })) as unknown as typeof fetch;
+
+  it("returns {} on 5xx", async () => {
+    expect(await fetchGraderImages("96679812", "psa", { fetch: failing(503) })).toEqual({});
+  });
+
+  it("returns {} on a transport failure", async () => {
+    const boom = (async () => { throw new Error("offline"); }) as unknown as typeof fetch;
+    expect(await fetchGraderImages("96679812", "psa", { fetch: boom })).toEqual({});
+  });
+
+  it("returns {} on unparseable JSON", async () => {
+    const bad = (async () => new Response("<html>", { status: 200 })) as unknown as typeof fetch;
+    expect(await fetchGraderImages("96679812", "psa", { fetch: bad })).toEqual({});
+  });
+
+  it("sends the User-Agent — this route is behind the same WAF", async () => {
+    const seen: RequestInit[] = [];
+    const spy = (async (_u: string, init: RequestInit) => {
+      seen.push(init);
+      return new Response(JSON.stringify(IMAGES), { status: 200 });
+    }) as unknown as typeof fetch;
+    await fetchGraderImages("129123650", "psa", { fetch: spy });
+    expect((seen[0].headers as Record<string, string>)["User-Agent"]).toBe(SCANNER_UA);
+  });
+
+  it("parses a real response end to end", async () => {
+    const ok = (async () => new Response(JSON.stringify(IMAGES), { status: 200 })) as unknown as typeof fetch;
+    const r = await fetchGraderImages("129123650", "psa", { fetch: ok });
+    expect(r.frontUrl).toMatch(/^https:\/\/.*\.jpg$/);
   });
 });

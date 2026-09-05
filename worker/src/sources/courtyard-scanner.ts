@@ -29,12 +29,16 @@ export {
   fetchCardDetails,
   parseCardDetails,
   cySourceKey,
+  SCANNER_UA,
+  attemptsFor,
+  fetchGraderImages,
+  parseGraderImages,
   gradeLabel,
   cyConfidence,
   usdToCents,
   CyError,
 } from "../../../supabase/functions/_shared/courtyard-scanner";
-export type { CyScanResult, CyIdentity, CySaleGroup, CyGrader } from "../../../supabase/functions/_shared/courtyard-scanner";
+export type { CyScanResult, CyIdentity, CySaleGroup, CyGrader, CyGraderImages } from "../../../supabase/functions/_shared/courtyard-scanner";
 
 /** The metric name this source writes to price_cache. Courtyard's own label for
  *  the number is "Market Value" (scanner.courtyardPricing.marketValue in their
@@ -73,6 +77,10 @@ export function populationForGrade(result: CyScanResult, grader?: string, grade?
  *  `source_error` must never blank a price the user already saw. */
 export const CY_ERROR_STATUS: Record<CyErrorKind, "not_found" | "source_error"> = {
   not_found: "not_found",
+  // Every (cert, grader) pairing was refused by GemRate. Deterministic, so it is
+  // an ANSWER (no Courtyard value for this slab) and gets cached like a 404 —
+  // classifying it as transient is what made these cards retry forever in silence.
+  unresolvable: "not_found",
   source_error: "source_error",
   network: "source_error",
 };
