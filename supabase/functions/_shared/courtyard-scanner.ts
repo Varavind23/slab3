@@ -48,6 +48,39 @@ const SCANNER_BASE = "https://api.courtyard.io/scanner";
  *  client, not the release, and must not need a bump to keep working. */
 export const SCANNER_UA = "Slabs/1.0 (graded-card inventory)";
 
+/** The second header this endpoint cannot go out without, and the one that decides
+ *  whether a cert RESOLVES AT ALL.
+ *
+ *  Without it, `card-details` answers `404 {"card details not found"}` for a large
+ *  class of certs — indistinguishable from a cert their catalog genuinely does not
+ *  know, which is exactly how it read to us for weeks: "Courtyard shows an em dash
+ *  while Card Ladder prices the same slab fine". With it, the identical request
+ *  returns a full priced record.
+ *
+ *  Measured live 2026-09-06, same minute, varying ONLY this header:
+ *
+ *    cert 60928769 PSA   404  ->  200 $144.40 conf 5   (1999 Pokemon Game Movie Mewtwo)
+ *    cert 66581638 PSA   404  ->  200 $155.40 conf 5
+ *    cert 129123650 PSA  404  ->  200 $38.40  conf 5   (spike/README.md §2e, open since 09-05)
+ *    cert 133653550 PSA  404  ->  200 $125.40 conf 5   (§2b's "authoritative 404" cert!)
+ *    cert 96679812 PSA   200  ->  200 $50.80  conf 2   (unchanged — strict superset)
+ *
+ *  It is a STRICT SUPERSET: no cert that already answered changed price, confidence
+ *  or response shape (the `acquisition` block is present either way), so this does
+ *  not select a different document — it gates which certs the backend will resolve.
+ *
+ *  Found by disassembling Courtyard's Android app (io.courtyard.app 1.7.10, Hermes
+ *  bytecode — `hermes-dec`, because the header is assembled in CODE and the string
+ *  table alone does not show the conditional). Their `getCustomHeaders` adds it to
+ *  every request whose URL contains `/scanner/`, so we do the same. Sending it is
+ *  truthful: we already read and surface `acquisition.accepted`.
+ *
+ *  NOT the gate, though the app sends it too: `cy-client-id` (a Statsig anonymous
+ *  id). Sending that alone still 404s. Neither is auth — a fresh Privy bearer makes
+ *  no difference — nor the User-Agent, nor the grader, nor the URL. See
+ *  spike/README.md §2f for the full elimination table. */
+export const SCANNER_ACQ_HEADER = "cy-supports-acquisition-status";
+
 export type CyGrader = "psa" | "cgc";
 
 export type FetchLike = typeof fetch;
@@ -278,7 +311,17 @@ export async function fetchGraderImages(
   const url = `${SCANNER_BASE}/card-grader-image?cert=${encodeURIComponent(cert)}&grader=${grader.toUpperCase()}`;
   try {
     const res = await f(deps)(url, {
-      headers: { Accept: "application/json", "User-Agent": SCANNER_UA },
+      // Same two headers as card-details. The acquisition one measurably changes
+      // nothing on THIS route (a cert with no photo returns `primaryImages: null`
+      // + `status: "NO_IMAGE"` either way, verified 2026-09-06) — it is sent
+      // because Courtyard's app sends it on every `/scanner/*` URL and because a
+      // route that silently starts gating on it must not become a second
+      // months-long hunt.
+      headers: {
+        Accept: "application/json",
+        "User-Agent": SCANNER_UA,
+        [SCANNER_ACQ_HEADER]: "1",
+      },
     });
     if (!res.ok) return {};
     return parseGraderImages(await res.json());
@@ -304,8 +347,14 @@ async function attempt(cert: string, grader: CyGrader, deps?: Deps): Promise<CyS
   let res: Response;
   try {
     res = await f(deps)(url, {
-      // User-Agent is load-bearing, not decoration — see SCANNER_UA. Absent = 403.
-      headers: { Accept: "application/json", "User-Agent": SCANNER_UA },
+      // BOTH headers are load-bearing, not decoration. Absent User-Agent = 403
+      // (SCANNER_UA); absent acquisition-status = a 404 on a cert that prices
+      // perfectly with it (SCANNER_ACQ_HEADER). Neither is optional.
+      headers: {
+        Accept: "application/json",
+        "User-Agent": SCANNER_UA,
+        [SCANNER_ACQ_HEADER]: "1",
+      },
     });
   } catch (e) {
     throw new CyError("network", String(e));

@@ -30,6 +30,7 @@ export {
   parseCardDetails,
   cySourceKey,
   SCANNER_UA,
+  SCANNER_ACQ_HEADER,
   attemptsFor,
   fetchGraderImages,
   parseGraderImages,

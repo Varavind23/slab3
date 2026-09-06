@@ -21,8 +21,10 @@
 import {
   fetchCardDetails,
   fetchGraderImages,
+  attemptsFor,
   CyError,
   type CyScanResult,
+  type CyGraderImages,
 } from "../_shared/courtyard-scanner.ts";
 import { admin, callerId, json } from "../_shared/http.ts";
 
@@ -182,7 +184,15 @@ Deno.serve(async (req) => {
       // A card Courtyard cannot PRICE still has a slab photograph, and this is
       // exactly the row that needs one: no price, no marketplace listing, so
       // without this the app falls back to the camera capture. Never throws.
-      const imgs = await fetchGraderImages(cert, grader);
+      // Every pairing failed, so the grader we were handed is exactly the thing
+      // in doubt — an `unresolvable` means GemRate refused all of them. Walk the
+      // same pairings for the picture rather than trusting the guess that just
+      // lost. Stops at the first hit; each call is cheap and never throws.
+      let imgs: CyGraderImages = {};
+      for (const t of attemptsFor(cert, grader)) {
+        imgs = await fetchGraderImages(t.cert, t.grader);
+        if (imgs.frontUrl ?? imgs.frontThumbUrl) break;
+      }
       await db.from("cy_scan_cache").upsert({
         grader,
         cert,
@@ -212,12 +222,29 @@ Deno.serve(async (req) => {
   //    card, it simply has no number for it, which the UI renders as an em dash.
   const row = rowOf(grader, cert, result);
 
+  // What Courtyard actually answered about, which `fetchCardDetails` may have had
+  // to correct: the other grader, or the cert without its leading zeros. The
+  // response echoes both, and the parse carries them through.
+  const answeredGrader = ((result.identity.grader ?? grader).toLowerCase() === "cgc"
+    ? "cgc"
+    : "psa") as "psa" | "cgc";
+  const answeredCert = result.identity.cert ?? cert;
+
   // card-details' own `primaryImages` has come back empty on every card sampled, so
   // the photograph comes from the sibling route. Only when we do not already have
   // one: the URL is stable and unsigned, so a stored one never goes bad, and this
   // keeps it to ONE extra upstream call per cert for the life of the row.
+  //
+  // ASK WITH THE PAIRING THAT ANSWERED, not the one we were asked for. The grader
+  // is a guess — nothing in a slab barcode names it, CertParser infers it from
+  // digit count — and `fetchCardDetails` corrects a wrong guess by walking
+  // `attemptsFor()` past the 400. `card-grader-image` gets no such correction, so
+  // sending it the original guess asks about a slab that does not exist and gets
+  // 200 with an empty array. Because `fetchGraderImages` never throws, that
+  // reached the user as a silently pictureless row on exactly the cards the price
+  // fallback had just rescued (2026-09-05).
   if (!row.image_url) {
-    const imgs = await fetchGraderImages(cert, grader);
+    const imgs = await fetchGraderImages(answeredCert, answeredGrader);
     row.image_url = imgs.frontUrl ?? imgs.frontThumbUrl ?? null;
   }
 

@@ -425,7 +425,7 @@ for that slab, the number this whole spike existed to reach.
 | 96679812 | PSA | $50.80 conf 2, 5 comp groups — the bar card |
 | 4260611176 | CGC | $111 conf 5, 9 comp groups |
 | 41066652 | PSA | $247 conf 4, 29 comp groups |
-| 133653550 | PSA | 404 not found |
+| 133653550 | PSA | 404 not found — **WRONG, see §2f**: prices at $125.40 once the request sends `cy-supports-acquisition-status: 1` |
 
 **This overturns §2's conclusions, and more besides:**
 1. **It is a catalog-backed pricing MODEL, not vault inventory.** Cert 41066652
@@ -526,7 +526,7 @@ has never priced. Nothing anywhere says "blocked" — it looks exactly like
 | 96679812 | PSA | 200, `price: 50.8`, conf `"2"`, g10, pop 38, 5 groups — **the bar** |
 | 154334127 | PSA | 200, `price: 0`, conf `"0"` ("not applicable"), g9, 1 group |
 | 4260611176 | CGC | 200, `price: 111`, conf `"5"`, `g10pristine`, pop 380, 9 groups |
-| 133653550 | PSA | 404 not found (authoritative) |
+| 133653550 | PSA | 404 not found — **NOT authoritative, see §2f**: $125.40 with `cy-supports-acquisition-status: 1` |
 
 **Standing rule:** before recording any Courtyard 403 as a finding, check the UA
 you sent. A 403 on `/scanner/*` from a tool agent says nothing about access; a 403
@@ -558,7 +558,7 @@ Verified live 2026-09-05, same minute, same UA:
 | `cert=4260611176&grader=PSA` | **400** |
 | `cert=4260611176` (grader omitted) | **400** |
 | `cert=0096679812&grader=PSA` (zero-padded) | **400** |
-| `cert=133653550&grader=PSA` (unknown cert) | 404 |
+| `cert=133653550&grader=PSA` (assumed unknown) | 404 — **only without the §2f header**; it is a known, priceable cert |
 | `grader=psa` (lowercase) | 200 — case does not matter |
 
 **Why it was permanent and silent.** `fetchCardDetails` mapped everything that was
@@ -612,9 +612,12 @@ returns `PSA_96679812` $50.80 conf 2; cert 4260611176 scanned as PSA returns
 and `grader` is a `card_key` segment, so the key stays wrong even though the price
 is now right.
 
-### 2e. Two certs their app prices that `/scanner/card-details` 404s — OPEN — 2026-09-05
+### 2e. Two certs their app prices that `/scanner/card-details` 404s — **SOLVED by §2f** — 2026-09-05
 
-**STATUS: UNRESOLVED. Do not read this as a closed finding.** The first version of
+**STATUS: RESOLVED 2026-09-06 — the cause is a missing REQUEST HEADER, see §2f.**
+Everything below is the hunt that led there; the conclusions it reaches about
+*coverage* ("the data exists and we are asking for it wrongly") were right, and the
+thing being asked wrongly was the header, not the URL, the grader or the account. The first version of
 this section concluded "Courtyard has no data, the em dash is correct". The OWNER
 then scanned both slabs in Courtyard's own app and **both displayed values**. So the
 data exists and we are asking for it wrongly — the same shape as §2b, where the
@@ -770,6 +773,108 @@ is NOT required for pricing — the endpoint is public. The Privy OTP relay in
 §2a still works and is still the right design *if* a future feature needs a user
 session, but nothing in the price path needs it. Do not build
 `courtyard-connect` for pricing.
+
+### 2f. THE 404s ARE OURS: `/scanner/*` needs `cy-supports-acquisition-status: 1` — 2026-09-06
+
+**One request header decides whether a cert resolves at all.** Courtyard's app sends
+it on every `/scanner/*` call; we never did. Without it a large class of certs
+answers `404 {"message":"card details not found"}` — indistinguishable from a cert
+their catalog genuinely does not know. With it, the same certs return a full priced
+record. This is the cause of §2e and of every "Courtyard shows an em dash while Card
+Ladder prices it fine" report.
+
+```
+GET /scanner/card-details?cert=60928769&grader=PSA
+  (no header)                          -> 404 {"message":"card details not found"}
+  cy-supports-acquisition-status: 1    -> 200 $144.40 confidence 5
+```
+
+**Measured 2026-09-06, live, same minute, varying ONLY that header:**
+
+| cert | grader | without | with |
+|---|---|---|---|
+| 60478273 | PSA | 404 | **200 $183.90 conf 5** |
+| 62320645 | PSA | 404 | **200 $16.90 conf 5** |
+| 60928769 | PSA | 404 | **200 $144.40 conf 5** |
+| 60928772 | PSA | 404 | **200 $180.90 conf 5** |
+| 60928787 | PSA | 404 | **200 $70.50 conf 5** |
+| 66581638 | PSA | 404 | **200 $155.40 conf 5** |
+| 129123650 | PSA | 404 | **200 $38.40 conf 5** | (§2e cert 1 — their app showed $36.90)
+| 110578584 | PSA | 404 | **200 $174.10 conf 5** | (§2e cert 2 — their app showed $172.30)
+| 133653550 | PSA | 404 | **200 $125.40 conf 5** | (the cert §2b recorded as an authoritative 404)
+| 96679812 | PSA | 200 $50.80 conf 2 | 200 $50.80 conf 2 |
+| 154334127 | PSA | 200 price 0 (n/a) | 200 price 0 (n/a) |
+| 4260611176 | CGC | 200 $111 conf 5 | 200 $111 conf 5 |
+
+**It is a strict superset.** No cert that already answered changed price, confidence
+or response shape — the `acquisition` block is present either way on 96679812. So the
+header does not select a different document; it gates which certs the backend will
+resolve at all. The consistent reading is that it opts into a newer resolution path
+(the one that will do a live GemRate lookup for a cert not already in their store),
+and clients that do not announce support are served only the pre-populated subset.
+
+**Where it came from.** Torn out of the Android app, `io.courtyard.app` 1.7.10 (91),
+Hermes bytecode as in §2b — but the string table alone is not enough this time, the
+header is assembled in code. Disassembled with `hermes-dec`; the chain is:
+
+```
+ApiConfigProvider          -> OpenAPI.HEADERS = getCustomHeaders
+getCustomHeaders(options)  -> { 'cy-client-id': statsigUser.customIDs.segmentAnonymousId ?? '' }
+                              if (url.includes('/checkout')) Object.assign(h, getCheckoutTraceHeaders())
+                              if (url.includes('/scanner/')) h['cy-supports-acquisition-status'] = '1'
+ScannerService.getScannerCardDetails(cert, grader)
+                           -> { method:'GET', url:'/scanner/card-details',
+                                query:{cert,grader}, errors:{400,404,429,500} }
+OpenAPI.BASE = ENV.apiUrl  -> production 'https://api.courtyard.io'   (identical to ours)
+```
+
+`cy-client-id` is the Statsig anonymous id and is **not** the gate — sending it alone
+still 404s. Only `cy-supports-acquisition-status: 1` matters. Sending it is truthful:
+we already read `acquisition.accepted` and surface it.
+
+**Ruled out before the header was found** (all live 2026-09-05/06, control 96679812
+answering 200 throughout, so no wall was active):
+* **Authentication.** A FRESH Privy bearer (OTP relay, token minted ~60s earlier)
+  returns the identical 404. This finally settles the question §2e left open and
+  confirms the account theory's retirement for a different reason than it was retired.
+* **The grader.** GemRate's own error names the supported set — `BCCG, BECKETT, BGS,
+  BVG, CGC, CSG, PSA, SGC`. All eight tried on 60928769: PSA 404s, the other seven
+  400. So the grader guess was right and there was no pairing left to walk.
+* **User-Agent.** Seven agents (ours, okhttp, a Courtyard/CFNetwork string, desktop
+  Chrome, iOS Safari, Deno) all 404. Absent UA still 403s, per §2c.
+* **The URL.** `OpenAPI.BASE` in the production config is `https://api.courtyard.io`,
+  byte-identical to ours. `api.dev.courtyard.io/forwarder` exists only in the dev
+  config; the production host has no `/forwarder` route (404 on GET and POST).
+* **Extra query params** (`refresh`, `force`, `live`, `manual`, `source`) — no effect.
+* **Lazy backfill.** Re-probed 10 and 40 minutes after the owner scanned all six in
+  Courtyard's own app: still 404 without the header. Their scan does not seed what we
+  read, which is why the §2e "re-queried after the owner's app scan" test misled.
+* **A dropped digit.** Restoring a leading `1` resolves two of the six, but to 2025
+  football cards, not the Pokemon the slabs actually are. Cert space is dense (§2e).
+
+**Consequences to carry into the code:**
+1. **Send the header on BOTH `/scanner/*` calls** in
+   `supabase/functions/_shared/courtyard-scanner.ts` — `attempt()` and
+   `fetchGraderImages()` — beside `SCANNER_UA`. Treat it as load-bearing exactly like
+   the UA: absent, it silently halves coverage.
+2. **`133653550` IS NOT A NOT_FOUND CERT.** It is used as the authoritative-404 case
+   in §2b's table and in `supabase/functions/README.md`'s smoke test. It prices at
+   $125.40 with the header. A new fixture cert is needed for the 404 path, and it
+   must be verified WITH the header.
+3. **The 400/`unresolvable` machinery of §2d stays.** A wrong grader is still a 400
+   and `attemptsFor()` still earns its place — the header changes the 404 class only.
+4. **Cached `not_found` rows are now wrong.** `cy_scan_cache` held 15 of them at the
+   time of this finding; they must be purged, not waited out, or they serve an em dash
+   for their full 24h TTL.
+5. **This does NOT explain the missing slab photographs.** `card-grader-image` returns
+   `200 {"primaryImages": null, "status": "NO_IMAGE"}` with or without the header, on
+   certs that price perfectly. That gap is genuinely upstream — see the §2e note that
+   "200 with an EMPTY array" is really `null` plus `NO_IMAGE` for these.
+
+**Standing rule, alongside §2c's:** before recording ANY Courtyard `/scanner/*` result
+— a 404 especially — check that the request carried both `SCANNER_UA` and
+`cy-supports-acquisition-status: 1`. A 404 without the header says nothing about
+whether Courtyard knows the cert.
 
 ## 3. Physical slab scanning (needs iPhone + real PSA and CGC slabs)
 

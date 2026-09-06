@@ -88,7 +88,10 @@ curl -s localhost:54321/functions/v1/courtyard-price -H "Authorization: Bearer $
 #    confidence for this slab (confirmed on device 2026-08-31).
 curl -s ... -d '{"cert":"154334127","grader":"psa"}'   # priceCents NULL — their app
                                                        # says "not applicable". Never $0.
-curl -s ... -d '{"cert":"133653550","grader":"psa"}'   # status not_found (404 upstream)
+# NOTE: there is currently NO verified not_found cert. 133653550 was this case
+# until 2026-09-06, when it turned out to price at $125.40 once the request
+# carries `cy-supports-acquisition-status: 1` (spike/README.md §2f). Any
+# replacement MUST be verified to 404 *with* that header before it is trusted.
 ```
 
 Three response states that must stay distinct, and are asserted in

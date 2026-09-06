@@ -4,6 +4,7 @@ import {
   parseCardDetails,
   fetchCardDetails,
   SCANNER_UA,
+  SCANNER_ACQ_HEADER,
   attemptsFor,
   fetchGraderImages,
   parseGraderImages,
@@ -228,6 +229,40 @@ describe("every request carries a User-Agent — the /scanner/* WAF blocks witho
     const { seen, fetchSpy } = spy();
     await fetchCardDetails("96679812", "psa", { fetch: fetchSpy });
     expect((seen[0].headers as Record<string, string>).Accept).toBe("application/json");
+  });
+
+  // The SECOND load-bearing header, and the one with teeth: without it the
+  // endpoint 404s certs it will price perfectly with it (measured 2026-09-06 —
+  // cert 60928769 goes 404 -> $144.40 conf 5 on this header alone). A 404 is
+  // AUTHORITATIVE in this pipeline: it gets cached and renders an em dash, so
+  // dropping this header does not fail loudly, it silently converts real prices
+  // into "Courtyard has no data" for 24h at a time. See spike/README.md §2f.
+  it("sends the acquisition-status header — without it a priceable cert 404s", async () => {
+    const { seen, fetchSpy } = spy();
+    await fetchCardDetails("96679812", "psa", { fetch: fetchSpy });
+    expect((seen[0].headers as Record<string, string>)[SCANNER_ACQ_HEADER]).toBe("1");
+  });
+
+  it("sends it on EVERY attempt, including the grader-flip retry", async () => {
+    // The retry path builds its own request. A header set only on the first
+    // attempt would rescue nothing for exactly the certs that need both fixes.
+    const seen: RequestInit[] = [];
+    const flip = (async (url: string, init: RequestInit) => {
+      seen.push(init);
+      return url.includes("grader=PSA")
+        ? new Response(JSON.stringify({ message: "invalid" }), { status: 400 })
+        : new Response(JSON.stringify(PSA), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+    }) as unknown as typeof fetch;
+    await fetchCardDetails("96679812", "psa", { fetch: flip }).catch(() => {});
+    expect(seen.length).toBeGreaterThan(1);
+    for (const init of seen) {
+      const h = init.headers as Record<string, string>;
+      expect(h[SCANNER_ACQ_HEADER]).toBe("1");
+      expect(h["User-Agent"]).toBe(SCANNER_UA);
+    }
   });
 });
 
@@ -465,6 +500,11 @@ describe("fetchGraderImages never costs a price", () => {
     }) as unknown as typeof fetch;
     await fetchGraderImages("129123650", "psa", { fetch: spy });
     expect((seen[0].headers as Record<string, string>)["User-Agent"]).toBe(SCANNER_UA);
+    // Measurably a no-op on THIS route today (a photo-less cert returns
+    // `primaryImages: null` either way). Asserted so the two scanner routes stay
+    // identical: if Courtyard ever gates images the way it gates card-details,
+    // this is already correct rather than another silent coverage hole.
+    expect((seen[0].headers as Record<string, string>)[SCANNER_ACQ_HEADER]).toBe("1");
   });
 
   it("parses a real response end to end", async () => {
