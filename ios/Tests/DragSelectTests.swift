@@ -135,4 +135,20 @@ struct DragSelectControllerTests {
         #expect(!controller.isActive)
         #expect(controller.move(to: 4, rowIDs: ids) == nil, "a finished scrub must not keep painting")
     }
+
+    /// The Cards list disables scrolling while a scrub is active, so an anchor left
+    /// standing is a list nobody can scroll (user report, 0.5). `endScrub` is now
+    /// also called from paths that may fire when no scrub is running — leaving
+    /// selection mode, and the screen disappearing — so ending must be safe to call
+    /// at any time, including twice.
+    @Test func endingIsSafeWhenNoScrubIsRunning() {
+        let controller = DragSelectController()
+        controller.end()
+        #expect(!controller.isActive)
+
+        _ = controller.begin(at: 2, rowIDs: ids, selection: [])
+        controller.end()
+        controller.end()
+        #expect(!controller.isActive, "a second end must not revive the session")
+    }
 }

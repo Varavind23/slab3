@@ -91,7 +91,18 @@ struct CardsScreen: View {
                 // the same vertical drag: the list scrolls, the finger never crosses
                 // a row relative to the content, and dragging down selects nothing.
                 // Reaching the rows below is what the edge auto-scroll is for.
-                .scrollDisabled(dragSelect.isActive)
+                // `&& app.isSelecting` is a FAILSAFE, not a redundancy: endScrub()
+                // is only reachable from the sequence's onEnded, and a CANCELLED
+                // gesture never calls it — a row recycled by LazyVStack mid-scrub
+                // does exactly that, which the edge auto-scroll actively causes.
+                // A stranded anchor used to leave the list unscrollable until the
+                // screen was rebuilt (user report, 0.5). Leaving selection mode now
+                // always gives scrolling back.
+                .scrollDisabled(dragSelect.isActive && app.isSelecting)
+                .onChange(of: app.isSelecting) { _, selecting in
+                    if !selecting { endScrub() }
+                }
+                .onDisappear { endScrub() }
                 // One rendered row's index and frame give the whole stack's origin
                 // and pitch. It refreshes as the list scrolls, which is what lets a
                 // finger position become a row index without tracking scroll offset
@@ -322,10 +333,17 @@ struct CardsScreen: View {
     /// row is under it, against the rows' measured origin, and how near it is to
     /// the viewport's edges, against the viewport's frame.
     private func scrub(at index: Int) -> some Gesture {
-        // Short, because by the time this gesture exists at all the user is ALREADY
-        // in selection mode — they chose Select from the menu. The hold only has to
-        // separate a deliberate scrub from a flick meant to scroll the list.
-        LongPressGesture(minimumDuration: 0.18)
+        // By the time this gesture exists the user is ALREADY in selection mode —
+        // they chose Select from the menu — so the hold only has to separate a
+        // deliberate scrub from a drag meant to scroll the list.
+        //
+        // It was 0.18s, and that is INSIDE the pause a finger makes between landing
+        // and dragging: a user scrolling a selected list held still for a fifth of a
+        // second, the press fired, scrollDisabled went true under their finger, and
+        // the drag painted a selection instead of scrolling (user report, 0.5).
+        // Scroll is the common action here and must win ties; Photos holds roughly
+        // this long before it starts painting too.
+        LongPressGesture(minimumDuration: 0.4)
             .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .global))
             .onChanged { value in
                 switch value {
