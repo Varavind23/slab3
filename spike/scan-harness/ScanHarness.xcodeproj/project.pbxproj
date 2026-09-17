@@ -14,6 +14,7 @@
 		4BF596B5819AC48E307EA165 /* SlabFrameCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 830F2BC5C26D1EAB0682DF66 /* SlabFrameCapture.swift */; };
 		558C1C197B974CD5F22A0584 /* ScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E28C7C0EFED23045744E09C6 /* ScannerView.swift */; };
 		5BE905086C0382037D8F62D2 /* ScanGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D5D26AA02E9409AB27D7AF1 /* ScanGeometry.swift */; };
+		702A35A80B25410914DD69E7 /* TapCaptureArm.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94051AD80783D11BAAAF919E /* TapCaptureArm.swift */; };
 		A8E30CB8FD37DE7AEDF242DD /* ScanHarnessApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EF490BB156783A4435B5BE3 /* ScanHarnessApp.swift */; };
 		BAD37391FCDE5461EB2D564F /* ScanController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 994B881F8134C7A77B0B5B3C /* ScanController.swift */; };
 		C73A3AB31FFDF5FD632D21E5 /* RecentCertWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0668757C47AFFE8208F72F4D /* RecentCertWindow.swift */; };
@@ -27,11 +28,12 @@
 		3D5D26AA02E9409AB27D7AF1 /* ScanGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanGeometry.swift; sourceTree = "<group>"; };
 		3EF490BB156783A4435B5BE3 /* ScanHarnessApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanHarnessApp.swift; sourceTree = "<group>"; };
 		5C847E66E5533301BFE1D284 /* Grader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Grader.swift; sourceTree = "<group>"; };
-		6D0951CA4F5794D02EB65174 /* ScanHarness.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ScanHarness.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		6D0951CA4F5794D02EB65174 /* ScanHarness.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ScanHarness.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		830F2BC5C26D1EAB0682DF66 /* SlabFrameCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SlabFrameCapture.swift; sourceTree = "<group>"; };
 		862887ED384AB6C7B4DDA05E /* HarnessShims.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HarnessShims.swift; sourceTree = "<group>"; };
 		8A7A6DFDC157B045A0C1B374 /* CertParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CertParser.swift; sourceTree = "<group>"; };
 		91E841E04E0333E25F899B32 /* CameraSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraSession.swift; sourceTree = "<group>"; };
+		94051AD80783D11BAAAF919E /* TapCaptureArm.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TapCaptureArm.swift; sourceTree = "<group>"; };
 		994B881F8134C7A77B0B5B3C /* ScanController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanController.swift; sourceTree = "<group>"; };
 		AC3BB7CB3382551D9542F58C /* BarcodeDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarcodeDetector.swift; sourceTree = "<group>"; };
 		E28C7C0EFED23045744E09C6 /* ScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerView.swift; sourceTree = "<group>"; };
@@ -58,6 +60,7 @@
 				994B881F8134C7A77B0B5B3C /* ScanController.swift */,
 				3D5D26AA02E9409AB27D7AF1 /* ScanGeometry.swift */,
 				830F2BC5C26D1EAB0682DF66 /* SlabFrameCapture.swift */,
+				94051AD80783D11BAAAF919E /* TapCaptureArm.swift */,
 			);
 			name = Scanning;
 			path = ../../ios/Slab3/Scanning;
@@ -121,6 +124,7 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					20A33448B8D6BFF85AF19291 = {
+						DevelopmentTeam = 7BMY83MWA8;
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -161,6 +165,7 @@
 				A8E30CB8FD37DE7AEDF242DD /* ScanHarnessApp.swift in Sources */,
 				558C1C197B974CD5F22A0584 /* ScannerView.swift in Sources */,
 				4BF596B5819AC48E307EA165 /* SlabFrameCapture.swift in Sources */,
+				702A35A80B25410914DD69E7 /* TapCaptureArm.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

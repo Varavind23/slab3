@@ -19,6 +19,7 @@ targets:
       - path: ../../ios/Slab3/Scanning/BarcodeDetector.swift
       - path: ../../ios/Slab3/Scanning/SlabFrameCapture.swift
       - path: ../../ios/Slab3/Scanning/RecentCertWindow.swift
+      - path: ../../ios/Slab3/Scanning/TapCaptureArm.swift
       - path: ../../ios/Slab3/Scanning/ScanGeometry.swift
       - path: ../../ios/Slab3/Models/Grader.swift
     settings:

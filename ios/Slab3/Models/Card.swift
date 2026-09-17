@@ -178,6 +178,15 @@ final class Card {
     var courtyardConfidence: Int = 0
     var cardLadderConfidence: Int = 0
 
+    /// Courtyard's census for this slab's OWN grade — how many of this card exist
+    /// at this grade. It arrives on every scanner reply (per comp group, and once
+    /// at card level) and was decoded but discarded until MaxBuyPrice needed it.
+    ///
+    /// Additive-optional per the SwiftData rule above. `nil` means Courtyard has
+    /// not answered for this cert — never "few": a missing population contributes
+    /// nothing to the calculation rather than being read as a small one.
+    var courtyardPopulation: Int?
+
     /// The card's picture (46 × 64 on a row) — how a sourcer recognises what they
     /// scanned. The scan's own frame fills this immediately, so a row is never
     /// picture-less; an official render replaces it only if one actually exists.

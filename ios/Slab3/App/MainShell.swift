@@ -10,7 +10,14 @@ struct MainShell: View {
     let auth: AuthManager
     @State private var app = AppState()
     @Environment(\.modelContext) private var context
+    @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \Card.scannedAt, order: .reverse) private var cards: [Card]
+
+    /// Deletes waiting out their undo window. It lives HERE, at the same tier as
+    /// `AppState` and for the same reason the selection bar does: it outlives any
+    /// one screen, and rebuilt per screen appearance its timer would be cancelled
+    /// by ARC and a pending delete would silently never commit.
+    @State private var pendingDeletes = PendingDeletionStore()
 
     @State private var showGroupSheet = false
     @State private var shareURL: URL?
@@ -24,7 +31,9 @@ struct MainShell: View {
                     .toolbar(.hidden, for: .navigationBar)
             }
             .tint(Caliper.cyan)
-            .padding(.bottom, Caliper.hitMin + (app.isSelecting ? 96 : 0))
+            .padding(.bottom, Caliper.hitMin
+                     + (app.isSelecting ? 96 : 0)
+                     + (pendingDeletes.pending != nil ? Caliper.hitMin : 0))
 
             VStack(spacing: 0) {
                 // Selection mode does NOT replace the tab bar.
@@ -39,8 +48,26 @@ struct MainShell: View {
                     )
                     .transition(.move(edge: .bottom))
                 }
+                // Shares the selection bar's slot, and in practice never coexists
+                // with it: a bulk delete ends selection before enqueueing.
+                if let pending = pendingDeletes.pending {
+                    UndoBar(label: pending.label) {
+                        withAnimation(Caliper.easeOut) { pendingDeletes.undo() }
+                    }
+                    .transition(.move(edge: .bottom))
+                }
                 CaliperTabBar(tab: $app.tab, onChange: { app.endSelecting() })
             }
+        }
+        // Every path that has to make a pending delete real. Leaving Cards is what
+        // keeps the Export tab honest about what is still inventory; backgrounding
+        // is the last checkpoint iOS guarantees, and the one that stops a deleted
+        // card from reappearing after a relaunch.
+        .onChange(of: app.tab) { previous, _ in
+            if previous == .cards { pendingDeletes.flush() }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background { pendingDeletes.flush() }
         }
         .fullScreenCover(isPresented: Binding(
             get: { !app.hasSeenOnboarding },
@@ -58,8 +85,8 @@ struct MainShell: View {
     @ViewBuilder private var screen: some View {
         switch app.tab {
         case .scan: ScanScreen(app: app)
-        case .cards: CardsScreen(app: app)
-        case .export: ExportScreen(app: app)
+        case .cards: CardsScreen(app: app, pendingDeletes: pendingDeletes)
+        case .export: ExportScreen(app: app, pendingDeletes: pendingDeletes)
         case .settings: SettingsScreen(app: app, auth: auth)
         }
     }
@@ -87,10 +114,24 @@ struct MainShell: View {
         app.endSelecting()
     }
 
+    /// Bulk delete is the more dangerous of the two delete paths — dozens of cards
+    /// on one tap — so it goes through the same undo window the swipe does rather
+    /// than deleting outright. Selection ends first, which is also what keeps the
+    /// selection bar and the undo bar from ever sharing their slot.
     private func deleteSelection() {
-        for card in selected { context.delete(card) }
-        try? context.save()
+        let ids = Set(selected.map(\.localId))
+        guard !ids.isEmpty else { return }
+        let label = ids.count == 1 ? "Card deleted" : "\(ids.count) cards deleted"
         app.endSelecting()
+        withAnimation(Caliper.easeOut) {
+            pendingDeletes.enqueue(ids, label: label) { doomed in commitDeletes(doomed) }
+        }
+    }
+
+    /// The actual delete, run when the undo window closes. Shared with the Cards
+    /// swipe so both paths delete identically.
+    private func commitDeletes(_ ids: Set<UUID>) {
+        CardDeletion.commit(ids, in: context)
     }
 }
 

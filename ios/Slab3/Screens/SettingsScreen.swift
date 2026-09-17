@@ -18,6 +18,8 @@ struct SettingsScreen: View {
     @State private var showConnect = false
     @State private var showPayout = false
     @State private var showOnboarding = false
+    @State private var showTesting = false
+    @AppStorage(TestingGate.unlockedKey) private var testingUnlocked = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -58,7 +60,17 @@ struct SettingsScreen: View {
                     SectionLabel(text: "About")
                     row("How it works", value: "Replay") { showOnboarding = true }
                     Hairline()
-                    row("Version", value: "0.1")
+                    row("Version", value: Self.version)
+                    Hairline()
+                    // Green so the state is unmistakable: an uncalibrated buy
+                    // recommendation is showing on every card, and that should
+                    // never be something you have to go and check.
+                    if testingUnlocked {
+                        row("Testing version", value: "On",
+                            dot: Caliper.payout, valueTint: Caliper.payout) { showTesting = true }
+                    } else {
+                        row("Testing", value: "Off") { showTesting = true }
+                    }
                     Hairline()
                     Button {
                         Task { await auth.signOut() }
@@ -87,9 +99,21 @@ struct SettingsScreen: View {
         .background(Caliper.bg)
         .sheet(isPresented: $showConnect) { CardLadderConnectView() }
         .sheet(isPresented: $showPayout) { PayoutSheet(app: app).presentationDetents([.height(260)]) }
+        .sheet(isPresented: $showTesting) { TestingGateSheet() }
         .fullScreenCover(isPresented: $showOnboarding) {
             OnboardingScreen { showOnboarding = false }
         }
+    }
+
+    /// Read from the bundle, never typed. This row said "0.1" through 0.3 and 0.4
+    /// because the literal was never touched when project.yml was bumped — and the
+    /// one person who needs it is a tester reporting which build they saw a bug on.
+    /// Shows both, because TestFlight identifies a build by the number in brackets.
+    static var version: String {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "\u{2014}"
+        let build = info?["CFBundleVersion"] as? String
+        return build.map { "\(short) (\($0))" } ?? short
     }
 
     private var lastRefresh: String {
@@ -98,7 +122,8 @@ struct SettingsScreen: View {
     }
 
     @ViewBuilder
-    private func row(_ label: String, value: String, dot: Color? = nil, tap: (() -> Void)? = nil) -> some View {
+    private func row(_ label: String, value: String, dot: Color? = nil,
+                     valueTint: Color? = nil, tap: (() -> Void)? = nil) -> some View {
         Button {
             tap?()
         } label: {
@@ -106,7 +131,7 @@ struct SettingsScreen: View {
                 if let dot { Circle().fill(dot).frame(width: 6, height: 6) }
                 Text(label).font(.calBody).foregroundStyle(Caliper.textPrimary)
                 Spacer(minLength: Caliper.space4)
-                Text(value).caliperLabel(tap == nil ? Caliper.textTertiary : Caliper.textSecondary)
+                Text(value).caliperLabel(valueTint ?? (tap == nil ? Caliper.textTertiary : Caliper.textSecondary))
                 if tap != nil {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 9))

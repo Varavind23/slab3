@@ -83,6 +83,7 @@ enum PriceService {
             card.courtyardConfidence = 0
             if let identity { applyScannerIdentity(identity, to: card) }
             applyScannerSales(groups, to: card)
+            applyScannerPopulation(groups, identity: identity, to: card)
             if card.lookupStatus == .pending, card.name == nil, card.title == nil {
                 card.lookupStatus = .needsConfirm
             }
@@ -99,6 +100,7 @@ enum PriceService {
             card.courtyardConfidence = price.confidence ?? 5
             applyScannerIdentity(identity, to: card)
             applyScannerSales(groups, to: card)
+            applyScannerPopulation(groups, identity: identity, to: card)
             await fillCourtyardImage(card, scannerImageUrl: identity.imageUrl)
             return .ok
         }
@@ -130,6 +132,19 @@ enum PriceService {
     private static func applyScannerSales(_ groups: [CourtyardScannerClient.SaleGroup], to card: Card) {
         card.courtyardSales = CourtyardScannerClient.sales(
             from: groups, grader: card.grader, grade: card.grade)
+    }
+
+    /// Courtyard's census at this slab's grade. Like the comps above, this is
+    /// called AFTER the identity so the grade it selects on is populated.
+    ///
+    /// Written only on the two AUTHORITATIVE branches — a `.unavailable` keeps the
+    /// last known figure, the same rule prices follow, because a GemRate outage is
+    /// not evidence that a card's population changed.
+    private static func applyScannerPopulation(_ groups: [CourtyardScannerClient.SaleGroup],
+                                               identity: CourtyardScannerClient.Identity?,
+                                               to card: Card) {
+        card.courtyardPopulation = CourtyardScannerClient.population(
+            from: groups, identity: identity, grader: card.grader, grade: card.grade)
     }
 
     /// The slab photograph.

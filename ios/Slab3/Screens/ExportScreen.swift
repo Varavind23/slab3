@@ -7,6 +7,9 @@ import SwiftData
 /// label the buyer receives with the file.
 struct ExportScreen: View {
     @Bindable var app: AppState
+    /// A card inside its undo window has left the inventory as far as the user is
+    /// concerned, so it must not appear in the file they hand a buyer either.
+    let pendingDeletes: PendingDeletionStore
     @Query(sort: \Card.scannedAt, order: .reverse) private var allCards: [Card]
     @Query(sort: \Folder.createdAt, order: .reverse) private var groups: [Folder]
 
@@ -97,7 +100,12 @@ struct ExportScreen: View {
     private var columnPicker: some View {
         VStack(alignment: .leading, spacing: Caliper.space5) {
             Text("Include columns").caliperLabel()
-            FlowLayout(spacing: Caliper.space3) {
+            // Fifteen small targets in a wrapping grid is the hardest thing on this
+            // screen to hit, and they were drawn at the size of the row badge they
+            // share a component with. The ink is now a step larger and each chip's
+            // TARGET is the full 44 Caliper asks for — taller than the ink, so the
+            // grid doesn't turn into fifteen buttons the size of Share CSV.
+            FlowLayout(spacing: Caliper.space4) {
                 ForEach(CSVColumn.allCases) { column in
                     let index = app.enabledColumns.firstIndex(of: column)
                     Button {
@@ -107,10 +115,15 @@ struct ExportScreen: View {
                             text: column.label,
                             tone: index == nil ? .quiet : (column.source == nil ? .standard : .source),
                             color: column.source?.hue ?? Caliper.cyan,
-                            order: index.map { $0 + 1 }
+                            order: index.map { $0 + 1 },
+                            size: .tap
                         )
+                        .frame(minHeight: Chip.Size.tap.hitHeight)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(CaliperPressStyle())
+                    .accessibilityLabel(column.label)
+                    .accessibilityValue(index.map { "Included, column \($0 + 1)" } ?? "Not included")
                 }
             }
         }
@@ -159,6 +172,9 @@ struct ExportScreen: View {
 
     private var scoped: [Card] {
         allCards.filter { card in
+            // A card in its undo window is gone from inventory, so it must not turn
+            // up in the file a buyer receives either.
+            guard !pendingDeletes.pendingIDs.contains(card.localId) else { return false }
             switch app.filter {
             case .all: return true
             case .ungrouped: return card.folder == nil

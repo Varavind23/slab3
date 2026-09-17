@@ -6,13 +6,20 @@ import Foundation
 /// load-bearing: the scanner reads barcodes off raw video frames, so a slab held
 /// in frame re-detects about twelve times a second.
 ///
-/// Two rules under test — identity first, then a short timer:
+/// Three rules under test — identity, then one-slab-at-a-time, then a short timer:
 ///   1. the same cert as the last one admitted never re-admits, however long the
 ///      gap, because that is the camera re-reading what is still in your hand;
-///   2. any other recently-seen cert is held off by a short trailing window.
+///   2. nothing at all is admitted while the slab just captured is still in
+///      frame, however many other codes are visible beside it;
+///   3. once it has gone, any OTHER recently-seen cert is held off by a short
+///      trailing window.
 ///
-/// (`admit` is mutating, so each call is hoisted into a local — the `#expect`
-/// macro can't call a mutating member inside its expansion.)
+/// Rule 2 arrived with the duplicate-scan fix (2026-09-15): users work a reversed
+/// stack and lift one slab at a time, so the slab coming off and the one beneath
+/// it share the frame constantly.
+///
+/// (`admit`/`update` are mutating, so each call is hoisted into a local — the
+/// `#expect` macro can't call a mutating member inside its expansion.)
 struct RecentCertWindowTests {
     private let key = "psa:49385027"
     private let t0 = Date(timeIntervalSince1970: 1_000_000)
@@ -56,29 +63,106 @@ struct RecentCertWindowTests {
         #expect(backToFirst, "a deliberate rescan should reach the duplicate check")
     }
 
-    @Test func differentCertsDoNotSuppressEachOther() {
-        var window = RecentCertWindow(suppression: 1.5)
-        let psa = window.admit("psa:49385027", now: t0)
-        let cgc = window.admit("cgc:6055074171", now: t0)
-        let other = window.admit("psa:82031277", now: t0)
-        #expect(psa)
-        #expect(cgc)
-        #expect(other)
+    // MARK: Rule 2 — one slab at a time
+
+    /// Was `differentCertsDoNotSuppressEachOther`, which asserted that three certs
+    /// seen at the same instant were all admitted. That is the duplicate bug in
+    /// miniature: a frame holding several labels is one slab being lifted off
+    /// another, not three slabs presented to be scanned.
+    @Test func onlyOneCertIsAdmittedFromOneFrame() {
+        var window = RecentCertWindow(suppression: 1.5, clearance: 0.4)
+        let first = window.update(sightings: ["psa:A", "psa:B", "cgc:C"], now: t0)
+        let alsoInFrame = window.update(sightings: ["psa:B", "cgc:C"], now: t0.addingTimeInterval(0.1))
+        #expect(first == "psa:A")
+        #expect(alsoInFrame == nil, "the captured slab was in frame 0.1s ago")
     }
 
-    /// Rule 2: two slabs sitting in frame together must not take turns
-    /// re-triggering each other every time detection alternates.
-    @Test func alternatingSlabsAreHeldOffByTheWindow() {
-        var window = RecentCertWindow(suppression: 1.5)
-        let a1 = window.admit("psa:A", now: t0)
-        let b1 = window.admit("psa:B", now: t0.addingTimeInterval(0.1))
-        let a2 = window.admit("psa:A", now: t0.addingTimeInterval(0.2))
-        let b2 = window.admit("psa:B", now: t0.addingTimeInterval(0.3))
-        #expect(a1)
-        #expect(b1)
-        #expect(!a2, "A was seen 0.2s ago")
-        #expect(!b2)
+    /// The workflow this was written for: lift the top slab, exposing the next.
+    /// Both are in frame together, and the one underneath must wait — but only
+    /// until the lifted one is actually gone, or a fast sourcer is throttled.
+    @Test func theNextSlabIsTakenAsSoonAsTheCapturedOneLeaves() {
+        var window = RecentCertWindow(suppression: 1.5, clearance: 0.4)
+        let captured = window.update(sightings: ["psa:A"], now: t0)
+        let whileLifting = window.update(sightings: ["psa:A", "psa:B"], now: t0.addingTimeInterval(0.3))
+        let afterItLeaves = window.update(sightings: ["psa:B"], now: t0.addingTimeInterval(0.8))
+        #expect(captured == "psa:A")
+        #expect(whileLifting == nil, "A is still in view")
+        #expect(afterItLeaves == "psa:B", "B waited out the hold, not its own trailing window")
     }
+
+    /// The deadlock this rule could easily have introduced: the next slab is in
+    /// view for the WHOLE hold, so if every sighting counted, its trailing window
+    /// would be pushed back on every pass and it could never be admitted at all.
+    @Test func aSlabVisibleThroughoutTheHoldIsStillTakenAfterwards() {
+        var window = RecentCertWindow(suppression: 1.5, clearance: 0.4)
+        _ = window.update(sightings: ["psa:A", "psa:B"], now: t0)
+        for tick in stride(from: 0.05, through: 0.35, by: 0.05) {
+            _ = window.update(sightings: ["psa:A", "psa:B"], now: t0.addingTimeInterval(tick))
+        }
+        let next = window.update(sightings: ["psa:B"], now: t0.addingTimeInterval(0.9))
+        #expect(next == "psa:B")
+    }
+
+    /// One slab can carry two readable codes, and they need not parse alike: a
+    /// zero-padded barcode reads as a ten-digit CGC cert where the QR reads the
+    /// eight-digit PSA one. While that slab is in frame only its first read is
+    /// taken, so it cannot open a second row under a second identity.
+    @Test func aSlabWithTwoReadableCodesIsAdmittedOnce() {
+        var window = RecentCertWindow(suppression: 1.5, clearance: 0.4)
+        let both = ["psa:49385027", "cgc:0049385027"]
+        let first = window.update(sightings: both, now: t0)
+        var admittedAgain: String?
+        for tick in stride(from: 0.1, through: 2.0, by: 0.1) {
+            if let again = window.update(sightings: both, now: t0.addingTimeInterval(tick)) {
+                admittedAgain = again
+            }
+        }
+        #expect(first == "psa:49385027")
+        #expect(admittedAgain == nil, "the slab's other code must not open a second row")
+    }
+
+    /// The viewport tells the user which state the scanner is in, so holding and
+    /// failing-to-read don't look alike. A blink of empty frames is not a lifted
+    /// slab — that is what `clearance` is for.
+    @Test func holdingIsReportedUntilTheSlabIsActuallyGone() {
+        var window = RecentCertWindow(suppression: 1.5, clearance: 0.4)
+        _ = window.update(sightings: ["psa:A"], now: t0)
+        let holdsOnCapture = window.isHolding
+        _ = window.update(sightings: [], now: t0.addingTimeInterval(0.2))
+        let stillHolding = window.isHolding
+        _ = window.update(sightings: [], now: t0.addingTimeInterval(0.5))
+        let armedAgain = window.isHolding
+        #expect(holdsOnCapture)
+        #expect(stillHolding, "0.2s of empty frames is a blink, not a lifted slab")
+        #expect(!armedAgain)
+    }
+
+    /// Rule 3 still earns its place once the hold is clear: two slabs left lying
+    /// in frame must not take turns re-triggering each other.
+    @Test func slabsLeftInFrameDoNotTakeTurns() {
+        var window = RecentCertWindow(suppression: 1.5, clearance: 0.4)
+        _ = window.update(sightings: ["psa:A"], now: t0)
+        let b = window.update(sightings: ["psa:B"], now: t0.addingTimeInterval(0.5))
+        let bAgain = window.update(sightings: ["psa:B"], now: t0.addingTimeInterval(1.0))
+        #expect(b == "psa:B", "A had gone, so B is the slab being presented")
+        #expect(bAgain == nil)
+    }
+
+    /// Tap-to-scan admits outside these rules — the user picked the slab — but it
+    /// still tells the window what it took. Without that, flipping back to
+    /// auto-scan with the tapped slab still in your hand would take it again.
+    @Test func aTapAdmissionStillHoldsTheScanner() {
+        var window = RecentCertWindow(suppression: 1.5, clearance: 0.4)
+        window.noteAdmitted("psa:A", now: t0)
+        let holdsImmediately = window.isHolding
+        let stillInFrame = window.update(sightings: ["psa:A"], now: t0.addingTimeInterval(0.1))
+        let neverRetaken = window.update(sightings: ["psa:A"], now: t0.addingTimeInterval(5))
+        #expect(holdsImmediately)
+        #expect(stillInFrame == nil)
+        #expect(neverRetaken == nil, "rule 1 covers a tapped slab too")
+    }
+
+    // MARK: Housekeeping
 
     /// Deleting a card has to make its slab immediately re-scannable, rather
     /// than leaving the user waiting out a window with no feedback.
@@ -90,11 +174,12 @@ struct RecentCertWindowTests {
         #expect(rescanned)
     }
 
-    /// A long sourcing session must not grow the map without bound.
+    /// A long sourcing session must not grow the map without bound. Spaced a
+    /// second apart so each slab is genuinely admitted rather than held.
     @Test func staleEntriesArePruned() {
-        var window = RecentCertWindow(suppression: 1.5)
-        for i in 0..<64 { _ = window.admit("psa:\(i)", now: t0) }
-        _ = window.admit("psa:fresh", now: t0.addingTimeInterval(120))
+        var window = RecentCertWindow(suppression: 1.5, clearance: 0.4)
+        for i in 0..<64 { _ = window.admit("psa:\(i)", now: t0.addingTimeInterval(Double(i))) }
+        _ = window.admit("psa:fresh", now: t0.addingTimeInterval(200))
         #expect(window.trackedCount < 64)
     }
 }

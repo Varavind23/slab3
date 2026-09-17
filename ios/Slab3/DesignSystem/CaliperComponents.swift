@@ -74,27 +74,53 @@ struct CaliperPressStyle: ButtonStyle {
 struct Chip: View {
     enum Tone { case standard, quiet, filled, source }
 
+    /// How big the chip is drawn — and, for `.tap`, how big a target the caller
+    /// owes it.
+    ///
+    /// `.badge` is the dense original: `GradeBadge` closes a card row and repeats
+    /// down a long list, so it stays small, and nothing taps it. `.tap` is for
+    /// chips that ARE buttons. The export column chips were drawn at badge size —
+    /// roughly 20pt tall against Caliper's own stated 44 minimum — which is what
+    /// made them fiddly to hit (2026-09-16).
+    enum Size {
+        case badge
+        case tap
+
+        var font: Font { self == .tap ? .mono(10, .medium) : .mono(9, .medium) }
+        var hPad: CGFloat { self == .tap ? Caliper.space5 : Caliper.space3 }
+        var vPad: CGFloat { self == .tap ? Caliper.space4 : Caliper.space2 }
+        var orderSide: CGFloat { self == .tap ? 14 : 12 }
+        var orderFont: Font { self == .tap ? .mono(9, .bold) : .mono(8, .bold) }
+
+        /// The touch target the CALLER must provide, deliberately taller than the
+        /// ink. Caliper sets a 44 minimum, but a chip drawn 44 tall would dominate
+        /// a wrapping grid of fifteen of them — so the ink grows a step and the
+        /// target grows the whole way.
+        var hitHeight: CGFloat { self == .tap ? Caliper.hitMin : 0 }
+    }
+
     let text: String
     var tone: Tone = .standard
     var color: Color = Caliper.textSecondary
     /// Export column chips carry their position — the number IS the column order
     /// in the file, so it has to be visible.
     var order: Int? = nil
+    var size: Size = .badge
 
     var body: some View {
         HStack(spacing: Caliper.space2) {
             if let order {
                 Text("\(order)")
-                    .font(.mono(8, .bold))
+                    .font(size.orderFont)
                     .foregroundStyle(tone == .source ? Caliper.textOnCyan : Caliper.bg)
-                    .frame(width: 12, height: 12)
+                    .frame(width: size.orderSide, height: size.orderSide)
                     .background(tone == .source ? color : Caliper.cyan)
             }
-            Text(text).font(.mono(9, .medium)).tracking(0.45)
+            Text(text).font(size.font).tracking(0.45)
         }
         .foregroundStyle(ink)
-        .padding(.horizontal, Caliper.space3)
-        .padding(.vertical, Caliper.space2)
+        .padding(.horizontal, size.hPad)
+        .padding(.vertical, size.vPad)
         .background(fill)
         .overlay(Rectangle().strokeBorder(stroke, lineWidth: Caliper.borderWidth))
     }
@@ -578,6 +604,16 @@ struct Hairline: View {
 struct CaliperSlider: View {
     @Binding var value: CGFloat
     let range: ClosedRange<CGFloat>
+    /// Defaults are the zoom row's: cyan, carrying the one sanctioned glow. A
+    /// slider on a screen that has already spent its single cyan primary passes a
+    /// quieter tint and turns the glow off — the glow is reserved, not decorative.
+    var tint: Color = Caliper.cyan
+    var glow: Bool = true
+    /// What the number MEANS, for VoiceOver: the zoom row reads "2.5x", a
+    /// proportion reads "30%".
+    var unit: String = "\u{00D7}"
+    var fractionDigits: Int = 1
+    var step: CGFloat = 0.25
 
     var body: some View {
         GeometryReader { geo in
@@ -585,11 +621,11 @@ struct CaliperSlider: View {
             let fraction = (value - range.lowerBound) / (range.upperBound - range.lowerBound)
             ZStack(alignment: .leading) {
                 Rectangle().fill(Caliper.line).frame(height: 2)
-                Rectangle().fill(Caliper.cyan).frame(width: usable * fraction + 7, height: 2)
+                Rectangle().fill(tint).frame(width: usable * fraction + 7, height: 2)
                 Rectangle()
-                    .fill(Caliper.cyan)
+                    .fill(tint)
                     .frame(width: 14, height: 14)
-                    .caliperGlow()
+                    .caliperGlow(glow ? tint : .clear)
                     .offset(x: usable * fraction)
             }
             .frame(height: Caliper.hitMin)
@@ -603,9 +639,10 @@ struct CaliperSlider: View {
         }
         .frame(height: Caliper.hitMin)
         .accessibilityElement()
-        .accessibilityValue(Double(value).formatted(.number.precision(.fractionLength(1))) + "×")
+        .accessibilityValue(
+            Double(value).formatted(.number.precision(.fractionLength(fractionDigits))) + unit
+        )
         .accessibilityAdjustableAction { direction in
-            let step: CGFloat = 0.25
             value = min(max(direction == .increment ? value + step : value - step, range.lowerBound), range.upperBound)
         }
     }

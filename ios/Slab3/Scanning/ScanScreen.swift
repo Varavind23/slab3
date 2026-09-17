@@ -16,6 +16,14 @@ struct ScanScreen: View {
     @State private var highlightedCardID: UUID?
     @State private var toast: ScanToast?
     @State private var toastTask: Task<Void, Never>?
+    /// Auto-scan or tap-to-scan, remembered across launches.
+    ///
+    /// It is a way of WORKING rather than a session accident — a stack goes
+    /// through on auto, a single card handed across a table goes through on tap —
+    /// so it outlives the screen. It lives here and not in `AppState` because no
+    /// other screen reads it; same call `CardDetailScreen` makes for the Card
+    /// Ladder connection flag.
+    @AppStorage("caliper_auto_scan") private var autoScan = true
     // Held and prepared: building a generator per scan adds a perceptible lag to
     // the first buzz, which in burst mode is every buzz.
     @State private var captureHaptic = UIImpactFeedbackGenerator(style: .medium)
@@ -37,6 +45,9 @@ struct ScanScreen: View {
             duplicateHaptic.prepare()
             await ensureCameraAccess()
         }
+        // The session is the authority while scanning, so the stored preference
+        // has to reach it on every change — not only when the camera starts.
+        .onChange(of: autoScan) { _, on in controller.autoScan = on }
         .sheet(isPresented: $showManualEntry) {
             ManualEntrySheet { scan in add(scan, photo: nil) }
                 .presentationDetents([.height(320)])
@@ -72,12 +83,22 @@ struct ScanScreen: View {
                     startPoint: .top, endPoint: .bottom
                 )
                 camera
+                // Dimmed while the scanner is holding on the slab just captured:
+                // the guides are the thing the user is actually looking at, so
+                // the state has to be visible there and not only in the copy.
                 CornerBrackets()
+                    .opacity(controller.isHolding ? 0.35 : 1)
+                    .animation(Caliper.easeOut, value: controller.isHolding)
                 shutterLabel
                 if let toast { ScanToastView(toast: toast) }
             }
             .frame(width: geo.size.width, height: geo.size.height)
             .clipped()
+            // The whole viewport is the shutter in tap-to-scan (Caliper §2), and
+            // inert in auto-scan — where a tap that took another slab would be
+            // the duplicate bug, by hand.
+            .contentShape(Rectangle())
+            .onTapGesture { tapToScan() }
             .overlay(Rectangle().strokeBorder(Caliper.lineStrong, lineWidth: Caliper.borderWidth))
         }
         .aspectRatio(1.15, contentMode: .fit)
@@ -100,7 +121,13 @@ struct ScanScreen: View {
             unavailable("Scanner unavailable", error)
         } else {
             CameraPreview(session: controller.captureSession)
-                .onAppear { controller.start { scan, photo in add(scan, photo: photo) } }
+                .onAppear {
+                    controller.autoScan = autoScan
+                    controller.start(
+                        onScan: { scan, photo in add(scan, photo: photo) },
+                        onMiss: { missed() }
+                    )
+                }
                 .onDisappear { controller.stop() }
         }
         #endif
@@ -120,28 +147,72 @@ struct ScanScreen: View {
     }
 
     /// Anchored to the lower third of the viewport.
+    ///
+    /// It states which state the scanner is in, because two of them look identical
+    /// from the outside: "holding on the slab you just scanned" and "not reading
+    /// your slab". A user who reads the hold as a failure waves the slab about
+    /// instead of lifting it away, which is the one thing that keeps the hold up.
+    /// Tap-to-scan gets the design's original line (Caliper §2).
     private var shutterLabel: some View {
         VStack {
             Spacer()
             VStack(spacing: Caliper.space3) {
-                Text("Hold code in frame")
+                Text(shutterHeadline)
                     .font(.sans(16, .semibold))
                     .foregroundStyle(Caliper.textPrimary)
-                Text("PSA · CGC QR or barcode").caliperLabel(Caliper.textSecondary)
+                Text(shutterSubhead).caliperLabel(Caliper.textSecondary)
             }
             .padding(.bottom, Caliper.space8 * 1.5)
+            .animation(Caliper.easeOut, value: controller.isHolding)
+            .animation(Caliper.easeOut, value: autoScan)
         }
+    }
+
+    private var shutterHeadline: String {
+        guard autoScan else { return "Tap to scan" }
+        return controller.isHolding ? "Captured — lift it away" : "Hold code in frame"
+    }
+
+    private var shutterSubhead: String {
+        guard autoScan, controller.isHolding else { return "PSA · CGC QR or barcode" }
+        return "The next slab scans on its own"
+    }
+
+    /// Tap-to-scan only. In auto-scan the viewport is inert: the camera is already
+    /// taking every slab it recognises, and a tap that took another would be the
+    /// duplicate bug committed by hand.
+    private func tapToScan() {
+        guard !autoScan else { return }
+        controller.capture()
+    }
+
+    /// A tap that found nothing readable. Auto-scan has no equivalent — nothing
+    /// was asked of it, so silence was honest — but a tap is a question, and a
+    /// question with no answer reads as a broken scanner.
+    private func missed() {
+        duplicateHaptic.notificationOccurred(.warning)
+        show(.noCode)
     }
 
     // MARK: Recent scans
 
     private var recentScans: some View {
         VStack(spacing: Caliper.space4) {
-            HStack {
+            // Auto sits beside Torch because both are ways of working THIS stack,
+            // flipped mid-session with the camera live — not settings you go to
+            // another screen to change.
+            HStack(spacing: Caliper.space4) {
                 Text("Recent scans").caliperLabel()
-                Spacer()
+                Spacer(minLength: Caliper.space4)
+                Text("Auto").caliperLabel(Caliper.textTertiary)
+                CaliperSwitch(isOn: $autoScan)
+                    .accessibilityLabel("Auto scan")
+                    .accessibilityValue(autoScan
+                        ? "On. Slabs capture as the camera recognises them."
+                        : "Off. Tap the viewport to scan.")
                 Text("Torch").caliperLabel(Caliper.textTertiary)
                 CaliperSwitch(isOn: $controller.torchOn)
+                    .accessibilityLabel("Torch")
             }
             .frame(height: Caliper.hitMin)
 
@@ -178,7 +249,15 @@ struct ScanScreen: View {
 
     private func add(_ scan: CertScan, photo: Data?) {
         // A duplicate cert gets an amber readout and does NOT add a row.
-        if let existing = cards.first(where: { $0.grader == scan.grader && $0.certNumber == scan.certNumber }) {
+        //
+        // Asked of the STORE, not of `cards`. That query is a rendered value —
+        // refreshed when SwiftUI updates this view — and this closure was handed
+        // to the camera back at `onAppear`, so a card inserted a moment ago can be
+        // missing from it. At burst cadence that gap is exactly where the second
+        // read of one slab landed: it found nothing, inserted a second card, and
+        // the slab appeared twice in Recent scans under a cyan "captured" readout
+        // instead of the amber duplicate one (2026-09-15).
+        if let existing = CardLookup.existing(scan, in: context) {
             duplicateHaptic.notificationOccurred(.warning)
             bringToFront(existing)
             show(.duplicate(name: existing.displayTitle, cert: existing.certNumber))
@@ -334,15 +413,19 @@ private struct CornerBrackets: View {
 /// now holds the card and reads its live state instead — so the toast fills
 /// itself in while it is still on screen, which is the point.
 ///
-/// There was also a `.miss` case. Nothing produces it: the scanner either reads a
-/// cert or says nothing at all, so it was deleted rather than given a fake caller.
+/// There was also a `.miss` case, deleted because nothing produced it: under
+/// auto-scan the scanner either reads a cert or says nothing at all, and silence
+/// was honest because nothing had been asked of it. Tap-to-scan asks — so
+/// `.noCode` is that case earning its place back, for a tap with nothing readable
+/// in frame (2026-09-16).
 enum ScanToast {
     case captured(card: Card)
     case duplicate(name: String, cert: String)
+    case noCode
 }
 
 /// Blurred scrim, hairline border, a 2pt coloured left edge — cyan for a capture,
-/// amber for a cert already in inventory. Holds 1.8s.
+/// amber for a cert already in inventory or a tap that found nothing. Holds 1.8s.
 struct ScanToastView: View {
     let toast: ScanToast
 
@@ -374,13 +457,14 @@ struct ScanToastView: View {
     private var edgeColor: Color {
         switch toast {
         case .captured: return Caliper.cyan
-        case .duplicate: return Caliper.confMid
+        case .duplicate, .noCode: return Caliper.confMid
         }
     }
     private var title: String {
         switch toast {
         case .captured(let card): return card.displayTitle
         case .duplicate(let name, _): return name
+        case .noCode: return "No code in frame"
         }
     }
     /// Reads the card as it resolves, so "Identifying" becomes the real set and
@@ -390,6 +474,7 @@ struct ScanToastView: View {
         case .captured(let card):
             return card.lookupStatus == .pending ? "Identifying · #\(card.certNumber)" : card.metaLine
         case .duplicate(_, let cert): return "Already in inventory · #\(cert)"
+        case .noCode: return "Hold the label inside the guides"
         }
     }
 }

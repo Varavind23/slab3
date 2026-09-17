@@ -15,6 +15,9 @@ struct CardDetailScreen: View {
     @Query(sort: \Folder.createdAt, order: .reverse) private var groups: [Folder]
 
     @AppStorage(PriceService.connectedKey) private var cardLadderConnected = false
+    /// Single-screen preference, the `caliper_auto_scan` idiom — only this screen
+    /// and the Settings gate read it, so it is deliberately not in AppState.
+    @AppStorage(TestingGate.unlockedKey) private var testingUnlocked = false
     @State private var showConnect = false
 
     var body: some View {
@@ -32,6 +35,11 @@ struct CardDetailScreen: View {
             ScrollView {
                 VStack(spacing: Caliper.rowGap) {
                     slabPanel
+                    // The first box, above the evidence it is built from. Absent
+                    // entirely unless the testing version is on.
+                    if testingUnlocked {
+                        MaxBuyPanel(card: card, source: app.activeSource)
+                    }
                     SalesPanel(card: card, source: $app.activeSource,
                                connected: cardLadderConnected) { showConnect = true }
                     pricePanel
@@ -42,8 +50,11 @@ struct CardDetailScreen: View {
                     CaliperButton(title: "Refresh prices now", variant: .accent, icon: "arrow.clockwise", fullWidth: true,
                                   disabled: card.pricesLoading) {
                         // One card, so bypassing the 24h Card Ladder cache costs a
-                        // single request from the daily budget — cheap here,
-                        // ruinous in bulk (see PriceRefresher).
+                        // single request from the daily budget. This is now the
+                        // ONLY way a price is re-fetched by hand: the Cards tab's
+                        // refresh-all was removed 2026-09-16, because one tap there
+                        // fired a stack-sized burst at the endpoint that 403s an IP
+                        // for hammering it.
                         Task { await PriceService.refresh(card, in: context, force: true) }
                     }
                     CaliperButton(title: "Delete card", variant: .danger, fullWidth: true) {
@@ -301,7 +312,11 @@ struct CardDetailScreen: View {
                     active: card.folder?.localId == group.localId,
                     leading: { Circle().fill(group.hue).frame(width: 8, height: 8) }
                 ) {
-                    card.folder = card.folder?.localId == group.localId ? nil : group
+                    let leaving = card.folder?.localId == group.localId
+                    card.folder = leaving ? nil : group
+                    // Filing — not un-filing — is what makes this the group the
+                    // Cards swipe offers next.
+                    if !leaving { group.markUsed() }
                 }
             }
             if groups.isEmpty {

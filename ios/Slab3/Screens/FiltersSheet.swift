@@ -87,15 +87,20 @@ struct FiltersSheet: View {
 struct GroupSheet: View {
     @Bindable var app: AppState
     let cards: [Card]
+    /// Cards the caller has already picked, when filing is not a selection — the
+    /// Cards swipe filing one row. Without this the sheet would have to flip the
+    /// screen into selection mode just to file a single card, which is a mode the
+    /// user did not ask for.
+    var targets: [Card]?
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \Folder.createdAt, order: .reverse) private var groups: [Folder]
     @State private var newName = ""
 
-    private var selected: [Card] { cards.filter { app.selection.contains($0.localId) } }
+    private var selected: [Card] { targets ?? cards.filter { app.selection.contains($0.localId) } }
 
     var body: some View {
-        CaliperSheet(title: "Add \(app.selection.count) to group") {
+        CaliperSheet(title: "Add \(selected.count) to group") {
             Button("Cancel") { dismiss() }
                 .font(.mono(10, .medium))
                 .foregroundStyle(Caliper.textSecondary)
@@ -146,6 +151,9 @@ struct GroupSheet: View {
 
     private func assign(to group: Folder) {
         for card in selected { card.folder = group }
+        // The Cards swipe offers "file into the group you last used" — from now on
+        // that is this one. Recorded beside every assignment, or it goes stale.
+        group.markUsed()
         try? context.save()
         app.endSelecting()
         dismiss()

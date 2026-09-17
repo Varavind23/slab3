@@ -129,4 +129,26 @@ struct CourtyardScannerClient {
             return RecentSale(priceCents: s.priceCents, soldAt: date)
         }
     }
+
+    /// The census for the slab's OWN grade. Mirrors `populationForGrade` in the
+    /// worker adapter: the matching group's figure, falling back to the card-level
+    /// one when this grade has no group.
+    ///
+    /// Grade first, because that is the number that decides whether a market is
+    /// thin — cert 4260611176 has 380 graded copies but only 11 at PSA 9, and it
+    /// is the 11 that moves a price. Returns nil when nothing is known, which is
+    /// NOT the same as 0: Courtyard reports a real 0 for CGC pristine-10 groups,
+    /// and that means the thinnest possible market rather than an absent answer.
+    static func population(from groups: [SaleGroup], identity: Identity?,
+                           grader: Grader, grade: String?) -> Int? {
+        let want = grader.rawValue.uppercased()
+        if let grade,
+           let group = groups.first(where: {
+               ($0.grader ?? "").uppercased() == want && $0.grade == grade
+           }),
+           let pop = group.population {
+            return pop
+        }
+        return identity?.population
+    }
 }

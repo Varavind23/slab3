@@ -35,16 +35,16 @@ cd ios && xcodegen generate
 xcodebuild -project ios/Slab3.xcodeproj -scheme Slab3 \
   -destination 'platform=iOS Simulator,name=iPhone 17' test   # pick a simulator you actually have
 # single test: add -only-testing:Slab3Tests/CardKeyTests/matchesSqlNormalization
-# ios/Tests uses Swift Testing (@Test/#expect), NOT XCTest — match it.
-# suites: CardKey, CertParser, ConfidenceMeter, CourtyardClient, CSVExport,
-#         PriceWriteback, IdentityChain, ImageDownscale, RecentCertWindow,
-#         RecentSales, DetailScreenRender  (11 files)  (renders panels to PNG — layout bugs
-#                              shipped green three times because nothing
-#                              asserted on layout)
-# ios/project.yml also defines SlabsDev, a side-by-side test build (separate
-# bundle id) so a TestFlight build and a dev build coexist on one device.
+# ios/Tests uses Swift Testing (@Test/#expect), NOT XCTest — match it. 11 files,
+# 12 plain structs (PriceSetTests lives in CSVExportTests.swift), no @Suite attributes.
+# DetailScreenRenderTests renders panels to PNG under $TMPDIR/slabs-render/ — layout
+# bugs shipped green three times because nothing asserted on layout, so LOOK at them.
+# ios/project.yml also defines SlabsDev, a side-by-side test build (separate bundle
+# id AND separate SwiftData store) so a TestFlight build and a dev build coexist on
+# one device. It talks to the SAME live Supabase as the shipped app.
 # Shipping version + build live ONLY in ios/project.yml (MARKETING_VERSION /
-# CURRENT_PROJECT_VERSION, currently 0.3 / 3 = "V3"); bump BOTH targets together
+# CURRENT_PROJECT_VERSION, currently 0.4 / 4 = "V4", on TestFlight since 2026-09-06;
+# by the same convention V5 is 0.5 / 5); bump BOTH targets together
 # or the dev build stops matching the TestFlight build it exists to compare against.
 # Shipping to TestFlight: signing is MANUAL on purpose, and the exact archive +
 # exportArchive commands, the App Store Connect API-key role trap that broke the
@@ -60,8 +60,26 @@ supabase functions deploy cardladder-price     # deploy one
 # Five functions: cardladder-connect, cardladder-price, cardladder-sales,
 # courtyard-price, psa-cert. cardladder-sales and courtyard-price are separate
 # deploys — deploying cardladder-price does NOT ship them.
-# Edge Function logic is covered offline by the worker/ vitest suite, not by a Deno suite.
-# Setup + curl smoke tests live in supabase/functions/README.md.
+# Only _shared/ is covered (offline, by the worker/ vitest suite). The function
+# BODIES — every <fn>/index.ts: cache-first, stale fallback, what gets written to the
+# cache, which grader the image is asked with — have ZERO tests: worker/ cannot import
+# them (they pull in Deno-only http.ts). That glue is where the 0.4 image bug lived
+# (COURTYARD-BLANKS.md §4.1). Logic you want tested belongs in _shared/.
+# Setup + curl smoke tests live in supabase/functions/README.md — but they cannot run
+# from this machine today: the SLABS_EMAIL/SLABS_PASSWORD test account returns
+# invalid_credentials (wrong credentials, not an unconfirmed account).
+#
+# A function deploy is a PRODUCTION RELEASE: it reaches every TestFlight user at once
+# with no build, and a wrong answer it caches is served for 24h even after a revert.
+# Client fixes ship on a different clock (a TestFlight build). Say what you are about
+# to deploy/migrate/delete and get a yes first. Verify what is actually live rather
+# than trusting commit order (a deploy has predated its own commit):
+supabase functions download courtyard-price --project-ref rrkvlrtohmylhslpzuvz  # grep the live bundle
+supabase db query --linked "select cert, fetch_status, image_url is null, fetched_at from cy_scan_cache order by fetched_at desc limit 20"
+# The installed CLI (2.98.2) has no `functions logs` — use the dashboard.
+# Prefer EXPIRING stale cache rows (backdate fetched_at) over deleting them: a
+# not_found row can still hold a slab photo URL, and an expiry keeps the old row if
+# the re-fetch fails.
 
 # spike (rarely — verdicts are already recorded in spike/README.md)
 cd spike && npm install && npx playwright install chromium
@@ -90,7 +108,10 @@ and the `cardKey` field in `worker/src/sources/types.ts`. The SQL and Swift test
 share the same vectors on purpose. It drives the sale-limit rule
 (max 3 identical card_key per folder; the 4th requires an explicit
 `over_limit_ack`) and cross-source matching. Change one, change all three and both
-test suites.
+test suites. **The sale limit is currently enforced nowhere a user can hit it:** it
+exists only as a trigger on the SQL `cards` table, the app never writes that table
+(see Data / trust model), and `Folder.identicalCount` — the hook for the in-app
+notice — has no callers.
 
 **It is NOT a cache key, and must not become one again** (2026-08-31). It is
 rebuilt in the app from whatever text the sources filled in, so it is mutable and
@@ -123,15 +144,20 @@ before touching any adapter**; don't re-litigate an access path it already ruled
     **Acceptance bar, live not fixture: cert 96679812 = $50.80, confidence 2** —
     what Courtyard's own app shows for that slab. `spike/README.md` §2b.
   - `/scanner/card-grader-image` — the SLAB PHOTOGRAPH, front and back, cert-keyed
-    (`fetchGraderImages`). The image source of record since 2026-09-05: measured over
-    nine certs it answered 9/9 including cards Courtyard cannot price, where Algolia
-    hit 1 of 4 — it missed even cert 96679812, which prices perfectly. It verifies the
-    cert (an unknown one returns **200 with an EMPTY array**, so 200 is NOT a hit —
-    check the array), and the CDN URLs are unsigned and never expire, so we store the
-    URL and the phone fetches the bytes. Two traps: the full-size entries carry **no
-    `imageSize` key at all** (only thumbnails are labelled), and `fetchGraderImages`
-    deliberately **never throws** — a missing picture must never reach the
-    `source_error` path and blank a price.
+    (`fetchGraderImages`). The image source of record since 2026-09-05; Algolia hit
+    1 of 4 where this route hit 9 of 9 — but that nine was a biased sample, and many
+    certs that price perfectly have NO photo upstream (`COURTYARD-BLANKS.md` §8.4), so
+    "priced, camera photo" is usually Courtyard, not us. It verifies the cert, and 200
+    is NOT a hit: the no-photo reply is `200 {"primaryImages": null, "status":
+    "NO_IMAGE"}` (the adapter comment's "EMPTY array" is also possible — parse both).
+    The CDN URLs are unsigned and never expire, so we store the URL and the phone
+    fetches the bytes. Traps: the full-size entries carry **no `imageSize` key at all**
+    (only thumbnails are labelled); `fetchGraderImages` deliberately **never throws**
+    and never logs — a missing picture must never reach `source_error` and blank a
+    price, but it also means an image failure is invisible; and it must be asked with
+    the pairing that ANSWERED `card-details`, never the caller's grader guess.
+    `courtyard-price` only asks for an image on a network miss, so an `ok` row cached
+    with a null `image_url` never gains a photo until its 24h TTL runs out.
   - `courtyard-algolia.ts` / `CourtyardClient.swift` — marketplace search. **No
     longer a price source** (2026-08-31), and since 2026-09-05 only the image
     FALLBACK: those indices are recent-activity feeds
@@ -156,9 +182,19 @@ before touching any adapter**; don't re-litigate an access path it already ruled
   fallback (it resolves PSA certs, 400s CGC ones), and leading zeros are rejected
   on their own.
 
+  **Every `/scanner/*` request needs TWO headers, and neither is optional**:
+  `User-Agent: SCANNER_UA` (absent = 403, below) and
+  `cy-supports-acquisition-status: 1` (`SCANNER_ACQ_HEADER`, `spike/README.md` §2f).
+  Without the second, `card-details` 404s a large class of certs that price
+  perfectly with it — that was the whole "Courtyard em dash while Card Ladder prices
+  it" report from 0.4 users, fixed server-side in `5c00ce0`. It is a strict superset
+  (nothing that already answered changes). Both are asserted in vitest; keep it that
+  way. **A 404 recorded without both headers says nothing about the cert**, and
+  there is currently NO verified not_found fixture cert (133653550 used to be one).
+
   **Scanner error semantics are load-bearing** and map straight onto the honesty
-  rules: `404 {"card details not found"}` is AUTHORITATIVE (cache it, show an em
-  dash); `502 {"invalid response from gemrate"}` is their upstream failing and is
+  rules: `404 {"card details not found"}` (with both headers) is AUTHORITATIVE
+  (cache it, show an em dash); `502 {"invalid response from gemrate"}` is their upstream failing and is
   TRANSIENT — never cached, never allowed to blank a price the user already saw.
   `price: 0` + `priceConfidence: "0"` means **"not applicable"**, not $0 — map it
   to the no-price state (`cyConfidence` returns undefined outside 1–5, which is
@@ -252,8 +288,9 @@ state for exactly this.
 The same TypeScript runs in three places and the split is deliberate:
 `worker/` under **Node** for vitest (fixtures, offline), `worker/src/index.ts` on
 **Cloudflare** (real browser via the `BROWSER` binding), and
-`supabase/functions/` on **Deno** (`cardladder-connect`, `cardladder-price`,
-`psa-cert`). `supabase/functions/_shared/cardladder.ts` is written cross-runtime on
+`supabase/functions/` on **Deno** (all five functions). `supabase/config.toml` only
+declares three of them (`cardladder-sales` and `courtyard-price` run on defaults,
+which also verify the JWT). `supabase/functions/_shared/cardladder.ts` is written cross-runtime on
 purpose so Node can test what Deno ships — keep it dependency-free and Web-API-only.
 Nothing in `_shared/` is a function: the leading underscore is what excludes it.
 
@@ -305,7 +342,17 @@ constructor, add fixtures.
 
 The iOS app currently persists locally with SwiftData (`Card`, `Folder` `@Model`s
 mirror the SQL columns, with `serverId` reserved for the sync link) and uses
-Supabase for auth only. The anon key in `ios/Slab3/Backend/Backend.swift` is public
+Supabase for auth and Edge Function calls only — it never reads or writes a table,
+so `cards`/`folders`/`folder_cards` (and the RLS on them) are unused in production.
+
+**Model changes are a migration on real users' inventory.** There is no
+`VersionedSchema`/`SchemaMigrationPlan` — `Slab3App` uses a bare
+`.modelContainer(for: [Card.self, Folder.self])` — so new `@Model` properties must
+be **optional or defaulted** (additive) for SwiftData's lightweight migration to
+keep existing stores; a rename, type change or non-optional field without a
+default needs a real migration plan first. That is why the entity is still `Folder`
+while every UI string says "group", and why enums are stored as `…Raw: String`.
+The anon key in `ios/Slab3/Backend/Backend.swift` is public
 by design — RLS, not secrecy, is the protection. The service_role key never goes in
 the client.
 
@@ -320,6 +367,84 @@ lives there, because the selection bar is above the tab bar and no screen owns i
 `payoutPercent` is deliberately `nil` until the user sets one — a default rate would
 be a fabricated dollar figure, same rule as prices.
 
+**The Cards row carries three gestures** (2026-09-16), kept apart on purpose: a tap
+opens the card; a right-to-left swipe slides the CARD ITSELF, uncovering **Delete at
+the outer edge** with *file into the group last used* inboard of it — dragged about
+half a File button PAST the tray, Delete takes the whole back of the card and fills
+red, and releasing there deletes (Gmail's promise — slide back to cancel); and a long
+press opens **the system's own context menu** — Select / Remove from group / Delete.
+The long press went back to iOS deliberately (2026-09-16): a hand-built 0.8s press
+with a spring lift and a tuned haptic was built and then thrown away, because the
+system menu brings Apple's zoom and haptic with it, and that pairing is what V4 had
+and what the hand-built version never matched. Select turns selection mode on, and
+ONLY then does the scrub exist — a short 0.18s hold plus a drag takes every row
+crossed, auto-scrolling at the edges. Gating it on selection mode is what stops it
+competing with the menu for the same press.
+
+**A scrub must disable the list's own scrolling** (`scrollDisabled(dragSelect.isActive)`).
+The scrub is attached simultaneously, so otherwise both recognise the same vertical
+drag: the list scrolls, the finger never crosses a row relative to the content, and
+dragging down selects nothing at all. Reaching the rows below is the edge
+auto-scroll's job, not the scroll view's.
+
+The row also takes `.frame(maxWidth: .infinity)` BEFORE its hit shape is computed.
+Without it the tappable rect can stop short of the trailing price, meter and grade
+chip, which is what made taps near the grade badge miss. The commit
+point is measured against the tray (`SwipeGeometry.commitOffset`), never as a
+fraction of the row: the tray is what the user is aiming at, and a fraction means
+something different on every screen width.
+
+**The row is NOT a `Button`, and must not become one again.** It was, and that one
+fact caused both of the first version's bugs. `CaliperPressStyle` dims a pressed
+button to 0.6, and the tray sat behind the row permanently — so ANY press made File
+and Delete ghost through the card without a swipe. And a `Button` swallows the drag
+it contains, so the card never followed the finger at all. The row is now a plain
+view with `.onTapGesture`, and the tray is mounted ONLY while the card is off its
+mark (held through the slide home, or the actions blink out from under a card still
+moving over them). Rows lost their press dim along with the Button, which is no
+loss: a tap pushes the detail screen, and that is its own feedback. One more trap —
+a long press that also fires the row's tap would toggle off the selection it just
+made, so `DragSelectController.endedAt` timestamps the scrub and the tap ignores
+anything landing within 0.35s of it. Caliper has no swipe language at
+all, so this extends the system deliberately, the way `Chip.Size.tap` did. The
+long-press context menu that held Select / Remove from group / Delete is **gone**;
+`SwipeableCardRow` carries those as `accessibilityActions`, which is the only route
+VoiceOver has to them now. Swipe is masked off in selection mode
+(`including: .subviews`) — the selection bar owns actions there.
+
+Arbitration is the fragile part, and it is settled by MEASUREMENT rather than
+gesture priority: plain `.gesture` (never `.simultaneousGesture` /
+`.highPriorityGesture`, which force a winner), `minimumDistance: 8` so a tap still
+reaches the Button and the ScrollView gets a fair first move, and the row does not
+move at all until `SwipeGeometry.isHorizontal` says the drag has beaten vertical by
+1.2×. Every threshold and the rubber-band curve live in `SwipeGeometry`, tested, so
+the gesture closure only reads a value and assigns a result. Scrub hit-testing is
+arithmetic (`DragSelectRange.index`) fed by ONE rendered row's index and frame
+through a PreferenceKey: rows are uniform and their fonts fixed-size, so that gives
+the stack's origin and pitch — and sampling whichever row is rendered, rather than
+row 0, is what keeps it correct once LazyVStack has discarded what scrolled away.
+`DragSelectRange.apply` recomputes the covered span from the anchor every move
+against a baseline snapshot, which is what makes dragging back deselect without
+tracking direction.
+
+**Deleting is deferred, never immediate.** `PendingDeletionStore` lives in
+`MainShell` (rebuilt per screen, its timer would be cancelled by ARC and the delete
+would silently never commit) and holds ONE batch — a new delete commits the previous
+one, which is why there is never a question of which delete the Undo bar means.
+Pending ids are filtered out of `CardsScreen.visible` AND `ExportScreen.scoped`, so a
+card in its undo window is absent from inventory and from the CSV a buyer receives.
+It commits on the 5s window, on another delete, on leaving the Cards tab, and on
+`scenePhase == .background` — that last one is what stops a "deleted" card
+reappearing after a relaunch. Both delete paths, swipe and the selection bar's bulk
+Delete, go through it; the real delete is `CardDeletion.commit`, which re-reads the
+store rather than closing over cards that may be stale seconds later.
+
+`Folder.lastUsedAt` (additive-optional, per the SwiftData rule above) is what the
+swipe's file action reads through `Folder.mostRecentlyUsed(in:)`. Set it beside
+every `card.folder = group`, or the swipe starts offering a group nobody has touched
+in weeks; nil everywhere means nothing has ever been filed and the action opens the
+picker instead of inventing a destination.
+
 Scan flow: continuous burst — the camera **never freezes and never blocks**.
 `CameraSession` owns an `AVCaptureSession` and runs Vision (`BarcodeDetector`) on
 the video frames at 12 Hz, restricted to `ScanGeometry.guideRect`, so **the frame
@@ -331,18 +456,57 @@ is no cheaper frame API on that class, which is why we own the session. Two
 non-negotiables carried over: `CameraPreview.updateUIView` is **empty on purpose**
 (per-update device configuration was a second hitch source), and the pixel buffer
 is **never retained past the delegate callback**. Then `CertParser` (grader
-auto-detected by cert length: PSA=8, CGC=10) → `Card` → `PriceService.refresh`.
+auto-detected: psacard/cgccards/cgccomics URL host if it is a URL, else bare digits
+10 → CGC, 7–9 → PSA, anything else is not a scan — a GUESS every downstream
+consumer must tolerate) → `Card` → `PriceService.refresh`, then
+`PsaIdentityService.enrich` (PSA last: it is walled and times out slowly).
 
 `RecentCertWindow` decides which sightings are worth reacting to — it never
-prevents a duplicate *row* (`ScanScreen.add` refuses a cert it already stores,
+prevents a duplicate *row* (`ScanScreen.add` refuses a cert already in the store,
 unconditionally). Load-bearing because raw Vision has no item tracking, so a slab
-in frame re-detects ~12×/s. Two rules: a repeat of the **last admitted cert is
-blocked outright, whatever the gap** (that's the camera re-reading what's still in
-your hand — and it's what makes glare-intermittent detection safe, where a pure
-timer would fire a spurious duplicate); any *other* recently-seen cert is held by
-a short ~1.5s trailing window (two slabs in frame taking turns). It replaced a
-session-lifetime `Set`, which erred the other way — a rescan was swallowed forever
-and never reached the "already in inventory" check.
+in frame re-detects ~12×/s. **Three** rules: a repeat of the **last admitted cert
+is blocked outright, whatever the gap** (that's the camera re-reading what's still
+in your hand — and it's what makes glare-intermittent detection safe, where a pure
+timer would fire a spurious duplicate); **nothing at all is admitted while the slab
+just captured is still in frame**, which re-arms only once it has gone unseen for
+`clearance` (0.4s); and any *other* recently-seen cert is held by a short ~1.5s
+trailing window. It replaced a session-lifetime `Set`, which erred the other way —
+a rescan was swallowed forever and never reached the "already in inventory" check.
+
+That middle rule is the **one-slab-at-a-time hold** (2026-09-15, user report: one
+card listed repeatedly in Recent scans). Users work a reversed stack, lifting one
+slab at a time, so the slab coming off and the one beneath it share the frame
+constantly. It needs the WHOLE frame every pass, which is why
+`BarcodeDetector.certificates` returns every cert rather than the first and why
+`CameraSession` calls `update(sightings:)` even on passes that detect nothing — an
+empty frame is the evidence that the slab left. **Only the admitted cert is
+recorded** in a pass that admits one, and only the held slab during a hold: record
+the whole frame and the next slab's own trailing window gets pushed back on every
+pass, costing about a second of dead air per slab (a test caught that, not a
+device). `ScanController.isHolding` drives the viewport copy and dims the guides,
+because a deliberate hold and a failed read look identical otherwise.
+
+**The duplicate check must ask the STORE** — `CardLookup.existing`, a
+`FetchDescriptor` (pending changes included, so an inserted-but-unsaved card
+counts) — never a screen's `@Query`. That array is a rendered value and the scan
+callback is handed to the camera once at `onAppear`, so a card inserted moments
+ago can be missing from it; at burst cadence that gap is where a second read of one
+slab inserted a second row, under a cyan "captured" readout instead of the amber
+duplicate one.
+
+**Two scan modes** (2026-09-16), remembered in `@AppStorage("caliper_auto_scan")`
+on `ScanScreen` — no other screen reads it, so it is deliberately not in
+`AppState`. Auto-scan is everything above. Tap-to-scan runs no Vision at all until
+the viewport is tapped (the whole viewport is the shutter, per Caliper §2): a tap
+**arms the next detection pass** (`TapCaptureArm`) rather than capturing inline,
+because the pixel buffer a tap would want is already recycled by the time the tap
+reaches the main actor — the armed pass then encodes the frame the barcode was
+really read in, one or two frames later. A tap **bypasses the window's rules** (the
+user picked that slab, so a second tap on a card already held must reach the
+duplicate readout rather than be swallowed by rule 1) but calls `noteAdmitted`, so
+flipping back to auto doesn't re-take the slab still in your hand. A tap that finds
+nothing readable expires after 1.2s into the `.noCode` toast — under auto-scan
+silence was honest because nothing had been asked, but a tap is a question.
 
 Identity and images resolve through a **ranked chain**, not a single source
 (`IdentitySource` + `Card.setIdentity`/`setImage`): PSA → Card Ladder → Courtyard,
@@ -369,17 +533,24 @@ detail screen says something different for each), a failed fetch keeps the last
 list, and nothing is ever synthesized to fill the panel.
 
 Prices come from two independent fetches per card (`PriceService.refresh`), so one
-source failing never blocks the other. Courtyard is `courtyard-price` (cache-first,
-`force` only from the detail screen's manual refresh); Card Ladder is only attempted
-when the user has connected an account, and `PriceRefresher` drops it for the rest of
-a bulk run the moment the connection reports gone. `PriceRefresher` paces itself off
-Card Ladder's ≤1 req/sec rule (1100 ms), and falls to 120 ms on a Courtyard-only run —
-that gap is the only thing between a big stack and Courtyard's per-IP 403.
-A refresh **never blanks a value the user already saw**. Only an
+source failing never blocks the other. Courtyard is `courtyard-price` (cache-first;
+`force: true` comes from exactly two places, the detail screen's "Refresh prices now"
+and `ScanScreen.retry`); Card Ladder is only attempted when the user has connected
+an account. A refresh **never blanks a value the user already saw**. Only an
 authoritative answer clears a price (`PriceWriteback` holds that rule and is tested
 directly); a transient failure keeps the last value and marks the column stale.
-Bulk refresh is cache-first — forcing on every card burns the 200/day Card Ladder
-budget, which reads to the user as prices going blank.
+
+**There is no bulk refresh** (removed 2026-09-16, owner decision). The Cards tab's
+refresh-all button and `PriceRefresher` — which paced a whole folder at 1100 ms for
+Card Ladder's ≤1 req/sec rule, or 120 ms on a Courtyard-only run, and dropped Card
+Ladder for the rest of a run the moment the connection reported gone — are gone,
+because one tap fired a stack-sized burst at exactly the endpoint that 403s an IP for
+hammering it, against a 200/day per-user Card Ladder budget. Prices now arrive on the
+scan itself and are re-fetched one card at a time from the detail screen. This
+knowingly departs from Caliper §3, which specifies that control and its in-flight
+`REFRESHING 9 CARDS · CL, CY` line; the `PRICES REFRESHED …` line stays. Any bulk
+path that comes back needs the pacing `PriceRefresher` had — recoverable from git
+history — and a scope narrower than "everything visible".
 
 ## Design
 
@@ -398,6 +569,11 @@ be misread as a source hue; **a missing price is an em dash — never `$0`, neve
 blank**; a confidence meter draws as many segments as its SOURCE actually asserts
 (CL 5, CY 3 — Courtyard's own app says only low/medium/high) at one fixed width, so
 the toggle never moves a row's right edge; copy states what happened without apology.
+A chip that is a BUTTON takes `Chip.Size.tap` and owes it `Chip.Size.tap.hitHeight`
+— the design's own 44 minimum, deliberately taller than the chip's ink, since a grid
+of fifteen 44pt chips would read as fifteen primary actions. `Chip.Size.badge` stays
+dense: `GradeBadge` shares the component, repeats down every row, and nothing taps it.
+`ExportColumnsRenderTests` pins both halves and renders the grid to a PNG.
 
 Two faces (Space Grotesk, JetBrains Mono) are Google Fonts with no .ttf in the
 handoff, so `CaliperType` falls back to system faces at the same sizes and weights
@@ -405,12 +581,13 @@ until the binaries are added to the target and registered under `UIAppFonts`.
 
 ## Where the prose evidence lives
 
-Six docs carry decisions that are not recoverable from the code; read the relevant
+Seven docs carry decisions that are not recoverable from the code; read the relevant
 one before changing that area:
 
 | Doc | Holds |
 |---|---|
 | `spike/README.md` | Per-source bot-wall verdicts, dated. Authoritative on access paths. |
+| `COURTYARD-BLANKS.md` | The 0.4 user bug report (no price / photo / confidence) worked end to end: the live-DB queries, the ruled-out hypotheses, and the latent issues found on the way (§4: cache keyed on the grader guess, silent image failures, function-body coverage). **§8 is the resolution and overrides §3 and Appendix A**; the "Fix not yet applied" status line at the top is stale — `5c00ce0` applied it. Read before debugging any "card shows no Courtyard data" report. |
 | `design/caliper/README.md` | Design source of truth; `reference/component-rules.md` + `prop-contracts.md` are the per-component rules. |
 | `supabase/functions/README.md` | Edge Function setup (`CL_ENC_KEY` generation, secrets) + curl smoke tests. |
 | `TODOS.md` | Deferred scope with rationale and the decision id that deferred it. |
@@ -432,9 +609,17 @@ appendix — not current guidance.
   credentials — gitignored, never commit or echo them. `spike/.state/` holds live
   sessions, likewise: `courtyard-session.json` is a LIVE Privy credential, not a fixture.
 - Commit messages record the test count (e.g. `83/83 tests` — the `worker/` vitest
-  total, currently 129 across 8 files; the iOS suite is a separate 80
-  across 11 files / 12 `@Suite` structs; pgTAP is 19, the `plan(19)` in
+  total, currently 131 across 8 files; the iOS suite is a separate 145
+  across 18 files / 20 test structs; pgTAP is 19, the `plan(19)` in
   supabase/tests/schema_test.sql). Re-count before writing the message rather than copying the
-  last commit's numbers — they have gone stale twice;
+  last commit's numbers — they have gone stale three times
+  (`grep -cE '^\s*(it|test)\(' worker/test/*.test.ts`, `grep -c '@Test' ios/Tests/*.swift`);
   tests are expected green before committing.
-- `TODOS.md` holds deferred scope with the rationale (currently: offline scan queue).
+- `TODOS.md` holds deferred scope with the rationale. Besides the offline scan queue,
+  its "Courtyard cleanup" section lists known, still-open gaps — check it before
+  "discovering" one: `PriceService.loadSales` still falls back to the phone-direct
+  Algolia comps path; the server's `stale: true` is never decoded by
+  `CourtyardScannerClient.Reply`, so a last-known Courtyard price looks current;
+  `fetchCardDetails` has no retry on a 502; CGC `g10pristine` collapses to `"10"` and
+  is shown ordinary-10 comps (fixing `gradeLabel` changes every `card_key` — needs a
+  `gradeRaw` carried end to end instead); the slab BACK photo is fetched but not stored.

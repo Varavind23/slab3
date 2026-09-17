@@ -18,7 +18,23 @@ final class ScanController {
     private(set) var framesPerSecond: Double = 0
     private(set) var detectionsPerSecond: Double = 0
 
+    /// True while the scanner is deliberately ignoring the frame because the slab
+    /// it just captured has not left yet (`RecentCertWindow` rule 2). The viewport
+    /// says so: holding and failing-to-read look identical otherwise, and a user
+    /// who thinks it missed the slab will wave it about instead of lifting it off.
+    private(set) var isHolding = false
+
     var torchOn = false { didSet { session.setTorch(torchOn) } }
+
+    /// Auto-scan (the default) takes every slab the camera recognises; tap-to-scan
+    /// waits to be asked. The screen owns the preference and pushes it here; the
+    /// session is what actually acts on it, and it is set again in `start` so a
+    /// restored preference survives the camera being torn down and rebuilt.
+    var autoScan = true { didSet { session.isAutoScanning = autoScan } }
+
+    /// Tap-to-scan: take the slab in front of the camera now. Arms the next
+    /// detection pass rather than capturing inline — see TapCaptureArm.
+    func capture() { session.requestCapture() }
 
     /// How long a slab stays suppressed after leaving frame. Exposed so the
     /// harness can tune it against real slabs.
@@ -33,14 +49,25 @@ final class ScanController {
 
     /// Start delivering scans. Safe to call repeatedly — the session ignores a
     /// start it is already running.
-    func start(onScan: @escaping (CertScan, Data?) -> Void) {
+    /// `onMiss` fires only in tap-to-scan — a tap that found nothing readable. It
+    /// defaults to doing nothing, so the device harness (which only ever
+    /// auto-scans) keeps compiling against this unchanged.
+    func start(onScan: @escaping (CertScan, Data?) -> Void, onMiss: @escaping () -> Void = {}) {
         session.onScan = onScan
+        session.onCaptureMiss = onMiss
         session.onStats = { [weak self] fps, dps in
             Task { @MainActor in
                 self?.framesPerSecond = fps
                 self?.detectionsPerSecond = dps
             }
         }
+        session.onHoldChange = { [weak self] holding in
+            Task { @MainActor in self?.isHolding = holding }
+        }
+        // The camera is torn down and rebuilt whenever the tab is left and come
+        // back to, so the remembered mode has to be pushed on every start, not
+        // only when the user flips the switch.
+        session.isAutoScanning = autoScan
         session.start()
         switch session.availability {
         case .ok: scannerError = nil

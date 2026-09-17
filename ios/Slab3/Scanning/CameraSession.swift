@@ -33,6 +33,12 @@ final class CameraSession: NSObject {
 
     /// Delivered on the main actor, once per admitted slab.
     var onScan: ((CertScan, Data?) -> Void)?
+    /// Main actor, on CHANGE only: the scanner is holding on the slab it just
+    /// captured (true) or is ready for the next one (false). See RecentCertWindow.
+    var onHoldChange: ((Bool) -> Void)?
+    /// Main actor: a tap-to-scan tap found nothing readable before its deadline.
+    /// Auto-scan never fires this — nothing was asked, so silence is honest.
+    var onCaptureMiss: (() -> Void)?
     /// Frames seen / certs admitted, for the harness read-out. Video queue only.
     var onStats: ((_ framesPerSecond: Double, _ detectionsPerSecond: Double) -> Void)?
 
@@ -49,7 +55,12 @@ final class CameraSession: NSObject {
     // Video-queue state. Not synchronized because that queue is serial and is
     // the only thing that touches them.
     private var window = RecentCertWindow()
+    private var arm = TapCaptureArm()
+    private var autoScan = true
     private var lastDetectionAt: CFTimeInterval = 0
+    /// Last hold state handed to the UI, so `onHoldChange` fires on transitions
+    /// rather than twelve times a second.
+    private var lastReportedHold = false
     private var frameCount = 0
     private var detectionCount = 0
     private var statsWindowStart: CFTimeInterval = CACurrentMediaTime()
@@ -61,6 +72,31 @@ final class CameraSession: NSObject {
     var suppressionWindow: TimeInterval {
         get { window.suppression }
         set { videoQueue.async { self.window.suppression = newValue } }
+    }
+
+    /// Auto-scan takes slabs as the camera recognises them; tap-to-scan waits to be
+    /// asked. Applied on the video queue, like the suppression window, because that
+    /// queue owns every decision it changes.
+    var isAutoScanning: Bool {
+        get { autoScan }
+        set {
+            videoQueue.async {
+                self.autoScan = newValue
+                // A tap the user has just switched away from must not fire its
+                // readout into the other mode.
+                self.arm.cancel()
+                // The hold is an auto-scan idea. Left lit, it would dim the guides
+                // of a tap-to-scan viewport that is perfectly ready.
+                if !newValue { self.reportHold(false) }
+            }
+        }
+    }
+
+    /// Tap-to-scan: take whatever is in front of the camera now. Arms the next
+    /// detection pass rather than capturing here — the frame a tap would want has
+    /// already been recycled by the time the tap arrives. See TapCaptureArm.
+    func requestCapture() {
+        videoQueue.async { self.arm.arm() }
     }
 
     // MARK: Lifecycle
@@ -170,14 +206,57 @@ extension CameraSession: AVCaptureVideoDataOutputSampleBufferDelegate {
         guard now - lastDetectionAt >= 1.0 / ScanGeometry.detectionsPerSecond else { return }
         lastDetectionAt = now
 
-        guard let scan = detector.certificate(in: buffer) else { return }
-        detectionCount += 1
-        guard window.admit(Self.key(scan)) else { return }
+        // Tap-to-scan looks only when it has been asked to. Vision is the
+        // expensive half of this callback, so an idle tap-mode viewport costs
+        // nothing beyond the preview it is already drawing.
+        if !autoScan && !arm.isArmed { return }
+
+        // The WHOLE frame, on EVERY pass — including passes that see nothing. An
+        // empty frame is the evidence that the captured slab has left and the
+        // scanner can take the next one, so this cannot be skipped when there is
+        // no cert to react to. Feeding the window one cert per pass is what made a
+        // slab still sitting in view look as though it had gone.
+        let scans = detector.certificates(in: buffer)
+        if !scans.isEmpty { detectionCount += 1 }
+
+        let taken: CertScan?
+        if autoScan {
+            let admitted = window.update(sightings: scans.map(Self.key))
+            reportHold(window.isHolding)
+            taken = admitted.flatMap { key in scans.first { Self.key($0) == key } }
+        } else {
+            switch arm.resolve(sawCert: !scans.isEmpty) {
+            case .idle:
+                return
+            case .expired:
+                DispatchQueue.main.async { [onCaptureMiss] in onCaptureMiss?() }
+                return
+            case .capture:
+                // The user picked this slab, so the window's rules are bypassed: a
+                // second tap on a card already in inventory has to reach the
+                // duplicate readout rather than be swallowed by rule 1. It is
+                // still recorded, so flipping back to auto-scan does not take the
+                // slab still sitting in your hand.
+                let scan = scans[0]
+                window.noteAdmitted(Self.key(scan))
+                taken = scan
+            }
+        }
+
+        guard let scan = taken else { return }
 
         // Encode inline: the buffer is only valid for this callback, and holding
         // it to convert later would starve the capture pool.
         let photo = capture.jpeg(from: buffer)
         DispatchQueue.main.async { [onScan] in onScan?(scan, photo) }
+    }
+
+    /// Transitions only. The UI redraws on this and the loop runs twelve times a
+    /// second, so reporting every pass would be twelve redraws a second.
+    private func reportHold(_ holding: Bool) {
+        guard holding != lastReportedHold else { return }
+        lastReportedHold = holding
+        DispatchQueue.main.async { [onHoldChange] in onHoldChange?(holding) }
     }
 
     private func reportStats(now: CFTimeInterval) {
