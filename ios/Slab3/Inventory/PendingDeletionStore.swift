@@ -15,6 +15,9 @@ enum CardDeletion {
         let all = (try? context.fetch(FetchDescriptor<Card>())) ?? []
         for card in all where ids.contains(card.localId) { context.delete(card) }
         try? context.save()
+        // Hygiene: the max-buy memo is keyed by card id, and a store that is emptied
+        // should not leave it holding every card it ever priced.
+        MaxBuyCache.forget(ids)
     }
 }
 

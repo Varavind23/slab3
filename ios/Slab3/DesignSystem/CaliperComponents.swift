@@ -162,34 +162,95 @@ struct GradeBadge: View {
 
 // MARK: - SourceToggle
 
-/// CL | CY. One instance of the state, global, on every tab's context line.
-/// The active segment fills with that source's own hue, so the control teaches the
-/// colour code every time it's used.
-struct SourceToggle: View {
-    @Binding var value: PriceSource
+/// The shared mechanics of both toggles — fill, glow, hairline, corner, press and
+/// the `.isSelected` trait — so `SourceToggle` and `LensToggle` cannot drift apart
+/// visually. Segments carry their own width, which is what lets one of them be a
+/// different size from the others without anything else measuring the control.
+private struct SegmentedToggle: View {
+    struct Segment: Identifiable {
+        let id: String
+        let label: String
+        let width: CGFloat
+        let hue: Color
+        let spokenName: String
+        let isActive: Bool
+        let select: () -> Void
+    }
+
+    let segments: [Segment]
 
     var body: some View {
         HStack(spacing: 0) {
-            ForEach(PriceSource.allCases) { source in
-                let active = source == value
-                Button {
-                    value = source
-                } label: {
-                    Text(source.rawValue)
+            ForEach(segments) { segment in
+                Button(action: segment.select) {
+                    Text(segment.label)
                         .font(.mono(9, .medium))
                         .tracking(1.0)
-                        .foregroundStyle(active ? Caliper.bg : Caliper.textSecondary)
-                        .frame(width: 30, height: 22)
-                        .background(active ? source.hue : .clear)
-                        .modifier(ActiveSegmentGlow(color: source.hue, active: active))
+                        .foregroundStyle(segment.isActive ? Caliper.bg : Caliper.textSecondary)
+                        .frame(width: segment.width, height: 22)
+                        .background(segment.isActive ? segment.hue : .clear)
+                        .modifier(ActiveSegmentGlow(color: segment.hue, active: segment.isActive))
                 }
                 .buttonStyle(CaliperPressStyle())
-                .accessibilityLabel(source.accessibilityName)
-                .accessibilityAddTraits(active ? [.isSelected] : [])
+                .accessibilityLabel(segment.spokenName)
+                .accessibilityAddTraits(segment.isActive ? [.isSelected] : [])
             }
         }
         .overlay(Rectangle().strokeBorder(Caliper.lineStrong, lineWidth: Caliper.borderWidth))
         .clipShape(RoundedRectangle(cornerRadius: Caliper.radiusControl))
+    }
+}
+
+/// CL | CY. The active segment fills with that source's own hue, so the control
+/// teaches the colour code every time it's used.
+///
+/// Still exactly two segments and still bound to a `PriceSource`: this is what
+/// `SalesPanel` uses to choose which source's COMPS it is showing, which is a
+/// genuinely different question from which figure leads. Max buy is not a comps
+/// source, so it has no business in this control. The screen headers take
+/// `LensToggle` instead.
+struct SourceToggle: View {
+    @Binding var value: PriceSource
+
+    var body: some View {
+        SegmentedToggle(segments: PriceSource.allCases.map { source in
+            .init(id: source.rawValue,
+                  label: source.rawValue,
+                  width: 30,
+                  hue: source.hue,
+                  spokenName: source.accessibilityName,
+                  isActive: source == value,
+                  select: { value = source })
+        })
+    }
+}
+
+/// MAX | CL | CY — the header control, and the only place the max-buy lens can be
+/// turned on (2026-09-22).
+///
+/// `lenses` comes from `AppState.availableLenses`, so a locked build renders the
+/// same two segments at the same 60pt it always did and no locked user's header
+/// moves. Max buy is first because it is the leftmost segment.
+struct LensToggle: View {
+    @Binding var value: PriceLens
+    var lenses: [PriceLens] = PriceLens.sources
+
+    /// The control's intrinsic width. Pinned by a test, because the header shares
+    /// its line with a context label that has overflowed here before.
+    static func width(of lenses: [PriceLens]) -> CGFloat {
+        lenses.map(\.segmentWidth).reduce(0, +)
+    }
+
+    var body: some View {
+        SegmentedToggle(segments: lenses.map { lens in
+            .init(id: lens.rawValue,
+                  label: lens.label,
+                  width: lens.segmentWidth,
+                  hue: lens.hue,
+                  spokenName: lens.accessibilityName,
+                  isActive: lens == value,
+                  select: { value = lens })
+        })
     }
 }
 
@@ -224,20 +285,58 @@ struct PriceLead: View {
     }
 }
 
+/// Our own max-buy figure leading a row, in place of a source's price.
+///
+/// `textPrimary`, never a source hue: the number is ours, computed from whichever
+/// comps were on hand, and colouring it Card Ladder cyan or Courtyard lime would
+/// claim one of them asserted it. The label is spelled out rather than abbreviated
+/// to `VMB` — a sourcer hands this screen to the person he is buying from, and it
+/// should read as what it is.
+///
+/// Nothing here names the comps basis. That disclosure lives behind the panel's
+/// "More", where it is for the sourcer rather than the seller.
+struct MaxBuyLead: View {
+    let cents: Int?
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 3) {
+            Text(caliperMoney(cents: cents))
+                .font(.price)
+                .foregroundStyle(cents == nil ? Caliper.textTertiary : Caliper.textPrimary)
+            Text(PriceLens.maxBuy.rowLabel)
+                .font(.mono(8, .medium))
+                .foregroundStyle(Caliper.textSecondary.opacity(0.75))
+        }
+    }
+}
+
 /// The source that isn't leading, in the metadata register.
+///
+/// `showing` defaults to "every source except the active one", which is the row's
+/// behaviour under a CL or CY lens. Under max buy the caller passes BOTH sources:
+/// no real source is leading, and the design's rule is that a row always carries
+/// every source's price — the toggle changes emphasis, never visibility.
 struct PriceRest: View {
     let prices: PriceSet
     let source: PriceSource
+    var showing: [PriceSource]? = nil
 
     var body: some View {
         HStack(spacing: Caliper.space3) {
-            ForEach(PriceSource.allCases.filter { $0 != source }) { other in
+            ForEach(showing ?? PriceSource.allCases.filter { $0 != source }) { other in
                 HStack(spacing: 2) {
                     Text(other.rawValue).foregroundStyle(other.hue.opacity(0.7))
                     Text(caliperMoney(cents: prices[other]))
                         .foregroundStyle(prices[other] == nil ? Caliper.textTertiary : Caliper.textSecondary)
                 }
                 .font(.meta)
+                // A price must never wrap. With one trailing source there was always
+                // room; with two four-figure ones there is not, and the money broke
+                // mid-number ("$1,32 / 0.00") and grew the row — which also breaks
+                // the drag-scrub's assumption that rows are a uniform height.
+                // metaLine beside this already truncates, so it absorbs the squeeze.
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
             }
         }
     }
@@ -282,7 +381,7 @@ struct ConfidenceMeter: View {
         .frame(width: Self.totalWidth)
         .modifier(HighConfidenceBloom(active: Caliper.isHighConfidence(lit, of: segments)))
         .accessibilityElement()
-        .accessibilityLabel("Match confidence \(lit) of \(segments)")
+        .accessibilityLabel("Confidence \(lit) of \(segments)")
     }
 }
 
@@ -363,7 +462,11 @@ struct ScreenHeader<Actions: View>: View {
     let context: String
     let title: String
     var contextTint: Color = Caliper.textSecondary
-    var source: Binding<PriceSource>? = nil
+    /// Which figure leads, app-wide. `lenses` decides how many segments the control
+    /// draws — two when the testing gate is locked, three when it is not — so the
+    /// header's width is a function of the gate and nothing else.
+    var lens: Binding<PriceLens>? = nil
+    var lenses: [PriceLens] = PriceLens.sources
     @ViewBuilder var actions: Actions
 
     var body: some View {
@@ -371,7 +474,7 @@ struct ScreenHeader<Actions: View>: View {
             HStack(alignment: .center) {
                 Text(context).caliperLabel(contextTint)
                 Spacer(minLength: Caliper.space4)
-                if let source { SourceToggle(value: source) }
+                if let lens { LensToggle(value: lens, lenses: lenses) }
                 actions
             }
             Text(title)
@@ -385,8 +488,10 @@ struct ScreenHeader<Actions: View>: View {
 }
 
 extension ScreenHeader where Actions == EmptyView {
-    init(context: String, title: String, contextTint: Color = Caliper.textSecondary, source: Binding<PriceSource>? = nil) {
-        self.init(context: context, title: title, contextTint: contextTint, source: source, actions: { EmptyView() })
+    init(context: String, title: String, contextTint: Color = Caliper.textSecondary,
+         lens: Binding<PriceLens>? = nil, lenses: [PriceLens] = PriceLens.sources) {
+        self.init(context: context, title: title, contextTint: contextTint,
+                  lens: lens, lenses: lenses, actions: { EmptyView() })
     }
 }
 

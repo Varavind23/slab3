@@ -4,8 +4,10 @@ import SwiftUI
 /// design is really about (reference/component-rules.md § CardRow).
 ///
 /// Three lines on one square panel:
-///   1. card name + the ACTIVE source's price, in that source's hue
-///   2. the other two prices, the year/set metadata, and the confidence meter
+///   1. card name + the LEADING figure — the active source's price in its own hue,
+///      or our own max-buy number when that lens is on
+///   2. the price(s) that aren't leading, the year/set metadata, and the
+///      confidence meter
 ///   3. the cert, the group chip, and the grade badge
 ///
 /// What must not be lost: both sources stay visible whichever one leads; a
@@ -16,9 +18,16 @@ import SwiftUI
 /// component and not a different screen, so the list never reflows.
 struct CardRow: View {
     let card: Card
-    let source: PriceSource
+    /// Which figure leads. Under `.maxBuy` no real source leads, so line 1 becomes
+    /// our own number and line 2 carries BOTH sources — the rule that every source
+    /// stays visible on every row is what the lens must not break.
+    let lens: PriceLens
     var selectable: Bool = false
     var selected: Bool = false
+
+    /// The source underneath the lens, for the parts of the row that are still
+    /// per-source. Max buy has none, and those parts branch rather than guess.
+    private var source: PriceSource? { lens.source }
 
     var body: some View {
         HStack(alignment: .top, spacing: Caliper.rowPad) {
@@ -44,18 +53,42 @@ struct CardRow: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
             Spacer(minLength: Caliper.space3)
-            PriceLead(prices: card.prices, source: source)
+            if let source {
+                PriceLead(prices: card.prices, source: source)
+            } else {
+                MaxBuyLead(cents: MaxBuyValue.cents(for: card))
+            }
         }
     }
 
-    // Line 2 — the other two prices, metadata, confidence.
+    // Line 2 — the trailing price(s), metadata, confidence.
     private var lineTwo: some View {
         HStack(alignment: .center, spacing: Caliper.space4) {
-            PriceRest(prices: card.prices, source: source)
+            // Under max buy this shows both sources rather than one, which costs
+            // metaLine some of its truncation budget — the most expendable thing on
+            // the row, and already truncating.
+            PriceRest(prices: card.prices, source: source ?? .cl,
+                      showing: source == nil ? PriceSource.allCases : nil)
             Text("·").caliperMeta(Caliper.textTertiary)
             Text(card.metaLine).caliperMeta(Caliper.textTertiary).lineLimit(1)
             Spacer(minLength: Caliper.space3)
+            trailingMeter
+        }
+    }
+
+    /// The confidence slot, always `ConfidenceMeter.totalWidth` wide so the row's
+    /// right edge never moves when the toggle flips.
+    ///
+    /// Under max buy it is EMPTY. A confidence meter belongs to a source — it grades
+    /// how sure we are of the match, not of our own arithmetic — and borrowing the
+    /// comps source's meter would also leak which source answered, since CL draws
+    /// five segments and CY three. The blank keeps the geometry and claims nothing.
+    @ViewBuilder
+    private var trailingMeter: some View {
+        if let source {
             ConfidenceMeter(value: card.confidences[source], source: source)
+        } else {
+            Color.clear.frame(width: ConfidenceMeter.totalWidth, height: 4)
         }
     }
 

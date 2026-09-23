@@ -246,10 +246,14 @@ enum PriceService {
             // replaces it, so a transient failure below leaves it alone.
             card.cardLadderLastSaleCents = price.lastSaleCents
             card.cardLadderLastSaleAt = price.lastSaleAt
-            // Card Ladder resolves by cert number server-side, so a hit is exact
-            // by construction — there is no fuzzy path to score lower. That also
-            // makes its identity and its card render safe to trust outright.
-            card.cardLadderConfidence = 5
+            // Card Ladder's OWN 1-5 confidence in its estimate — the same kind of
+            // figure Courtyard's meter shows, which is what lets the two meters sit
+            // side by side. It used to be pinned at 5 because a cert-keyed hit is
+            // always the right CARD, but that grades the match, which is never in
+            // doubt, and threw away the only statement about the VALUE's
+            // reliability. Absent means unknown: an empty meter, never a made-up 5.
+            // The cert-keyed hit still makes identity and render safe to trust.
+            card.cardLadderConfidence = price.confidence ?? 0
             if let identity { await applyCardLadderIdentity(identity, to: card) }
             return .ok
 

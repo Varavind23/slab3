@@ -133,7 +133,7 @@ struct CardsScreen: View {
         }
         .navigationDestination(item: $route) { id in
             if let card = allCards.first(where: { $0.localId == id }) {
-                CardDetailScreen(card: card, app: app)
+                CardDetailScreen(card: card, app: app, pendingDeletes: pendingDeletes)
             }
         }
     }
@@ -145,7 +145,8 @@ struct CardsScreen: View {
             context: app.isSelecting ? "\(app.selection.count) of \(visible.count) selected" : "\(visible.count) cards",
             title: app.isSelecting ? "Select cards" : filterTitle,
             contextTint: app.isSelecting ? Caliper.cyan : Caliper.textSecondary,
-            source: $app.activeSource
+            lens: $app.lens,
+            lenses: app.availableLenses
         ) {
             if app.isSelecting {
                 HStack(spacing: Caliper.space5) {
@@ -244,13 +245,17 @@ struct CardsScreen: View {
                 // to them once a swipe is the affordance.
                 SwipeableCardRow(
                     card: card,
-                    source: app.activeSource,
+                    lens: app.lens,
                     selectable: app.isSelecting,
                     selected: app.selection.contains(card.localId),
                     fileTarget: Folder.mostRecentlyUsed(in: groups),
                     openRowID: $openRowID,
                     onTap: {
                         if app.isSelecting {
+                            // A long press that ends without a drag also reports
+                            // a tap; toggling on it would undo the selection the
+                            // press just made.
+                            guard !dragSelect.swallowsTap() else { return }
                             app.toggleSelection(card.localId)
                         } else {
                             route = card.localId
@@ -524,9 +529,28 @@ struct CardsScreen: View {
         case .recent: return cards.sorted { $0.scannedAt > $1.scannedAt }
         case .name: return cards.sorted { $0.displayTitle.localizedCompare($1.displayTitle) == .orderedAscending }
         case .price:
-            // Sorts by the ACTIVE source — the toggle changes the sort basis, not
-            // just the colour. Cards with no price for it sink to the bottom.
-            return cards.sorted { ($0.prices[app.activeSource] ?? -1) > ($1.prices[app.activeSource] ?? -1) }
+            // Sorts by whatever LEADS — the toggle changes the sort basis, not just
+            // the colour. Cards with no figure for it sink to the bottom.
+            guard app.isMaxBuy else {
+                return cards.sorted { ($0.prices[app.activeSource] ?? -1) > ($1.prices[app.activeSource] ?? -1) }
+            }
+            // Decorate–sort–undecorate: each card is valued ONCE per sort rather
+            // than once per comparison. The scannedAt tiebreak matters more here
+            // than on a price sort — comps-less cards all tie at -1, and without it
+            // their order would shuffle between recomputes of this property.
+            //
+            // Spelled out in steps rather than chained: the tuple version defeats
+            // the type checker ("unable to type-check in reasonable time").
+            var valued: [(card: Card, cents: Int)] = []
+            valued.reserveCapacity(cards.count)
+            for card in cards {
+                valued.append((card, MaxBuyValue.cents(for: card) ?? -1))
+            }
+            valued.sort { lhs, rhs in
+                if lhs.cents != rhs.cents { return lhs.cents > rhs.cents }
+                return lhs.card.scannedAt > rhs.card.scannedAt
+            }
+            return valued.map(\.card)
         }
     }
 

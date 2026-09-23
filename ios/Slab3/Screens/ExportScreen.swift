@@ -21,7 +21,8 @@ struct ExportScreen: View {
             ScreenHeader(
                 context: "\(filename) · \(scoped.count) rows",
                 title: "Export",
-                source: $app.activeSource
+                lens: $app.lens,
+                lenses: app.availableLenses
             )
             ScrollView {
                 VStack(spacing: Caliper.rowGap) {
@@ -90,7 +91,9 @@ struct ExportScreen: View {
     }
 
     private var previewRows: [String] {
-        Array(CSVExport.rows(Array(scoped.prefix(4)), columns: app.enabledColumns, payoutPercent: app.payoutPercent).dropFirst())
+        Array(CSVExport.rows(Array(scoped.prefix(4)), columns: app.exportColumns,
+                             payoutPercent: app.payoutPercent,
+                             maxBuyCents: MaxBuyValue.centsByCard(Array(scoped.prefix(4)))).dropFirst())
     }
 
     // MARK: Columns
@@ -106,8 +109,11 @@ struct ExportScreen: View {
             // TARGET is the full 44 Caliper asks for — taller than the ink, so the
             // grid doesn't turn into fifteen buttons the size of Share CSV.
             FlowLayout(spacing: Caliper.space4) {
-                ForEach(CSVColumn.allCases) { column in
-                    let index = app.enabledColumns.firstIndex(of: column)
+                ForEach(CSVColumn.available(testingUnlocked: app.testingUnlocked)) { column in
+                    // Numbered by what the file EMITS, not the raw saved order: a
+                    // max-buy column the locked gate hides would otherwise leave a
+                    // gap, and the badge would name a column position the CSV lacks.
+                    let index = app.exportColumns.firstIndex(of: column)
                     Button {
                         toggle(column)
                     } label: {
@@ -154,12 +160,13 @@ struct ExportScreen: View {
             .padding(.horizontal, Caliper.gutter)
 
             CaliperButton(title: "Share CSV", variant: .primary, icon: "square.and.arrow.up", fullWidth: true,
-                          disabled: scoped.isEmpty || app.enabledColumns.isEmpty) {
+                          disabled: scoped.isEmpty || app.exportColumns.isEmpty) {
                 shareURL = CSVExport.write(
                     scoped,
-                    columns: app.enabledColumns,
+                    columns: app.exportColumns,
                     scope: activeGroup?.name,
-                    payoutPercent: app.payoutPercent
+                    payoutPercent: app.payoutPercent,
+                    maxBuyCents: MaxBuyValue.centsByCard(scoped)
                 )
             }
             .padding(.horizontal, Caliper.gutter)

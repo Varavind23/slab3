@@ -168,13 +168,26 @@ final class Card {
     /// Real recent sales per source, JSON-encoded `[RecentSale]`. `nil` means
     /// never fetched; an encoded EMPTY array means fetched and the source has
     /// none. Read through `cardLadderSales` / `courtyardSales`.
+    ///
+    /// WRITE THROUGH THOSE ACCESSORS, never to these blobs directly: the setters
+    /// bump `compsRevision`, and `MaxBuyCache` trusts that stamp to decide whether
+    /// a row's max buy is still valid. A direct write would leave a stale figure on
+    /// screen until something unrelated changed.
     var cardLadderSalesData: Data?
     var courtyardSalesData: Data?
     var salesLoading: Bool = false
 
-    /// Match confidence 0–5 per source, derived at fetch time (PriceService).
-    /// README.md open question 2 asks the client to define the real scale; until
-    /// then these are derived from how the match was actually made, never guessed.
+    /// Bumped whenever comps are written for either source. Exists so the max-buy
+    /// memo can be invalidated with one `Int` compare instead of decoding both
+    /// comps blobs — they decode on EVERY property read, and the Cards list would
+    /// otherwise run thousands of `JSONDecoder`s a frame while sorting.
+    ///
+    /// Additive-optional per the SwiftData rule above; `nil` reads as revision 0.
+    var compsRevision: Int?
+
+    /// Each source's OWN confidence in its price, 0–5, written at fetch time
+    /// (PriceService). 0 means the source stated none — never guessed upward.
+    /// Courtyard's is bucketed to three segments for display.
     var courtyardConfidence: Int = 0
     var cardLadderConfidence: Int = 0
 
@@ -221,11 +234,17 @@ final class Card {
     /// something different for each, so the distinction must survive to the UI.
     var cardLadderSales: [RecentSale]? {
         get { Self.decodeSales(cardLadderSalesData) }
-        set { cardLadderSalesData = Self.encodeSales(newValue) }
+        set {
+            cardLadderSalesData = Self.encodeSales(newValue)
+            compsRevision = (compsRevision ?? 0) &+ 1
+        }
     }
     var courtyardSales: [RecentSale]? {
         get { Self.decodeSales(courtyardSalesData) }
-        set { courtyardSalesData = Self.encodeSales(newValue) }
+        set {
+            courtyardSalesData = Self.encodeSales(newValue)
+            compsRevision = (compsRevision ?? 0) &+ 1
+        }
     }
 
     func sales(for source: PriceSource) -> [RecentSale]? {

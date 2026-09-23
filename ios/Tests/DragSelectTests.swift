@@ -151,4 +151,25 @@ struct DragSelectControllerTests {
         controller.end()
         #expect(!controller.isActive, "a second end must not revive the session")
     }
+
+    // ── The tap that is really the scrub's own touch-up ─────────────────────────
+
+    /// A long press that ends without a drag also reports a tap. Toggling on it
+    /// would deselect the row the press just selected.
+    @Test func swallowsTapJustAfterAScrub() {
+        let controller = DragSelectController()
+        #expect(!controller.swallowsTap(), "no scrub yet, so nothing to swallow")
+        _ = controller.begin(at: 1, rowIDs: ids, selection: [])
+        controller.end()
+        let ended = controller.endedAt!
+        #expect(controller.swallowsTap(now: ended.addingTimeInterval(0.1)))
+    }
+
+    @Test func letsATapThroughLater() {
+        let controller = DragSelectController()
+        _ = controller.begin(at: 1, rowIDs: ids, selection: [])
+        controller.end()
+        let ended = controller.endedAt!
+        #expect(!controller.swallowsTap(now: ended.addingTimeInterval(DragSelectController.tapSuppression)))
+    }
 }

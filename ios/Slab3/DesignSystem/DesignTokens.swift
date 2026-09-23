@@ -169,6 +169,95 @@ extension PriceSource {
     }
 }
 
+/// Which figure LEADS on a row, in the hero and in the sort: one of the two real
+/// sources, or our own max-buy number (2026-09-22).
+///
+/// Deliberately NOT a third `PriceSource` case. `PriceSource` indexes data a source
+/// actually stored — `PriceSet`, `ConfidenceSet`, `Card.sales(for:)`, and
+/// `PriceRest`'s "every source except the active one". Max buy has no stored price,
+/// no confidence and no comps of its own; it is computed from whatever comps a real
+/// source left behind. A third case there would have compiled and then been quietly
+/// wrong in ten binary `source == .cl ? … : …` ternaries — `Card.sales(for:)` would
+/// have handed it Courtyard's comps by accident, and the row would have drawn two
+/// trailing prices on line 2.
+///
+/// So the lens sits ABOVE the source: `AppState.activeSource` keeps its exact
+/// meaning and every one of its read sites, and only the handful of places that
+/// render a LEADING figure consult the lens.
+enum PriceLens: String, CaseIterable, Identifiable {
+    /// First, because it is the LEFTMOST segment on the toggle (owner, 2026-09-22).
+    case maxBuy = "maxbuy"
+    case cl = "CL", cy = "CY"
+
+    var id: String { rawValue }
+
+    /// The real source behind this lens, or nil for max buy — which is the whole
+    /// distinction, so prefer branching on this over comparing cases.
+    var source: PriceSource? {
+        switch self {
+        case .maxBuy: return nil
+        case .cl: return .cl
+        case .cy: return .cy
+        }
+    }
+
+    init(_ source: PriceSource) {
+        switch source {
+        case .cl: self = .cl
+        case .cy: self = .cy
+        }
+    }
+
+    /// The toggle segment's ink. "MAX" rather than the full words because a segment
+    /// is 30pt wide; the row and the hero spell it out where there is room.
+    var label: String {
+        switch self {
+        case .maxBuy: return "MAX"
+        case .cl: return "CL"
+        case .cy: return "CY"
+        }
+    }
+
+    /// Written out beside the figure it leads — the owner's call over the "VMB"
+    /// acronym, and over a `VMB·CL` suffix naming the comps source, which would
+    /// have put the evidence basis on a screen held out to the person being bought
+    /// from.
+    var rowLabel: String {
+        switch self {
+        case .maxBuy: return "MAX BUY"
+        case .cl: return "CL"
+        case .cy: return "CY"
+        }
+    }
+
+    /// Per-segment width. The ONE place a longer label would be paid for, so a
+    /// change here is the whole change — nothing else measures the toggle.
+    var segmentWidth: CGFloat { 30 }
+
+    /// Max buy takes `textPrimary`, never cyan: cyan is already Card Ladder's hue
+    /// AND the screen's one primary action, and white is the register `MaxBuyPanel`
+    /// uses to say the figure is ours rather than a source's.
+    var hue: Color { source?.hue ?? Caliper.textPrimary }
+
+    /// Spoken name — "MAX" and "CL" are both unreadable to VoiceOver.
+    var accessibilityName: String {
+        switch self {
+        case .maxBuy: return "Max buy"
+        case .cl, .cy: return source?.accessibilityName ?? ""
+        }
+    }
+
+    /// The two real sources, in toggle order — what a locked build shows, and the
+    /// width a locked user's header must keep.
+    static let sources: [PriceLens] = [.cl, .cy]
+
+    /// Max buy exists only behind the testing gate, so the toggle's segment count
+    /// is a function of the gate and nothing else.
+    static func available(unlocked: Bool) -> [PriceLens] {
+        unlocked ? allCases : sources
+    }
+}
+
 /// The two prices for one card, in cents. A `nil` is a real answer — the source
 /// has nothing — and renders as an em dash, never as zero.
 struct PriceSet {
@@ -190,7 +279,7 @@ struct PriceSet {
     }
 }
 
-/// Match confidence 0–5 per source. Same shape as PriceSet so the row can read
+/// Each source's own price confidence, 0–5. Same shape as PriceSet so the row can read
 /// both with one index.
 struct ConfidenceSet {
     var cl: Int = 0

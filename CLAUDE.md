@@ -35,16 +35,24 @@ cd ios && xcodegen generate
 xcodebuild -project ios/Slab3.xcodeproj -scheme Slab3 \
   -destination 'platform=iOS Simulator,name=iPhone 17' test   # pick a simulator you actually have
 # single test: add -only-testing:Slab3Tests/CardKeyTests/matchesSqlNormalization
-# ios/Tests uses Swift Testing (@Test/#expect), NOT XCTest — match it. 11 files,
-# 12 plain structs (PriceSetTests lives in CSVExportTests.swift), no @Suite attributes.
-# DetailScreenRenderTests renders panels to PNG under $TMPDIR/slabs-render/ — layout
-# bugs shipped green three times because nothing asserted on layout, so LOOK at them.
+# ios/Tests uses Swift Testing (@Test/#expect), NOT XCTest — match it. 23 files,
+# 25 plain structs, no @Suite attributes — the file name is NOT the struct name in
+# three places: PriceSetTests lives in CSVExportTests.swift, DragSelectControllerTests
+# in DragSelectTests.swift, and TestingGate's passcode vectors in
+# MaxBuyPanelRenderTests.swift, so -only-testing names can't be guessed from ls.
+# Five suites render panels to PNG under $TMPDIR/slabs-render/ — DetailScreenRender,
+# MaxBuyPanelRender, SwipeRowRender, ExportColumnsRender, LensRender — and assert only
+# that the file exists: layout bugs shipped green three times because nothing asserted
+# on layout, so LOOK at them. ($TMPDIR is the SIMULATOR's, not the shell's — the test
+# log prints each absolute path, which is the only way to find them.)
 # ios/project.yml also defines SlabsDev, a side-by-side test build (separate bundle
 # id AND separate SwiftData store) so a TestFlight build and a dev build coexist on
 # one device. It talks to the SAME live Supabase as the shipped app.
 # Shipping version + build live ONLY in ios/project.yml (MARKETING_VERSION /
-# CURRENT_PROJECT_VERSION, currently 0.4 / 4 = "V4", on TestFlight since 2026-09-06;
-# by the same convention V5 is 0.5 / 5); bump BOTH targets together
+# CURRENT_PROJECT_VERSION, currently 0.7 / 7, on the release/0.5 branch — 0.7 is
+# the max-buy lens plus the 2026-09-23 review fixes; V5 was 0.5 / 5-6 (6 the
+# selection-mode scroll fix in 564520b); V4 was 0.4 / 4, on TestFlight since
+# 2026-09-06); bump BOTH targets together
 # or the dev build stops matching the TestFlight build it exists to compare against.
 # Shipping to TestFlight: signing is MANUAL on purpose, and the exact archive +
 # exportArchive commands, the App Store Connect API-key role trap that broke the
@@ -552,6 +560,130 @@ knowingly departs from Caliper §3, which specifies that control and its in-flig
 path that comes back needs the pacing `PriceRefresher` had — recoverable from git
 history — and a scope narrower than "everything visible".
 
+### Verified Max Buy Price — the gated pilot (V5, 2026-09-16; a lens since 2026-09-22)
+
+The one number in the app that is **ours**, not a source's: the most a sourcer
+should pay for a slab and still clear his cut. It answers a different question from
+every price above, and that premise is the thing to hold on to — **the sourcer is
+PAID in Card Ladder Value**, so CLV is his revenue, not a reference price, and what
+he needs is a ceiling on his offer. Entirely client-side from comps already on the
+device: no Edge Function, no migration, no new request, so none of the deploy
+caution above applies to changing it. There is no prose doc; the reasoning lives in
+the headers of `MaxBuyPrice.swift` (the formula), `MaxBuyValue.swift` (which comps,
+and the memo), `MaxBuyPanel.swift` / `ValueBlock.swift` (what is shown) and
+`TestingGate.swift` (the gate).
+
+`MaxBuyPrice` (`ios/Slab3/Pricing/MaxBuyPrice.swift`) is the whole formula, pure and
+Foundation-only so the vectors test off-device the way `PriceWriteback` does:
+
+    base = mean(newest N comps);  room = base - lowest of those N
+    s    = skew + 0.80*dispersion + 0.40*bottomHeaviness + 0.35*thinness  (clamp 0…1)
+    VMB  = (base - s*room) * (1 - margin),  capped at CL Value
+
+**`s = 1` is the lowest recent sale, so at `margin = 0` the answer is always a
+figure this card actually sold for.** That floor is what makes the number
+defensible to the seller it gets shown to, and `margin` is the only term allowed to
+cut below it — keep that property if you touch the algebra. The three weights are
+**best guesses shipped to be tuned live** against the tester's own numbers (owner
+decision), not fitted to data we have, so expect to move them — and move
+`MaxBuyPriceTests`' three worked cases (tight/high-pop, scattered/low-pop,
+bottom-heavy) with them, since those are relative assertions, not golden figures.
+There is deliberately **no recency decay**: the window is "the newest N", which is
+how the sourcer already thinks, and `Breakdown.newestSoldAt` rides up so the panel
+can show how old the evidence is instead of hiding a second opinion in a half-life.
+
+Same honesty rules as prices: no usable comps is **no number** (`.unavailable(.noComps)`
+→ em dash + a reason, never `$0`), and an **unknown population contributes zero**
+rather than being read as a small one — while a real `0` (CGC pristine-10 groups
+report one) is the thinnest market there is.
+
+`MaxBuyValue` (`ios/Slab3/Pricing/MaxBuyValue.swift`) is the ONE place that decides
+which comps, which cap and which population — six consumers now show this figure and
+six copies of that rule is six chances for the list and the screen being held out to a
+seller to disagree. Inputs:
+- **Comps**: Card Ladder's when the card has any, else Courtyard's; an **empty** CL
+  list means "CL answered and has none" and falls THROUGH rather than answering. They
+  are already filtered to this slab's own grader AND grade — `applyScannerSales` for
+  CY, server-side for CL — so `[]` is a real answer, not a bug. Consequence to know:
+  CY comps arrive on the scan but CL comps only when a card's detail screen is opened
+  with an account connected, **so a card re-prices the first time it is opened**. That
+  is accepted, not a defect; fetching comps in bulk is what the 200/day budget forbids.
+- **The cap** is always `card.prices[.cl]`, whichever source supplied the comps; no
+  CL Value means no cap, not no number.
+- **Population** is `card.courtyardPopulation`, and **Courtyard is the only source
+  that carries one** — a card CY 400s on has CL comps and no census, and the
+  thinness term just goes quiet. Written only on the two authoritative scanner
+  branches (`PriceService.applyScannerPopulation`, so an outage keeps the last
+  figure), grade-group first then the card-level total, mirroring `populationForGrade`
+  in the worker adapter. It is `Int?` and additive per the SwiftData rule above.
+
+**The lens.** `PriceLens` (`.maxBuy`/`.cl`/`.cy`, in `DesignTokens.swift`) sits ABOVE
+`PriceSource` and drives the header toggle's third segment, `MAX`, leftmost and present
+only while the gate is unlocked. It is deliberately **not** a third `PriceSource` case:
+that enum indexes stored per-source data (`PriceSet`, `ConfidenceSet`,
+`Card.sales(for:)`, `PriceRest`'s "every other source"), and max buy has no stored
+price, no confidence and no comps of its own — a third case there compiles and is then
+silently wrong in ~10 `source == .cl ? … : …` ternaries. `AppState.activeSource` keeps
+its exact meaning and all 13 read sites; `lens` persists ONLY max buy, and a CL/CY lens
+is always derived from `activeSource` — a stored source lens let Settings' "Default
+emphasis" and the comps toggle move the sort and totals while the header kept the old
+source. Choosing max buy writes NO source, which is what makes flipping back land where
+you were. `SalesPanel` keeps its own two-way `SourceToggle` — which comps you are
+*reading* is a different question from which figure *leads*, and writing `activeSource`
+there must not knock you off max buy (under a CL/CY lens it moves the hero with it).
+
+Under the lens: the row's lead figure, the detail hero, the scan toast, selection
+mode's running total and the price sort all become max buy; the Cards summary total and
+Export's footer total deliberately do **not**. Row line 2 shows BOTH source prices
+(nothing may hide a source), and the confidence slot goes **blank at its full 43pt** —
+a meter grades a source's OWN confidence in its price (CL's real 1–5 since 0.7 — it
+was pinned at 5 before), not our arithmetic, and borrowing one would also leak
+which source answered, since CL draws five segments and CY three. Nothing on the row
+names the comps basis, by owner decision: the screen gets held out to the person being
+bought from, and that disclosure lives behind the panel's "More".
+
+**`MaxBuyCache` is required, not an optimisation.** `card.cardLadderSales` /
+`courtyardSales` run a `JSONDecoder` on EVERY property read, `CardsScreen.visible` is
+evaluated several times per body pass, and sorting values every card in the store — so
+an uncached lens costs tens of thousands of decodes a frame. The memo is stamped on
+`(compsRevision, cardLadderPriceCents, courtyardPopulation, knobs)`; the row reads those
+inside `body`, so a write both redraws the row and misses the cache on the same pass.
+`Card.compsRevision` is bumped inside the two comps SETTERS — never write the
+`…SalesData` blobs directly or a stale figure stays on screen. Keep the cache a
+`@MainActor enum`, never `@Observable`: it is written during `body`.
+
+`CSVExport` stays **nonisolated** and takes max-buy values as a `[UUID: Int]` the caller
+resolves (`MaxBuyValue.centsByCard`). Isolating it to reach the main-actor memo
+isolated `filename`/`rows` too and broke the offline CSV tests. The `max_buy_price`
+column is gated at both ends via `AppState.exportColumns`, so locking the gate stops it
+exporting without destroying the user's column order — the CSV is the part of this app a
+buyer sees, and it states the most you were willing to pay.
+
+`MaxBuyPanel` shows **nothing but the number until "More" is tapped**, and that is
+the feature, not a default: the tester holds this screen out to the person he is
+buying from, so sliders, his margin and the weights must not be in frame. It is a
+deliberate exception to SalesPanel's "empty is REAL CONTENT, never a hidden panel"
+rule — that rule is about hiding data a user knows exists, and this whole feature is
+undisclosed. The figure takes `.figureSmall` and `Caliper.textPrimary`: never the
+screen's one hero `.figure` (that is `valueBlock`'s), and never a source hue, which
+would claim CL or CY asserted it.
+
+Knobs live on `CardDetailScreen` (not the panel) so the **hero follows the sliders
+live** — two differently-tuned figures on one screen, both labelled "Max buy", is the
+misreading the hero's toggle-following rule exists to prevent. The list always shows the
+baseline figure, so a tuned card legitimately reads differently there: the panel is the
+negotiation scratchpad, the list is one consistent basis. They are **per-card and reset
+from `MaxBuyDefaults` on every card** so a figure tuned in one negotiation cannot silently
+follow him into the next; the baseline itself is edited once, in Settings → Testing.
+`TestingGate` is **obfuscation, not security, and is meant to be** — the passcode is
+plain text in the binary (`TestingGate.passcode`, the only place it lives), and its
+job is to stop a curious TestFlight user acting on an uncalibrated buy
+recommendation, not to withstand anyone trying. A real entitlement would mean an
+Edge Function deploy, which is a production release reaching every user at once;
+that is not warranted to hide one panel. The unlock is
+`@AppStorage("caliper_testing_unlocked")`, read by exactly two screens, so like
+`caliper_auto_scan` it is deliberately NOT in `AppState`.
+
 ## Design
 
 **Caliper** is the current system. `design/caliper/README.md` is the source of
@@ -609,8 +741,8 @@ appendix — not current guidance.
   credentials — gitignored, never commit or echo them. `spike/.state/` holds live
   sessions, likewise: `courtyard-session.json` is a LIVE Privy credential, not a fixture.
 - Commit messages record the test count (e.g. `83/83 tests` — the `worker/` vitest
-  total, currently 131 across 8 files; the iOS suite is a separate 145
-  across 18 files / 20 test structs; pgTAP is 19, the `plan(19)` in
+  total, currently 131 across 8 files; the iOS suite is a separate 209
+  across 23 files / 25 test structs; pgTAP is 19, the `plan(19)` in
   supabase/tests/schema_test.sql). Re-count before writing the message rather than copying the
   last commit's numbers — they have gone stale three times
   (`grep -cE '^\s*(it|test)\(' worker/test/*.test.ts`, `grep -c '@Test' ios/Tests/*.swift`);

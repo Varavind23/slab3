@@ -27,7 +27,7 @@ import SwiftUI
 /// whether it means this card or all of them.
 struct SwipeableCardRow: View {
     let card: Card
-    let source: PriceSource
+    let lens: PriceLens
     var selectable: Bool = false
     var selected: Bool = false
     /// Where a file action would put this card. `nil` = nothing has ever been
@@ -73,7 +73,7 @@ struct SwipeableCardRow: View {
             // the row at all, which is what stops the actions showing through it.
             if trayMounted { tray }
 
-            CardRow(card: card, source: source, selectable: selectable, selected: selected)
+            CardRow(card: card, lens: lens, selectable: selectable, selected: selected)
                 // Full width BEFORE the hit shape is taken. The row's own trailing
                 // content — price, meter, grade chip — sits against the right edge,
                 // and without this the tappable rect could stop short of it, which

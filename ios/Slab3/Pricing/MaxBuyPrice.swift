@@ -40,7 +40,9 @@ enum MaxBuyPrice {
     /// The three knobs. Per-card in the UI, reset to a stored baseline on every
     /// card, so a slider moved during one negotiation cannot silently follow him
     /// into the next.
-    struct Knobs: Equatable {
+    /// `Hashable`, not merely `Equatable`: the knobs are part of `MaxBuyCache`'s
+    /// stamp, so changing a slider has to invalidate every memoized row.
+    struct Knobs: Hashable {
         /// How many of the newest comps to average. 1...50.
         var windowN: Int
         /// How far to pull the average toward the lowest comp. 0 = the mean,

@@ -113,6 +113,16 @@ final class DragSelectController {
     /// rather than toggling off the selection the press has just made.
     private(set) var endedAt: Date?
 
+    /// How long after a scrub a tap is treated as that scrub's own touch-up.
+    static let tapSuppression: TimeInterval = 0.35
+
+    /// True when a tap is the tail of the scrub that just ended, not a new tap.
+    /// `now` is a parameter so the window tests without a wall clock.
+    func swallowsTap(now: Date = .now) -> Bool {
+        guard let endedAt else { return false }
+        return now.timeIntervalSince(endedAt) < Self.tapSuppression
+    }
+
     func end() {
         anchor = nil
         lastIndex = nil

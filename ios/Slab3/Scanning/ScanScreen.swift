@@ -58,7 +58,8 @@ struct ScanScreen: View {
         ScreenHeader(
             context: "Today · \(todayCount) scans",
             title: "Scan",
-            source: $app.activeSource
+            lens: $app.lens,
+            lenses: app.availableLenses
         ) {
             Button { showManualEntry = true } label: {
                 Image(systemName: "pencil")
@@ -90,7 +91,7 @@ struct ScanScreen: View {
                     .opacity(controller.isHolding ? 0.35 : 1)
                     .animation(Caliper.easeOut, value: controller.isHolding)
                 shutterLabel
-                if let toast { ScanToastView(toast: toast) }
+                if let toast { ScanToastView(toast: toast, lens: app.lens) }
             }
             .frame(width: geo.size.width, height: geo.size.height)
             .clipped()
@@ -428,6 +429,13 @@ enum ScanToast {
 /// amber for a cert already in inventory or a tap that found nothing. Holds 1.8s.
 struct ScanToastView: View {
     let toast: ScanToast
+    /// Only to decide whether the max-buy figure belongs here. The toast has never
+    /// carried a price under a CL or CY lens and still doesn't — the Caliper spec
+    /// asks for one, but building it for everyone is a change to the scan screen of
+    /// every shipped build, and this is a gated pilot. Under max buy the figure is
+    /// the point: it is the number he needs while the slab is still in his hand and
+    /// the seller is standing there.
+    var lens: PriceLens = .cl
 
     var body: some View {
         VStack {
@@ -435,10 +443,20 @@ struct ScanToastView: View {
             HStack(spacing: 0) {
                 Rectangle().fill(edgeColor).frame(width: 2)
                 VStack(alignment: .leading, spacing: Caliper.space3) {
-                    Text(title)
-                        .font(.calBody)
-                        .foregroundStyle(Caliper.textPrimary)
-                        .lineLimit(1)
+                    HStack(alignment: .firstTextBaseline, spacing: Caliper.space4) {
+                        Text(title)
+                            .font(.calBody)
+                            .foregroundStyle(Caliper.textPrimary)
+                            .lineLimit(1)
+                        if lens == .maxBuy, case .captured(let card) = toast {
+                            Spacer(minLength: Caliper.space3)
+                            // Fills in as the price fetch lands — the toast already
+                            // re-reads the card while it resolves, so an em dash
+                            // here becomes a figure without the toast being
+                            // replaced.
+                            MaxBuyLead(cents: MaxBuyValue.cents(for: card))
+                        }
+                    }
                     Text(subtitle).caliperLabel(edgeColor)
                 }
                 .padding(Caliper.rowPad)

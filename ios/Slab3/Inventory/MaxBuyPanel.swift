@@ -19,19 +19,24 @@ import SwiftUI
 /// whole feature is undisclosed to everyone but the tester.
 struct MaxBuyPanel: View {
     let card: Card
-    let source: PriceSource
 
     /// Per-card, and reset to the stored baseline on every card: a figure tuned
     /// during one negotiation must not silently follow him into the next.
-    @State private var knobs = MaxBuyDefaults.current
+    ///
+    /// Owned by `CardDetailScreen` since 2026-09-22, not by this panel, because the
+    /// hero above now shows the same figure and has to move with these sliders —
+    /// two differently-tuned max buys on one screen, both labelled the same, is the
+    /// exact misreading the hero's toggle-following rule exists to prevent.
+    @Binding var knobs: MaxBuyPrice.Knobs
+
     @State private var expanded: Bool
 
     /// `initiallyExpanded` exists so the render test can photograph the open
     /// state — there is no other way in from outside, and the open state is the
     /// half with the layout worth looking at.
-    init(card: Card, source: PriceSource, initiallyExpanded: Bool = false) {
+    init(card: Card, knobs: Binding<MaxBuyPrice.Knobs>, initiallyExpanded: Bool = false) {
         self.card = card
-        self.source = source
+        _knobs = knobs
         _expanded = State(initialValue: initiallyExpanded)
     }
 
@@ -42,13 +47,10 @@ struct MaxBuyPanel: View {
     /// evidence about CLV, not a second thing he could be paid.
     private var clValueCents: Int? { card.prices[.cl] }
 
-    private var result: MaxBuyPrice.Result {
-        MaxBuyPrice.compute(.init(
-            comps: card.sales(for: source) ?? [],
-            clValueCents: clValueCents,
-            population: card.courtyardPopulation,
-            knobs: knobs.sanitized
-        ))
+    /// Which comps, which cap, which population all live in `MaxBuyValue` now, so
+    /// this panel and the five other places that show the figure cannot drift.
+    private var answer: MaxBuyValue.Answer {
+        MaxBuyValue.answer(for: card, knobs: knobs.sanitized)
     }
 
     var body: some View {
@@ -59,10 +61,7 @@ struct MaxBuyPanel: View {
         }
         .padding(Caliper.rowPad)
         .caliperPanel()
-        .onChange(of: card.localId) { _, _ in
-            knobs = MaxBuyDefaults.current
-            expanded = false
-        }
+        .onChange(of: card.localId) { _, _ in expanded = false }
     }
 
     private var header: some View {
@@ -91,7 +90,7 @@ struct MaxBuyPanel: View {
 
     @ViewBuilder
     private var figure: some View {
-        switch result {
+        switch answer.result {
         case .price(let cents, _):
             // figureSmall, never .figure: valueBlock holds this screen's one hero
             // number and this panel deliberately does not take it. textPrimary
@@ -112,12 +111,17 @@ struct MaxBuyPanel: View {
         }
     }
 
+    /// Names the source only when one actually answered. With no comps anywhere,
+    /// blaming a source the user did not choose would be worse than saying plainly
+    /// that nothing has sold.
     private func note(for reason: MaxBuyPrice.Unavailable) -> String {
         switch reason {
         case .noComps:
-            return source == .cl
-                ? "No Card Ladder sales at this grade to price against"
-                : "No Courtyard sales at this grade to price against"
+            switch answer.compsSource {
+            case .cl: return "No Card Ladder sales at this grade to price against"
+            case .cy: return "No Courtyard sales at this grade to price against"
+            case nil: return "No recent sales at this grade to price against"
+            }
         }
     }
 
@@ -135,7 +139,7 @@ struct MaxBuyPanel: View {
                 MaxBuyKnobSlider(value: $knobs.margin)
             }
 
-            if case .price(let cents, let breakdown) = result {
+            if case .price(let cents, let breakdown) = answer.result {
                 Hairline()
                 Text(summary(breakdown))
                     .caliperMeta(Caliper.textTertiary)
@@ -204,6 +208,12 @@ struct MaxBuyPanel: View {
     /// What the number was actually built from. The sales panel below lists only
     /// five, so when the window is wider than that this line is the only place the
     /// real count is stated.
+    ///
+    /// It is ALSO the only place the comps basis is disclosed now that the row and
+    /// the hero deliberately say nothing about it (owner, 2026-09-22): the figure
+    /// gets held out to the person being bought from, and a `MAX BUY · CL` suffix
+    /// on it would put our evidence in their hands. Here, behind "More", it is for
+    /// the sourcer.
     private func summary(_ b: MaxBuyPrice.Breakdown) -> String {
         var parts = ["avg of \(b.usedCount)"]
         // Population comes from Courtyard even when Card Ladder supplied the
@@ -211,7 +221,7 @@ struct MaxBuyPanel: View {
         // comp source to keep the two straight.
         if let pop = b.population { parts.append("pop \(pop)") }
         parts.append("spread \((b.dispersion * 100).formatted(.number.precision(.fractionLength(0))))%")
-        parts.append(source == .cl ? "CL comps" : "CY comps")
+        if let source = answer.compsSource { parts.append("\(source.rawValue) comps") }
         if b.cappedByClValue { parts.append("held at CL Value") }
         return parts.joined(separator: " \u{00B7} ")
     }

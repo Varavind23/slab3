@@ -36,7 +36,20 @@ enum MaxBuyDefaults {
         static let margin = "caliper_vmb_margin"
     }
 
+    /// Memoized because the max-buy lens reads this once per card per layout pass —
+    /// thousands of times a frame on a full stack — and each read is three
+    /// `UserDefaults` lookups. `save` is the only writer, so it is also the only
+    /// thing that has to clear it.
+    private static var memo: MaxBuyPrice.Knobs?
+
     static var current: MaxBuyPrice.Knobs {
+        if let memo { return memo }
+        let knobs = load()
+        memo = knobs
+        return knobs
+    }
+
+    private static func load() -> MaxBuyPrice.Knobs {
         let defaults = UserDefaults.standard
         let standard = MaxBuyPrice.Knobs.standard
         let storedN = defaults.integer(forKey: Keys.windowN)
@@ -54,6 +67,30 @@ enum MaxBuyDefaults {
         defaults.set(knobs.windowN, forKey: Keys.windowN)
         defaults.set(knobs.skew, forKey: Keys.skew)
         defaults.set(knobs.margin, forKey: Keys.margin)
+        memo = knobs
+    }
+
+    /// Tests only — they write the keys directly.
+    static func invalidateCache() { memo = nil }
+
+    /// Tests only. Pins the baseline for the length of `body`, then puts back exactly
+    /// what was stored before — including "never set". The test host IS the app, so a
+    /// bare `save` leaks twice: into whichever test runs next (a row priced on another
+    /// test's margin rendered $1,082.25 beside a hero reading $934.81, 2026-09-23) and
+    /// into the simulator app's real preferences. Scoped rather than paired
+    /// setup/teardown because the suites are `@MainActor` and their tests synchronous,
+    /// so nothing can interleave inside `body`.
+    static func withPinned<T>(_ knobs: MaxBuyPrice.Knobs, _ body: () throws -> T) rethrows -> T {
+        let defaults = UserDefaults.standard
+        let keys = [Keys.windowN, Keys.skew, Keys.margin]
+        let stored = keys.map { defaults.object(forKey: $0) }
+        save(knobs)
+        defer {
+            // `set(nil, …)` removes the key, which restores "never set".
+            for (key, value) in zip(keys, stored) { defaults.set(value, forKey: key) }
+            memo = nil
+        }
+        return try body()
     }
 }
 
@@ -120,7 +157,10 @@ struct TestingGateSheet: View {
                 Text("Every card starts from these. Adjusting the sliders on a card changes that card only.")
                     .caliperMeta()
 
-                labelled("Average of", value: "\(knobs.windowN) sales") {
+                // The label shows what is SAVED — a 0 or blank entry is stored
+                // as the standard window, so the raw field would promise a
+                // number that never takes effect.
+                labelled("Average of", value: "\(knobs.sanitized.windowN) sales") {
                     TextField("5", value: $knobs.windowN, format: .number)
                         .font(.price)
                         .keyboardType(.numberPad)

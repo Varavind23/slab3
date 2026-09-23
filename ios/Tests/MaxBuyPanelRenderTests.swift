@@ -72,7 +72,7 @@ struct MaxBuyPanelRenderTests {
     @Test func rendersCollapsedWithNothingButTheNumber() throws {
         let card = card(in: store.mainContext)
         let url = try render(
-            MaxBuyPanel(card: card, source: .cl)
+            MaxBuyPanel(card: card, knobs: .constant(.standard))
                 .padding(Caliper.gutter)
                 .background(Caliper.bg),
             named: "maxbuy-collapsed", height: 140
@@ -91,7 +91,7 @@ struct MaxBuyPanelRenderTests {
     @Test func rendersExpandedControls() throws {
         let card = card(in: store.mainContext)
         let url = try render(
-            MaxBuyPanel(card: card, source: .cl, initiallyExpanded: true)
+            MaxBuyPanel(card: card, knobs: .constant(.standard), initiallyExpanded: true)
                 .padding(Caliper.gutter)
                 .background(Caliper.bg),
             named: "maxbuy-expanded", height: 460
@@ -101,10 +101,16 @@ struct MaxBuyPanelRenderTests {
 
     /// No comps at this grade: an em dash and a reason, never a $0 and never a
     /// blank panel.
+    ///
+    /// The fixture must have NEITHER source's comps now. The panel no longer prices
+    /// whichever source the toggle points at — it prefers Card Ladder and falls
+    /// through to Courtyard — so giving the card CL comps and pointing at CY would
+    /// render a price instead of the state this test exists to photograph.
     @Test func rendersTheNoCompsState() throws {
         let card = card(in: store.mainContext, comps: [])
+        card.courtyardSales = nil
         let url = try render(
-            MaxBuyPanel(card: card, source: .cy)
+            MaxBuyPanel(card: card, knobs: .constant(.standard))
                 .padding(Caliper.gutter)
                 .background(Caliper.bg),
             named: "maxbuy-no-comps", height: 160

@@ -10,6 +10,9 @@ import SwiftData
 struct CardDetailScreen: View {
     @Bindable var card: Card
     @Bindable var app: AppState
+    /// The same undo window as the list's swipe and bulk delete — a delete from
+    /// here is just as irreversible, so it must not be the one path that skips it.
+    let pendingDeletes: PendingDeletionStore
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \Folder.createdAt, order: .reverse) private var groups: [Folder]
@@ -20,12 +23,24 @@ struct CardDetailScreen: View {
     @AppStorage(TestingGate.unlockedKey) private var testingUnlocked = false
     @State private var showConnect = false
 
+    /// The max-buy knobs for THIS card. Owned here rather than inside `MaxBuyPanel`
+    /// because the hero shows the same figure and has to move with the panel's
+    /// sliders (owner, 2026-09-22).
+    ///
+    /// Per-card, and reset to the stored baseline on every card: a figure tuned
+    /// during one negotiation must not silently follow him into the next. The Cards
+    /// list always shows the baseline figure, so a card tuned here can legitimately
+    /// read differently there — the panel is the negotiation scratchpad, the list is
+    /// the one consistent basis.
+    @State private var maxBuyKnobs = MaxBuyDefaults.current
+
     var body: some View {
         VStack(spacing: 0) {
             ScreenHeader(
                 context: "#\(card.certNumber)",
                 title: card.displayTitle,
-                source: $app.activeSource
+                lens: $app.lens,
+                lenses: app.availableLenses
             ) {
                 Button("Done") { dismiss() }
                     .font(.mono(10, .medium))
@@ -38,7 +53,7 @@ struct CardDetailScreen: View {
                     // The first box, above the evidence it is built from. Absent
                     // entirely unless the testing version is on.
                     if testingUnlocked {
-                        MaxBuyPanel(card: card, source: app.activeSource)
+                        MaxBuyPanel(card: card, knobs: $maxBuyKnobs)
                     }
                     SalesPanel(card: card, source: $app.activeSource,
                                connected: cardLadderConnected) { showConnect = true }
@@ -58,8 +73,11 @@ struct CardDetailScreen: View {
                         Task { await PriceService.refresh(card, in: context, force: true) }
                     }
                     CaliperButton(title: "Delete card", variant: .danger, fullWidth: true) {
-                        context.delete(card)
+                        let id = card.localId
                         dismiss()
+                        pendingDeletes.enqueue([id], label: "Card deleted") { ids in
+                            CardDeletion.commit(ids, in: context)
+                        }
                     }
                 }
                 .padding(.horizontal, Caliper.gutter)
@@ -72,6 +90,9 @@ struct CardDetailScreen: View {
         // refresh, which would spend the 200/day Card Ladder budget on cards
         // nobody opened. Server-side cache makes re-opening a card free.
         .task(id: card.localId) { await PriceService.loadSales(card, in: context) }
+        // Defensive: this screen is pushed per card, but if it is ever reused the
+        // knobs must not carry a previous negotiation's tuning into this card.
+        .onChange(of: card.localId) { _, _ in maxBuyKnobs = MaxBuyDefaults.current }
     }
 
     /// The card, big enough to actually check against the slab in your hand.
@@ -90,7 +111,7 @@ struct CardDetailScreen: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            valueBlock
+            ValueBlock(card: card, lens: app.lens, knobs: maxBuyKnobs)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
@@ -115,77 +136,6 @@ struct CardDetailScreen: View {
             .aspectRatio(0.72, contentMode: .fit)
             .clipped()
             .overlay(Rectangle().strokeBorder(Caliper.lineStrong, lineWidth: Caliper.borderWidth))
-        }
-    }
-
-    /// This screen's ONE hero figure: the value from the SELECTED source, with
-    /// that source's last sale beneath it.
-    ///
-    /// It follows the header/comps toggle (owner decision 2026-08-31). It used to
-    /// be hardwired to Card Ladder, so selecting Courtyard changed the comps
-    /// underneath while the big number kept saying CL — two sources' figures
-    /// stacked on one screen with nothing marking the difference, which is the
-    /// misreading the source toggle exists to prevent. One source is selected;
-    /// the whole block speaks for it.
-    ///
-    /// Value leads because it is what a reseller decides against; the last sale is
-    /// the single hard data point behind it, and the comps panel shows the rest of
-    /// the evidence. Nothing else on this screen may use `.figure`. A missing
-    /// number is an em dash, never $0 (caliperMoney).
-    private var valueBlock: some View {
-        let source = app.activeSource
-        let price = card.prices[source]
-        let confidence = card.confidences[source]
-        let stale = source == .cl ? card.cardLadderIsStale : card.courtyardIsStale
-
-        return VStack(alignment: .leading, spacing: Caliper.space3) {
-            VStack(alignment: .leading, spacing: Caliper.space1) {
-                Text("\(source.rawValue) Value").caliperLabel(Caliper.textTertiary)
-                Text(caliperMoney(cents: price))
-                    .font(.figure)
-                    .foregroundStyle(price == nil ? Caliper.textTertiary : source.hue)
-                    .minimumScaleFactor(0.6)
-                    .lineLimit(1)
-                if confidence > 0 {
-                    ConfidenceMeter(value: confidence, source: source)
-                }
-            }
-
-            VStack(alignment: .leading, spacing: Caliper.space1) {
-                Text("Last sold").caliperLabel(Caliper.textTertiary)
-                Text(caliperMoney(cents: lastSale(for: source)?.cents))
-                    .font(.figureSmall)
-                    .foregroundStyle(lastSale(for: source) == nil ? Caliper.textTertiary : Caliper.textPrimary)
-                    .minimumScaleFactor(0.6)
-                    .lineLimit(1)
-                if let at = lastSale(for: source)?.at {
-                    Text(at.formatted(.dateTime.month(.abbreviated).day().year()))
-                        .caliperMeta(Caliper.textTertiary)
-                }
-            }
-
-            if stale {
-                Text("Couldn\u{2019}t refresh — showing the last known value")
-                    .caliperMeta(Caliper.textTertiary)
-            }
-        }
-    }
-
-    /// The selected source's most recent sale.
-    ///
-    /// Card Ladder states one directly (it rides the estimate call). Courtyard
-    /// does not: its scanner response carries the sale HISTORY, already filtered
-    /// to this slab's grader and grade and sorted newest first, so the head of
-    /// that list IS its last sold. Deriving it beats storing a field that could
-    /// drift from the comps shown right below it.
-    private func lastSale(for source: PriceSource) -> (cents: Int, at: Date?)? {
-        switch source {
-        case .cl:
-            guard let cents = card.cardLadderLastSaleCents else { return nil }
-            return (cents, card.cardLadderLastSaleAt)
-        case .cy:
-            guard let newest = card.courtyardSales?.first else { return nil }
-            return (newest.priceCents, newest.soldAt)
         }
     }
 

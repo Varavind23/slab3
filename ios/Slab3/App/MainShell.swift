@@ -22,6 +22,9 @@ struct MainShell: View {
     @State private var showGroupSheet = false
     @State private var shareURL: URL?
 
+    /// Mirrored into `AppState.testingUnlocked` below — see there for why.
+    @AppStorage(TestingGate.unlockedKey) private var testingUnlocked = false
+
     var body: some View {
         ZStack(alignment: .bottom) {
             Caliper.bg.ignoresSafeArea()
@@ -79,6 +82,14 @@ struct MainShell: View {
             GroupSheet(app: app, cards: cards).presentationDetents([.large])
         }
         .sheet(item: $shareURL) { ShareSheet(items: [$0]) }
+        // The testing gate decides whether the toggle has a max-buy segment at all,
+        // and it is flipped from a Settings sheet. Mirrored into AppState rather
+        // than read there from UserDefaults, because a read inside `lens` would not
+        // be observable — the third segment would linger until something unrelated
+        // invalidated the header. Locking while max buy leads drops every consumer
+        // back to the source underneath, in AppState's own didSet.
+        .onChange(of: testingUnlocked) { _, unlocked in app.testingUnlocked = unlocked }
+        .task { app.testingUnlocked = testingUnlocked }
         .preferredColorScheme(.dark) // Caliper is dark-only; cyan-on-black doesn't invert.
     }
 
@@ -94,8 +105,19 @@ struct MainShell: View {
     // MARK: Selection actions
 
     private var selected: [Card] { cards.filter { app.selection.contains($0.localId) } }
+
+    /// The running total the whole selection mode exists for — sourcers select until
+    /// they hit a target. Under the max-buy lens that target is what they can PAY for
+    /// the pile, not what it is worth, so the figure follows the lens.
+    ///
+    /// `compactMap` either way: a card with no figure contributes nothing rather than
+    /// a zero. Worth knowing that comps-less cards are far more common than
+    /// price-less ones, so this total can cover fewer cards than are selected.
     private var selectionTotal: Int {
-        selected.compactMap { $0.prices.best(preferring: app.activeSource) }.reduce(0, +)
+        if app.isMaxBuy {
+            return selected.compactMap { MaxBuyValue.cents(for: $0) }.reduce(0, +)
+        }
+        return selected.compactMap { $0.prices.best(preferring: app.activeSource) }.reduce(0, +)
     }
 
     private func removeFromGroup() {
@@ -107,9 +129,10 @@ struct MainShell: View {
     private func exportSelection() {
         shareURL = CSVExport.write(
             selected,
-            columns: app.enabledColumns,
+            columns: app.exportColumns,
             scope: nil,
-            payoutPercent: app.payoutPercent
+            payoutPercent: app.payoutPercent,
+            maxBuyCents: MaxBuyValue.centsByCard(selected)
         )
         app.endSelecting()
     }

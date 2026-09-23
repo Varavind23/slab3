@@ -103,8 +103,8 @@ struct DetailScreenRenderTests {
         card.courtyardConfidence = 2
         let url = try render(
             VStack(spacing: Caliper.rowGap) {
-                CardRow(card: card, source: .cl)
-                CardRow(card: card, source: .cy)
+                CardRow(card: card, lens: .cl)
+                CardRow(card: card, lens: .cy)
             }
             .padding(Caliper.gutter)
             .background(Caliper.bg),

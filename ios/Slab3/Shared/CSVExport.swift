@@ -10,6 +10,9 @@ enum CSVColumn: String, CaseIterable, Identifiable, Hashable {
     case clPrice, clConf, cyPrice, cyConf
     case outlet, payoutPercent, payoutProvider, payoutUsd
     case scannedAt, refreshedAt
+    /// Our own figure, not a source's. Gated on the testing passcode everywhere it
+    /// appears — see `CSVColumn.available(testingUnlocked:)`.
+    case maxBuy
 
     var id: String { rawValue }
 
@@ -32,6 +35,7 @@ enum CSVColumn: String, CaseIterable, Identifiable, Hashable {
         case .payoutUsd: return "Payout $"
         case .scannedAt: return "Scanned at"
         case .refreshedAt: return "Refreshed at"
+        case .maxBuy: return "Max buy"
         }
     }
 
@@ -54,6 +58,7 @@ enum CSVColumn: String, CaseIterable, Identifiable, Hashable {
         case .payoutUsd: return "payout_usd"
         case .scannedAt: return "scanned_at"
         case .refreshedAt: return "refreshed_at"
+        case .maxBuy: return "max_buy_price"
         }
     }
 
@@ -67,8 +72,18 @@ enum CSVColumn: String, CaseIterable, Identifiable, Hashable {
         }
     }
 
-    /// What a fresh install exports until the user reorders it.
+    /// What a fresh install exports until the user reorders it. Max buy is
+    /// deliberately absent: it is gated, and the CSV is the part of this app a buyer
+    /// actually sees — a column stating the most you were willing to pay is not
+    /// something to switch on for anyone by default.
     static let defaults: [CSVColumn] = [.cert, .name, .year, .grade, .grader, .clPrice, .cyPrice]
+
+    /// The columns a build may show and emit. Max buy exists only behind the testing
+    /// gate, and this is applied at BOTH ends — the chip grid and the file — so a
+    /// column enabled while unlocked cannot keep exporting after the gate is closed.
+    static func available(testingUnlocked: Bool) -> [CSVColumn] {
+        testingUnlocked ? allCases : allCases.filter { $0 != .maxBuy }
+    }
 }
 
 /// Writes the current scope to a CSV in a temp file and returns its URL for the
@@ -84,16 +99,19 @@ enum CSVExport {
         return "inventory\(slug)_\(day).csv"
     }
 
-    static func rows(_ cards: [Card], columns: [CSVColumn], payoutPercent: Double?) -> [String] {
+    static func rows(_ cards: [Card], columns: [CSVColumn], payoutPercent: Double?,
+                     maxBuyCents: [UUID: Int] = [:]) -> [String] {
         var out = [columns.map(\.header).joined(separator: ",")]
         for card in cards {
-            out.append(columns.map { cell(card, $0, payoutPercent) }.joined(separator: ","))
+            out.append(columns.map { cell(card, $0, payoutPercent, maxBuyCents) }.joined(separator: ","))
         }
         return out
     }
 
-    static func write(_ cards: [Card], columns: [CSVColumn], scope: String?, payoutPercent: Double?) -> URL? {
-        let text = rows(cards, columns: columns, payoutPercent: payoutPercent).joined(separator: "\n")
+    static func write(_ cards: [Card], columns: [CSVColumn], scope: String?, payoutPercent: Double?,
+                      maxBuyCents: [UUID: Int] = [:]) -> URL? {
+        let text = rows(cards, columns: columns, payoutPercent: payoutPercent,
+                        maxBuyCents: maxBuyCents).joined(separator: "\n")
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename(scope: scope))
         do {
             try text.write(to: url, atomically: true, encoding: .utf8)
@@ -105,7 +123,12 @@ enum CSVExport {
 
     // MARK: Cells
 
-    private static func cell(_ c: Card, _ column: CSVColumn, _ payoutPercent: Double?) -> String {
+    /// `maxBuyCents` is passed in rather than computed: the figure lives behind a
+    /// main-actor memo, and isolating this file to reach it would isolate the whole
+    /// CSV layer along with it. A card absent from the map has no max buy, which
+    /// renders as an empty cell — never "0.00".
+    private static func cell(_ c: Card, _ column: CSVColumn, _ payoutPercent: Double?,
+                             _ maxBuyCents: [UUID: Int]) -> String {
         switch column {
         case .cert: return c.certNumber
         case .name: return quoted(c.name)
@@ -124,6 +147,9 @@ enum CSVExport {
             return dollars(Int((Double(gross) * pct / 100).rounded()))
         case .scannedAt: return iso(c.scannedAt)
         case .refreshedAt: return iso(c.lastPricedAt)
+        // Empty, never "0.00", when no comps can price this card — the same rule
+        // the price columns follow, and the same rule the panel follows on screen.
+        case .maxBuy: return dollars(maxBuyCents[c.localId])
         }
     }
 

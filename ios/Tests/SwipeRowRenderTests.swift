@@ -95,7 +95,7 @@ struct SwipeRowRenderTests {
         let url = try render(
             SwipeableCardRow(
                 card: card,
-                source: .cl,
+                lens: .cl,
                 fileTarget: nil,
                 openRowID: .init(get: { open }, set: { open = $0 }),
                 onTap: {}, onFile: {}, onDelete: {}
