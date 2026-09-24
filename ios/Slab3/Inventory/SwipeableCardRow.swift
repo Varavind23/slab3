@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// A card row you can swipe left: file it into the group you last used, or delete
 /// it. Carry the swipe far enough and the delete takes the whole back of the card,
@@ -87,12 +88,9 @@ struct SwipeableCardRow: View {
                 .contentShape(Rectangle())
                 .onTapGesture { tapped() }
                 .offset(x: offset)
-                // Plain `.gesture`, never `.simultaneousGesture`/`.highPriorityGesture`:
-                // those force one recogniser to always win, and what is wanted here
-                // is for the ScrollView to take vertical drags and this to take
-                // horizontal ones. `.subviews` in selection mode disables THIS
-                // gesture only, leaving the row's tap alone.
-                .gesture(swipe, including: selectable ? .subviews : .all)
+                // The ScrollView must take vertical drags and this horizontal
+                // ones. Disabled in selection mode, leaving the row's tap alone.
+                .modifier(SwipeGestureAttachment(row: self))
         }
         .background(widthReader)
         .clipped()
@@ -197,14 +195,37 @@ struct SwipeableCardRow: View {
 
     // MARK: Gesture
 
-    private var swipe: some Gesture {
+    /// iOS 18+: a UIKit pan that only BEGINS on a sideways first move (0.7 fix).
+    ///
+    /// WHY NOT A SwiftUI DragGesture any more: from iOS 18, SwiftUI gestures are
+    /// real UIKit recognisers, and a DragGesture on a row inside a ScrollView takes
+    /// the touch before the ScrollView's own pan can. The row did not MOVE on a
+    /// vertical drag (the horizontal gate below saw to that) but it still OWNED the
+    /// touch — so a scroll that started on a card went nowhere, while one started on
+    /// the summary block, or caught mid-momentum, worked (user report, 0.7). A
+    /// `UIPanGestureRecognizer` whose delegate refuses to begin unless the first
+    /// movement is horizontal fails at once on a vertical drag, and UIKit hands the
+    /// touch straight to the ScrollView. SwiftUI has no direction-locked drag; this
+    /// is the direction lock.
+    @available(iOS 18.0, *)
+    fileprivate var horizontalPan: HorizontalPan {
+        HorizontalPan(
+            isEnabled: !selectable,
+            changed: { swipeMoved(translationX: $0) },
+            ended: { translationX, velocityX in
+                swipeReleased(
+                    predictedX: translationX + SwipeGeometry.projectedTravel(velocity: velocityX),
+                    claimed: true)
+            },
+            cancelled: { swipeCancelled() }
+        )
+    }
+
+    /// iOS 17 keeps the SwiftUI drag. It predates the UIKit-backed gesture system,
+    /// where the ScrollView still gets a fair first move.
+    fileprivate var swipe: some Gesture {
         DragGesture(minimumDistance: SwipeGeometry.minimumDragDistance, coordinateSpace: .local)
             .onChanged { value in
-                // Until horizontal intent is unambiguous the card does not move, so
-                // the ScrollView is free to treat the same drag as a scroll. There
-                // is no direction-locked DragGesture in SwiftUI; this gate is the
-                // substitute, and claiming the drag early is exactly what makes a
-                // hand-built swipe row fight vertical scrolling.
                 // A new touch starts unclaimed. Keyed on the start point rather than
                 // cleared in `onEnded`, because a CANCELLED drag (the ScrollView
                 // taking over, the row recycled) never reaches `onEnded` and would
@@ -213,47 +234,70 @@ struct SwipeableCardRow: View {
                     dragStart = value.startLocation
                     claimed = false
                 }
-                // Once claimed, the row keeps following even if the finger drifts
+                // Until horizontal intent is unambiguous the card does not move.
+                // Once claimed, it keeps following even if the finger drifts
                 // vertical — un-claiming mid-swipe would strand it off its mark.
                 guard claimed || SwipeGeometry.isHorizontal(value.translation) else { return }
                 claimed = true
-                trayMounted = true
-                openRowID = card.localId
-                offset = SwipeGeometry.offset(
-                    translation: value.translation.width, from: restingOffset, rowWidth: rowWidth)
-
-                let past = SwipeGeometry.isPastCommit(offset, rowWidth: rowWidth)
-                if past, !haptickedAtCommit {
-                    impact.impactOccurred()
-                    haptickedAtCommit = true
-                } else if !past {
-                    haptickedAtCommit = false
-                }
+                swipeMoved(translationX: value.translation.width)
             }
             .onEnded { value in
-                haptickedAtCommit = false
                 // Ended by a DIFFERENT touch than the one that claimed? Then it was
                 // never claimed at all.
                 let wasClaimed = claimed && value.startLocation == dragStart
                 claimed = false
                 dragStart = nil
-                guard let resolution = SwipeGeometry.release(
-                    offset: offset,
-                    predicted: restingOffset + value.predictedEndTranslation.width,
-                    rowWidth: rowWidth,
-                    claimed: wasClaimed
-                ) else { return }
-                switch resolution {
-                case .delete:
-                    commitDelete()
-                case .open:
-                    withAnimation(Caliper.easeOut) { offset = -SwipeGeometry.trayWidth }
-                    restingOffset = -SwipeGeometry.trayWidth
-                    openRowID = card.localId
-                case .closed:
-                    close()
-                }
+                swipeReleased(
+                    predictedX: value.predictedEndTranslation.width, claimed: wasClaimed)
             }
+    }
+
+    // Both gestures feed these, so the swipe behaves the same on every iOS.
+
+    private func swipeMoved(translationX: CGFloat) {
+        trayMounted = true
+        openRowID = card.localId
+        offset = SwipeGeometry.offset(translation: translationX, from: restingOffset, rowWidth: rowWidth)
+
+        let past = SwipeGeometry.isPastCommit(offset, rowWidth: rowWidth)
+        if past, !haptickedAtCommit {
+            impact.impactOccurred()
+            haptickedAtCommit = true
+        } else if !past {
+            haptickedAtCommit = false
+        }
+    }
+
+    private func swipeReleased(predictedX: CGFloat, claimed: Bool) {
+        haptickedAtCommit = false
+        guard let resolution = SwipeGeometry.release(
+            offset: offset,
+            predicted: restingOffset + predictedX,
+            rowWidth: rowWidth,
+            claimed: claimed
+        ) else { return }
+        settle(resolution)
+    }
+
+    /// The system took the touch mid-swipe (a call, the row recycled). Settle by
+    /// where the card IS — never by a projection, so a cancel can never delete.
+    private func swipeCancelled() {
+        haptickedAtCommit = false
+        let resolution = SwipeGeometry.resolve(offset: offset, predicted: offset, rowWidth: rowWidth)
+        settle(resolution == .delete ? .open : resolution)
+    }
+
+    private func settle(_ resolution: SwipeGeometry.Resolution) {
+        switch resolution {
+        case .delete:
+            commitDelete()
+        case .open:
+            withAnimation(Caliper.easeOut) { offset = -SwipeGeometry.trayWidth }
+            restingOffset = -SwipeGeometry.trayWidth
+            openRowID = card.localId
+        case .closed:
+            close()
+        }
     }
 
     // MARK: Actions
@@ -291,5 +335,68 @@ struct SwipeableCardRow: View {
         trayMounted = false
         if openRowID == card.localId { openRowID = nil }
         onDelete()
+    }
+}
+
+/// Picks the swipe recogniser for the running OS. A modifier because
+/// `if #available` cannot sit inside a view-modifier chain.
+private struct SwipeGestureAttachment: ViewModifier {
+    let row: SwipeableCardRow
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.gesture(row.horizontalPan)
+        } else {
+            content.gesture(row.swipe, including: row.selectable ? .subviews : .all)
+        }
+    }
+}
+
+/// A pan that begins only when its first movement is horizontal — the direction
+/// lock SwiftUI's DragGesture lacks. See `SwipeableCardRow.horizontalPan`.
+@available(iOS 18.0, *)
+struct HorizontalPan: UIGestureRecognizerRepresentable {
+    var isEnabled: Bool
+    /// Horizontal travel since the pan began.
+    var changed: (CGFloat) -> Void
+    /// Travel and horizontal velocity (pt/s) at release.
+    var ended: (CGFloat, CGFloat) -> Void
+    var cancelled: () -> Void
+
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
+
+    func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
+        let pan = UIPanGestureRecognizer()
+        pan.delegate = context.coordinator
+        pan.isEnabled = isEnabled
+        return pan
+    }
+
+    func updateUIGestureRecognizer(_ recognizer: UIPanGestureRecognizer, context: Context) {
+        recognizer.isEnabled = isEnabled
+    }
+
+    func handleUIGestureRecognizerAction(_ recognizer: UIPanGestureRecognizer, context: Context) {
+        let view = recognizer.view
+        switch recognizer.state {
+        case .began, .changed:
+            changed(recognizer.translation(in: view).x)
+        case .ended:
+            ended(recognizer.translation(in: view).x, recognizer.velocity(in: view).x)
+        case .cancelled, .failed:
+            cancelled()
+        default:
+            break
+        }
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        /// The whole fix: refuse to begin unless the drag starts sideways, so a
+        /// vertical drag fails here immediately and the ScrollView scrolls.
+        func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
+            guard let pan = recognizer as? UIPanGestureRecognizer else { return true }
+            let v = pan.velocity(in: pan.view)
+            return SwipeGeometry.isHorizontal(CGSize(width: v.x, height: v.y))
+        }
     }
 }

@@ -103,6 +103,9 @@ final class AppState {
     // MARK: Session state
 
     var tab: AppTab = .scan
+    /// Bumped when the tab ALREADY showing is tapped again. Screens that push a
+    /// detail watch it and pop back to their list — the standard iOS reselect.
+    var tabReselected = 0
     var filter: CardFilter = .all
     var selection: Set<UUID> = []
     var isSelecting = false

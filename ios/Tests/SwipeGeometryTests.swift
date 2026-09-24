@@ -120,6 +120,17 @@ struct SwipeGeometryTests {
         #expect(release == .delete)
     }
 
+    /// The UIKit pan reports velocity, not a projected end; the projection stands
+    /// in for it. A still finger projects nothing, so a slow release settles where
+    /// the card is — only a real flick reaches the commit point.
+    @Test func projectionIsZeroAtRestAndCarriesAFlick() {
+        #expect(SwipeGeometry.projectedTravel(velocity: 0) == 0)
+        let flick = -120 + SwipeGeometry.projectedTravel(velocity: -1500)
+        #expect(SwipeGeometry.release(offset: -120, predicted: flick, rowWidth: rowWidth, claimed: true) == .delete)
+        let drift = -60 + SwipeGeometry.projectedTravel(velocity: -40)
+        #expect(SwipeGeometry.release(offset: -60, predicted: drift, rowWidth: rowWidth, claimed: true) == .closed)
+    }
+
     // MARK: Constants the design depends on
 
     /// Both actions have to fit, and each has to be tappable once revealed.

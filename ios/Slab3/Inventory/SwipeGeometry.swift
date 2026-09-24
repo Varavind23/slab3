@@ -95,6 +95,16 @@ enum SwipeGeometry {
         return offset <= -(trayWidth / 2) ? .open : .closed
     }
 
+    /// How much further a release at `velocity` (pt/s) would carry the card — what
+    /// SwiftUI's `predictedEndTranslation` gave the old DragGesture, recomputed for
+    /// the UIKit pan, which reports only velocity. UIScrollView's `.normal`
+    /// deceleration (0.998 per ms) is the standard projection, and it is what makes
+    /// a fast flick commit a delete the way it did before.
+    static func projectedTravel(velocity: CGFloat) -> CGFloat {
+        let rate: CGFloat = 0.998
+        return (velocity / 1000) * rate / (1 - rate)
+    }
+
     /// What a release does, given whether this drag was ever CLAIMED as a swipe.
     ///
     /// nil = not a swipe at all: leave the row exactly as it is. This is what keeps

@@ -148,6 +148,8 @@ struct CardsScreen: View {
             GroupSheet(app: app, cards: allCards, targets: [card])
                 .presentationDetents([.large])
         }
+        // Tapping Cards while a card is open goes back to the list.
+        .onChange(of: app.tabReselected) { _, _ in route = nil }
         .navigationDestination(item: $route) { id in
             if let card = allCards.first(where: { $0.localId == id }) {
                 CardDetailScreen(card: card, app: app, pendingDeletes: pendingDeletes)

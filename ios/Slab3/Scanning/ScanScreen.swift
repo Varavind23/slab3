@@ -6,6 +6,9 @@ import AVFoundation
 /// move through a stack without stopping for a shutter or confirmation step.
 struct ScanScreen: View {
     @Bindable var app: AppState
+    /// So a card opened from Recent scans deletes through the same undo window as
+    /// everywhere else.
+    let pendingDeletes: PendingDeletionStore
     @Environment(\.modelContext) private var context
     @Query(sort: \Card.scannedAt, order: .reverse) private var cards: [Card]
 
@@ -13,6 +16,9 @@ struct ScanScreen: View {
     @State private var cameraAuthorized = AVCaptureDevice.authorizationStatus(for: .video) == .authorized
     @State private var showManualEntry = false
     @State private var recentCardIDs: [UUID] = []
+    /// The card opened from Recent scans. Pushing it stops the camera (the preview's
+    /// onDisappear), and coming back restarts it.
+    @State private var route: UUID?
     @State private var highlightedCardID: UUID?
     @State private var toast: ScanToast?
     @State private var toastTask: Task<Void, Never>?
@@ -51,6 +57,13 @@ struct ScanScreen: View {
         .sheet(isPresented: $showManualEntry) {
             ManualEntrySheet { scan in add(scan, photo: nil) }
                 .presentationDetents([.height(320)])
+        }
+        // Tapping Scan while a card is open goes back to the camera.
+        .onChange(of: app.tabReselected) { _, _ in route = nil }
+        .navigationDestination(item: $route) { id in
+            if let card = cards.first(where: { $0.localId == id }) {
+                CardDetailScreen(card: card, app: app, pendingDeletes: pendingDeletes)
+            }
         }
     }
 
@@ -226,7 +239,7 @@ struct ScanScreen: View {
                 ScrollView(.vertical, showsIndicators: false) {
                     LazyVStack(spacing: Caliper.space3) {
                         ForEach(recentCards.prefix(6)) { card in
-                            Button { retry(card) } label: { RecentScanRow(card: card) }
+                            Button { tapped(card) } label: { RecentScanRow(card: card) }
                                 .buttonStyle(.plain)
                                 .overlay(Rectangle().strokeBorder(
                                     highlightedCardID == card.localId ? Caliper.confMid : Caliper.line,
@@ -245,7 +258,10 @@ struct ScanScreen: View {
     /// the cost grew with the whole inventory while scanning.
     private var recentCards: [Card] {
         let byID = Dictionary(cards.map { ($0.localId, $0) }, uniquingKeysWith: { a, _ in a })
+        // A card deleted from its detail screen leaves this list with the undo
+        // window, the same way it leaves Cards.
         return recentCardIDs.compactMap { byID[$0] }
+            .filter { !pendingDeletes.pendingIDs.contains($0.localId) }
     }
 
     private func add(_ scan: CertScan, photo: Data?) {
@@ -308,6 +324,16 @@ struct ScanScreen: View {
     private func bringToFront(_ card: Card) {
         recentCardIDs.removeAll { $0 == card.localId }
         recentCardIDs.insert(card.localId, at: 0)
+    }
+
+    /// A row that failed to identify says "Tap to retry", so a tap retries it.
+    /// Every other row opens the card, the same as a row in Cards (owner decision,
+    /// 0.7 — a card you had just scanned could not be opened from here at all).
+    private func tapped(_ card: Card) {
+        switch card.lookupStatus {
+        case .notFound, .unavailable, .needsConfirm: retry(card)
+        case .resolved, .pending: route = card.localId
+        }
     }
 
     /// Tap-to-retry on an unresolved row. No longer PSA-only: Card Ladder

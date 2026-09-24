@@ -49,7 +49,7 @@ xcodebuild -project ios/Slab3.xcodeproj -scheme Slab3 \
 # id AND separate SwiftData store) so a TestFlight build and a dev build coexist on
 # one device. It talks to the SAME live Supabase as the shipped app.
 # Shipping version + build live ONLY in ios/project.yml (MARKETING_VERSION /
-# CURRENT_PROJECT_VERSION, currently 0.7 / 7, on the release/0.5 branch — 0.7 is
+# CURRENT_PROJECT_VERSION, currently 0.7 / 8, on the release/0.5 branch — 0.7 is
 # the max-buy lens plus the 2026-09-23 review fixes; V5 was 0.5 / 5-6 (6 the
 # selection-mode scroll fix in 564520b); V4 was 0.4 / 4, on TestFlight since
 # 2026-09-06); bump BOTH targets together
@@ -365,7 +365,12 @@ by design — RLS, not secrecy, is the protection. The service_role key never go
 the client.
 
 ### iOS shape
-`Slab3App` → `RootView` gates on `AuthManager.state` → `MainShell`. **Four tabs:
+`Slab3App` → `RootView` gates on `AuthManager.state` → `MainShell`. Each tab gets its
+OWN navigation stack (`.id(app.tab)`): one shared stack left a card's detail pushed on top
+when the tab changed, so the tab bar looked dead (0.7). Re-tapping the active tab bumps
+`AppState.tabReselected`, which pops Cards and Scan back to their root. Recent scans rows
+open the card; a row that failed to identify retries instead (owner decision, 0.7).
+**Four tabs:
 Scan, Cards, Export, Settings** — a hand-built `CaliperTabBar`, not a `TabView`,
 because the selection bar rises *above* it without replacing it. App-level state
 lives in `App/AppState.swift`; two pieces of it are load-bearing and global:
@@ -431,12 +436,18 @@ long-press context menu that held Select / Remove from group / Delete is **gone*
 VoiceOver has to them now. Swipe is masked off in selection mode
 (`including: .subviews`) — the selection bar owns actions there.
 
-Arbitration is the fragile part, and it is settled by MEASUREMENT rather than
-gesture priority: plain `.gesture` (never `.simultaneousGesture` /
-`.highPriorityGesture`, which force a winner), `minimumDistance: 8` so a tap still
-reaches the Button and the ScrollView gets a fair first move, and the row does not
-move at all until `SwipeGeometry.isHorizontal` says the drag has beaten vertical by
-1.2×. Every threshold and the rubber-band curve live in `SwipeGeometry`, tested, so
+Arbitration is the fragile part. **On iOS 18+ the swipe is a UIKit
+`UIPanGestureRecognizer` (`HorizontalPan`, a `UIGestureRecognizerRepresentable`)
+whose delegate refuses to BEGIN unless the first movement passes
+`SwipeGeometry.isHorizontal` (horizontal beats vertical by 1.2×)** — a vertical
+drag fails it at once and UIKit hands the touch to the ScrollView. It replaced a
+SwiftUI `DragGesture` (0.7 user report): from iOS 18 SwiftUI gestures are real UIKit
+recognisers, and that drag OWNED any touch that started on a card even though the
+card never moved, so scrolling only worked from the header or mid-momentum. Do not
+put a SwiftUI drag back on the row. iOS 17 keeps the old `DragGesture` path
+(`minimumDistance: 8`, same horizontal gate). The UIKit pan reports velocity, not a
+projected end, so `SwipeGeometry.projectedTravel` supplies the flick projection
+(UIScrollView `.normal` deceleration). Every threshold and the rubber-band curve live in `SwipeGeometry`, tested, so
 the gesture closure only reads a value and assigns a result. Scrub hit-testing is
 arithmetic (`DragSelectRange.index`) fed by ONE rendered row's index and frame
 through a PreferenceKey: rows are uniform and their fonts fixed-size, so that gives
@@ -752,7 +763,7 @@ appendix — not current guidance.
   credentials — gitignored, never commit or echo them. `spike/.state/` holds live
   sessions, likewise: `courtyard-session.json` is a LIVE Privy credential, not a fixture.
 - Commit messages record the test count (e.g. `83/83 tests` — the `worker/` vitest
-  total, currently 131 across 8 files; the iOS suite is a separate 214
+  total, currently 131 across 8 files; the iOS suite is a separate 215
   across 23 files / 26 test structs; pgTAP is 19, the `plan(19)` in
   supabase/tests/schema_test.sql). Re-count before writing the message rather than copying the
   last commit's numbers — they have gone stale three times

@@ -33,6 +33,11 @@ struct MainShell: View {
                 screen
                     .toolbar(.hidden, for: .navigationBar)
             }
+            // One stack PER TAB. All four used to share one, so a card's detail
+            // screen stayed pushed on top when the tab changed underneath it — the
+            // tab bar looked dead until you backed out of the card (user report,
+            // 0.7). A new identity per tab starts every tab at its own root.
+            .id(app.tab)
             .tint(Caliper.cyan)
             .padding(.bottom, Caliper.hitMin
                      + (app.isSelecting ? 96 : 0)
@@ -59,7 +64,8 @@ struct MainShell: View {
                     }
                     .transition(.move(edge: .bottom))
                 }
-                CaliperTabBar(tab: $app.tab, onChange: { app.endSelecting() })
+                CaliperTabBar(tab: $app.tab, onChange: { app.endSelecting() },
+                              onReselect: { app.tabReselected += 1 })
             }
         }
         // Every path that has to make a pending delete real. Leaving Cards is what
@@ -95,7 +101,7 @@ struct MainShell: View {
 
     @ViewBuilder private var screen: some View {
         switch app.tab {
-        case .scan: ScanScreen(app: app)
+        case .scan: ScanScreen(app: app, pendingDeletes: pendingDeletes)
         case .cards: CardsScreen(app: app, pendingDeletes: pendingDeletes)
         case .export: ExportScreen(app: app, pendingDeletes: pendingDeletes)
         case .settings: SettingsScreen(app: app, auth: auth)
@@ -163,6 +169,8 @@ struct MainShell: View {
 struct CaliperTabBar: View {
     @Binding var tab: AppTab
     var onChange: () -> Void = {}
+    /// The active tab was tapped again.
+    var onReselect: () -> Void = {}
 
     var body: some View {
         VStack(spacing: 0) {
@@ -171,7 +179,7 @@ struct CaliperTabBar: View {
                 ForEach(AppTab.allCases) { destination in
                     let active = destination == tab
                     Button {
-                        if destination != tab { onChange() }
+                        if destination != tab { onChange() } else { onReselect() }
                         tab = destination
                     } label: {
                         VStack(spacing: Caliper.space2) {
