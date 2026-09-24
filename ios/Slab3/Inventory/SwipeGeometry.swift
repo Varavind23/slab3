@@ -95,6 +95,19 @@ enum SwipeGeometry {
         return offset <= -(trayWidth / 2) ? .open : .closed
     }
 
+    /// What a release does, given whether this drag was ever CLAIMED as a swipe.
+    ///
+    /// nil = not a swipe at all: leave the row exactly as it is. This is what keeps
+    /// a scroll from deleting a card (0.7). `onEnded` fires for a vertical drag too,
+    /// and `resolve` reads the projected end translation — so a fast scroll flick
+    /// with any leftward lean projected past the commit point and deleted the row
+    /// under the finger, without the card ever having moved. Only a drag that
+    /// passed `isHorizontal` may resolve.
+    static func release(offset: CGFloat, predicted: CGFloat, rowWidth: CGFloat, claimed: Bool) -> Resolution? {
+        guard claimed else { return nil }
+        return resolve(offset: offset, predicted: predicted, rowWidth: rowWidth)
+    }
+
     /// UIScrollView's resistance curve: the further past the edge, the less each
     /// point of finger travel moves the row.
     private static func resisted(_ excess: CGFloat, over dimension: CGFloat) -> CGFloat {

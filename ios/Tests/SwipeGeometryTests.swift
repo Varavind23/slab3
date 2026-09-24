@@ -105,6 +105,21 @@ struct SwipeGeometryTests {
         #expect(resolution == .closed)
     }
 
+    /// A scroll is not a swipe (0.7: cards vanished while users scrolled). A fast
+    /// vertical flick with a leftward lean projects far past the commit point; if
+    /// the drag never passed the horizontal gate, releasing it must do nothing.
+    @Test func anUnclaimedFlickDeletesNothing() {
+        let release = SwipeGeometry.release(
+            offset: 0, predicted: -(rowWidth * 2), rowWidth: rowWidth, claimed: false)
+        #expect(release == nil)
+    }
+
+    @Test func aClaimedFlickStillDeletes() {
+        let release = SwipeGeometry.release(
+            offset: -120, predicted: -(rowWidth * 1.4), rowWidth: rowWidth, claimed: true)
+        #expect(release == .delete)
+    }
+
     // MARK: Constants the design depends on
 
     /// Both actions have to fit, and each has to be tappable once revealed.

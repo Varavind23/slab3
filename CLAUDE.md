@@ -389,6 +389,17 @@ ONLY then does the scrub exist — a short 0.18s hold plus a drag takes every ro
 crossed, auto-scrolling at the edges. Gating it on selection mode is what stops it
 competing with the menu for the same press.
 
+**A scrub starts on the CONFIRMED hold, never on finger-down** (0.7). In a
+`LongPressGesture.sequenced(before:)`, `.first(true)` fires when the finger LANDS; starting
+the scrub there disabled scrolling on every touch in selection mode, and the long press
+then failed — which never calls `onEnded` — so the list froze and the stranded anchor
+made the next scrub select rows nobody chose. `ScrubStage` reads the gesture value and
+is tested; a `@GestureState` (`scrubHeld`) ends the scrub however the gesture finishes.
+The row's context menu is empty in selection mode for the same reason (its press
+cancelled the scrub). Likewise a swipe resolves only if its drag passed the horizontal
+gate (`SwipeGeometry.release`): a vertical scroll flick used to project past the
+commit point and delete the card under the finger.
+
 **A scrub must disable the list's own scrolling** (`scrollDisabled(dragSelect.isActive)`).
 The scrub is attached simultaneously, so otherwise both recognise the same vertical
 drag: the list scrolls, the finger never crosses a row relative to the content, and
@@ -741,8 +752,8 @@ appendix — not current guidance.
   credentials — gitignored, never commit or echo them. `spike/.state/` holds live
   sessions, likewise: `courtyard-session.json` is a LIVE Privy credential, not a fixture.
 - Commit messages record the test count (e.g. `83/83 tests` — the `worker/` vitest
-  total, currently 131 across 8 files; the iOS suite is a separate 209
-  across 23 files / 25 test structs; pgTAP is 19, the `plan(19)` in
+  total, currently 131 across 8 files; the iOS suite is a separate 214
+  across 23 files / 26 test structs; pgTAP is 19, the `plan(19)` in
   supabase/tests/schema_test.sql). Re-count before writing the message rather than copying the
   last commit's numbers — they have gone stale three times
   (`grep -cE '^\s*(it|test)\(' worker/test/*.test.ts`, `grep -c '@Test' ios/Tests/*.swift`);

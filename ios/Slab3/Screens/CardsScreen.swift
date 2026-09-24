@@ -32,6 +32,10 @@ struct CardsScreen: View {
     // would re-publish the whole list on every scroll tick, the one shape certain to
     // stutter on a 200-slab stack.
     @State private var dragSelect = DragSelectController()
+    /// True only while a CONFIRMED scrub's finger is down. Gesture state, so SwiftUI
+    /// resets it however the gesture finishes — the one signal a cancelled or failed
+    /// scrub is guaranteed to send.
+    @GestureState private var scrubHeld = false
     /// Screen-space y of the top of the rows stack. It moves AS THE LIST SCROLLS,
     /// which is exactly what lets a finger position become a row index without
     /// tracking scroll offset separately.
@@ -101,6 +105,19 @@ struct CardsScreen: View {
                 .scrollDisabled(dragSelect.isActive && app.isSelecting)
                 .onChange(of: app.isSelecting) { _, selecting in
                     if !selecting { endScrub() }
+                }
+                // The filter pill and search stay live in selection mode, and the bulk
+                // actions act on `app.selection` against the WHOLE store — so a card
+                // selected and then filtered out of sight would still be deleted by
+                // the selection bar. Only what is on screen may stay selected.
+                .onChange(of: rowIDs) { _, ids in
+                    guard app.isSelecting else { return }
+                    let onScreen = app.selection.intersection(ids)
+                    if onScreen != app.selection { app.selection = onScreen }
+                }
+                // The finger is gone, however the gesture ended — give scrolling back.
+                .onChange(of: scrubHeld) { _, held in
+                    if !held, dragSelect.isActive { endScrub() }
                 }
                 .onDisappear { endScrub() }
                 // One rendered row's index and frame give the whole stack's origin
@@ -277,18 +294,26 @@ struct CardsScreen: View {
                 // what V4 had and what a hand-built lift never matched — the lift
                 // and its 0.8s press went out with this coming back. Select turns
                 // selection mode on; the scrub takes over from there.
+                //
+                // EMPTY in selection mode, which suppresses the menu entirely. Left
+                // live, its own long press (~0.5s) fired just after the scrub's
+                // 0.4s hold, and presenting it CANCELLED the scrub mid-drag — one of
+                // the paths that left the list frozen. Selection mode has the
+                // selection bar for these actions anyway.
                 .contextMenu {
-                    Button("Select") {
-                        app.isSelecting = true
-                        app.selection.insert(card.localId)
-                    }
-                    if card.folder != nil {
-                        Button("Remove from group") {
-                            card.folder = nil
-                            try? context.save()
+                    if !app.isSelecting {
+                        Button("Select") {
+                            app.isSelecting = true
+                            app.selection.insert(card.localId)
                         }
+                        if card.folder != nil {
+                            Button("Remove from group") {
+                                card.folder = nil
+                                try? context.save()
+                            }
+                        }
+                        Button("Delete card", role: .destructive) { delete(card) }
                     }
-                    Button("Delete card", role: .destructive) { delete(card) }
                 }
                 // The scrub exists ONLY once selection mode is on, so it can never
                 // compete with the context menu for the long press.
@@ -350,21 +375,25 @@ struct CardsScreen: View {
         // this long before it starts painting too.
         LongPressGesture(minimumDuration: 0.4)
             .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .global))
+            // Resets to false on EVERY way a gesture can finish — ended, failed or
+            // cancelled (a row recycled by LazyVStack, the context menu taking the
+            // touch). `onEnded` only covers the first, which is how a scrub used to
+            // outlive its finger and freeze the list. `onChange(of: scrubHeld)`
+            // turns that reset into `endScrub()`.
+            .updating($scrubHeld) { value, held, _ in
+                if case .confirmed = ScrubStage.of(value) { held = true }
+            }
             .onChanged { value in
-                switch value {
-                case .first(true):
-                    beginScrub(at: index)
-                case .second(true, let drag):
-                    if let drag { updateScrub(at: drag.location) }
-                default:
-                    break
-                }
+                // ONLY a confirmed hold starts a scrub — see `ScrubStage` for why
+                // `.first(true)` (finger down) must not.
+                guard case .confirmed(let location) = ScrubStage.of(value) else { return }
+                if !dragSelect.isActive { beginScrub(at: index) }
+                if let location { updateScrub(at: location) }
             }
             .onEnded { _ in endScrub() }
     }
 
     private func beginScrub(at index: Int) {
-        guard !dragSelect.isActive else { return }
         // A tray left open under the finger would be offering actions on a card the
         // user has just started selecting.
         openRowID = nil

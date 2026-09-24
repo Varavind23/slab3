@@ -1,6 +1,36 @@
 import Foundation
 import Observation
+import SwiftUI
 import UIKit
+
+/// What a long-press-then-drag gesture value MEANS, read in one tested place.
+///
+/// THE TRAP THIS EXISTS FOR (scroll lock + unwanted deletes, 0.7): in a
+/// `LongPressGesture.sequenced(before:)`, `.first(true)` is reported the moment the
+/// finger LANDS — Apple's own sample labels it "Long press begins" — not when the
+/// hold completes. The scrub used to start there. So in selection mode every touch,
+/// including the start of an ordinary scroll, selected the row under the finger and
+/// disabled scrolling; when the finger then moved, the long press FAILED, and a
+/// failed gesture never calls `onEnded` — so the scrub was never ended and the list
+/// stayed frozen wherever it was (usually the bottom, where people enter selection
+/// mode). The stranded anchor then made the next real scrub paint from a row far
+/// off screen, silently selecting cards the bulk Delete then took with it.
+/// Only `.second(true, _)` — the hold confirmed — may start a scrub.
+enum ScrubStage: Equatable {
+    /// Finger down, hold not yet confirmed. Must NOT select or stop scrolling.
+    case pressing
+    /// Hold confirmed; `location` is the drag's point once the finger moves.
+    case confirmed(location: CGPoint?)
+    case inactive
+
+    static func of(_ value: SequenceGesture<LongPressGesture, DragGesture>.Value) -> ScrubStage {
+        switch value {
+        case .first(true): return .pressing
+        case .second(true, let drag): return .confirmed(location: drag?.location)
+        default: return .inactive
+        }
+    }
+}
 
 /// Photos-style scrub selection: long-press a row to take it, then keep dragging to
 /// take everything the finger crosses.

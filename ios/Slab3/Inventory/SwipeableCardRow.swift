@@ -48,6 +48,11 @@ struct SwipeableCardRow: View {
     /// actions do not blink out from under a card that is still moving.
     @State private var trayMounted = false
     @State private var haptickedAtCommit = false
+    /// Whether THIS drag ever passed the horizontal gate. A drag that never did is a
+    /// scroll, and its release must not resolve — see `SwipeGeometry.release`.
+    @State private var claimed = false
+    /// Where the current drag began — how a new drag is told from the last one.
+    @State private var dragStart: CGPoint?
     // Held and prepared, like the scanner's: built per gesture, the first buzz
     // arrives late enough to feel disconnected from the finger.
     @State private var impact = UIImpactFeedbackGenerator(style: .rigid)
@@ -200,7 +205,18 @@ struct SwipeableCardRow: View {
                 // is no direction-locked DragGesture in SwiftUI; this gate is the
                 // substitute, and claiming the drag early is exactly what makes a
                 // hand-built swipe row fight vertical scrolling.
-                guard SwipeGeometry.isHorizontal(value.translation) else { return }
+                // A new touch starts unclaimed. Keyed on the start point rather than
+                // cleared in `onEnded`, because a CANCELLED drag (the ScrollView
+                // taking over, the row recycled) never reaches `onEnded` and would
+                // otherwise hand its claim to the next drag — a scroll.
+                if value.startLocation != dragStart {
+                    dragStart = value.startLocation
+                    claimed = false
+                }
+                // Once claimed, the row keeps following even if the finger drifts
+                // vertical — un-claiming mid-swipe would strand it off its mark.
+                guard claimed || SwipeGeometry.isHorizontal(value.translation) else { return }
+                claimed = true
                 trayMounted = true
                 openRowID = card.localId
                 offset = SwipeGeometry.offset(
@@ -216,11 +232,17 @@ struct SwipeableCardRow: View {
             }
             .onEnded { value in
                 haptickedAtCommit = false
-                let resolution = SwipeGeometry.resolve(
+                // Ended by a DIFFERENT touch than the one that claimed? Then it was
+                // never claimed at all.
+                let wasClaimed = claimed && value.startLocation == dragStart
+                claimed = false
+                dragStart = nil
+                guard let resolution = SwipeGeometry.release(
                     offset: offset,
                     predicted: restingOffset + value.predictedEndTranslation.width,
-                    rowWidth: rowWidth
-                )
+                    rowWidth: rowWidth,
+                    claimed: wasClaimed
+                ) else { return }
                 switch resolution {
                 case .delete:
                     commitDelete()

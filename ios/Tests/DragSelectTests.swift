@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import SwiftUI
 @testable import Slab3
 
 /// Scrub selection has one genuinely hard case — dragging back over rows you just
@@ -171,5 +172,22 @@ struct DragSelectControllerTests {
         controller.end()
         let ended = controller.endedAt!
         #expect(!controller.swallowsTap(now: ended.addingTimeInterval(DragSelectController.tapSuppression)))
+    }
+}
+
+/// Which stage of the long-press-then-drag may start a scrub. The scrub used to
+/// start on `.first(true)` — the finger LANDING — which froze scrolling in selection
+/// mode and selected rows nobody chose (0.7).
+struct ScrubStageTests {
+    @Test func fingerDownIsOnlyPressing() {
+        #expect(ScrubStage.of(.first(true)) == .pressing)
+    }
+
+    @Test func aConfirmedHoldStartsTheScrub() {
+        #expect(ScrubStage.of(.second(true, nil)) == .confirmed(location: nil))
+    }
+
+    @Test func anythingElseIsInactive() {
+        #expect(ScrubStage.of(.first(false)) == .inactive)
     }
 }
