@@ -102,6 +102,28 @@ struct LensRenderTests {
         #expect(FileManager.default.fileExists(atPath: url.path))
     }
 
+    /// The two totals under MAX. What to look at: the summary's headline reads
+    /// MAX BUY TOTAL with NO payout half, and its count says "with max buy"; the
+    /// bar's figure carries its MAX BUY basis label, and a short count reads
+    /// "12 selected · 9 priced" without crowding the figure off its line.
+    @Test func rendersTheTotalsUnderTheLens() throws {
+        let url = try render(
+            VStack(spacing: Caliper.space6) {
+                SummaryBlock(totalCents: 421_050, payoutCents: nil, matched: 9, of: 12, maxBuy: true)
+                SummaryBlock(totalCents: 612_000, payoutCents: 489_600, matched: 12, of: 12)
+                Spacer(minLength: 0)
+                SelectionBar(count: 12, totalCents: 421_050, counted: 9, basis: PriceLens.maxBuy.rowLabel,
+                             group: {}, remove: {}, export: {}, delete: {})
+                SelectionBar(count: 3, totalCents: 90_000, counted: 3,
+                             group: {}, remove: {}, export: {}, delete: {})
+            }
+            .padding(.vertical, Caliper.gutter)
+            .background(Caliper.bg),
+            named: "lens-totals", height: 720
+        )
+        #expect(FileManager.default.fileExists(atPath: url.path))
+    }
+
     /// A card no source has comps for. An em dash, never `$0` and never a blank —
     /// and the row keeps its shape.
     @Test func rendersTheRowWithNoComps() throws {

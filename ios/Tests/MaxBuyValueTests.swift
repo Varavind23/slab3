@@ -184,4 +184,40 @@ struct MaxBuyValueTests {
             #expect(map[blank.localId] == nil)
         }
     }
+
+    // ── Totals (LensTotal) ────────────────────────────────────────────────────
+
+    /// The selection bar under MAX must equal the rows it covers added up — a
+    /// tester adding the selected rows by hand got a CY total instead (2026-09-25).
+    @Test func aMaxBuyTotalIsTheSumOfTheRows() {
+        pinned {
+            let a = card(cy: [100, 100, 100])
+            let b = card(cy: [250, 250])
+            let total = LensTotal.of([a, b], lens: .maxBuy)
+            let rows = [a, b].compactMap { MaxBuyValue.cents(for: $0) }.reduce(0, +)
+            #expect(total.cents == rows)
+            #expect(total.cents == 35_000)
+            #expect(total.counted == 2)
+        }
+    }
+
+    /// No comps is no figure: it adds nothing and is not counted, so the bar can
+    /// say "2 selected · 1 priced" instead of passing off a short total.
+    @Test func aCardWithNoCompsIsNotCounted() {
+        pinned {
+            let priced = card(cy: [100])
+            let blank = card()
+            let total = LensTotal.of([priced, blank], lens: .maxBuy)
+            #expect(total.cents == 10_000)
+            #expect(total.counted == 1)
+        }
+    }
+
+    /// The value totals keep falling back across sources, as they always have.
+    @Test func aValueTotalFallsBackToTheOtherSource() {
+        let clOnly = card(clValue: 500)
+        let total = LensTotal.of([clOnly], lens: .cy)
+        #expect(total.cents == 50_000)
+        #expect(total.counted == 1)
+    }
 }

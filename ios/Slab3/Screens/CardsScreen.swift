@@ -70,11 +70,12 @@ struct CardsScreen: View {
                 ScrollView {
                     LazyVStack(spacing: Caliper.rowGap) {
                         SummaryBlock(
-                            totalCents: totalCents,
-                            payoutCents: app.payoutCents(on: totalCents),
-                            matched: visible.filter(\.isMatched).count,
+                            totalCents: summary.cents,
+                            payoutCents: app.payoutCents(on: summary.cents),
+                            matched: app.isMaxBuy ? summary.counted : visible.filter(\.isMatched).count,
                             of: visible.count,
-                            scoped: app.filter != .all
+                            scoped: app.filter != .all,
+                            maxBuy: app.isMaxBuy
                         )
                         FilterPill(
                             label: filterLabel,
@@ -585,8 +586,10 @@ struct CardsScreen: View {
         }
     }
 
-    private var totalCents: Int {
-        visible.compactMap { $0.prices.best(preferring: app.activeSource) }.reduce(0, +)
+    /// Follows the lens: max buy under MAX (owner decision, 2026-09-25), value
+    /// otherwise. Same rule as the selection bar — see `LensTotal`.
+    private var summary: (cents: Int, counted: Int) {
+        LensTotal.of(visible, lens: app.lens)
     }
 
     private var activeGroup: Folder? {

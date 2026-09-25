@@ -49,7 +49,7 @@ xcodebuild -project ios/Slab3.xcodeproj -scheme Slab3 \
 # id AND separate SwiftData store) so a TestFlight build and a dev build coexist on
 # one device. It talks to the SAME live Supabase as the shipped app.
 # Shipping version + build live ONLY in ios/project.yml (MARKETING_VERSION /
-# CURRENT_PROJECT_VERSION, currently 0.7 / 8, on the release/0.5 branch — 0.7 is
+# CURRENT_PROJECT_VERSION, currently 0.7 / 9, on the release/0.5 branch — 0.7 is
 # the max-buy lens plus the 2026-09-23 review fixes; V5 was 0.5 / 5-6 (6 the
 # selection-mode scroll fix in 564520b); V4 was 0.4 / 4, on TestFlight since
 # 2026-09-06); bump BOTH targets together
@@ -655,8 +655,13 @@ you were. `SalesPanel` keeps its own two-way `SourceToggle` — which comps you 
 there must not knock you off max buy (under a CL/CY lens it moves the hero with it).
 
 Under the lens: the row's lead figure, the detail hero, the scan toast, selection
-mode's running total and the price sort all become max buy; the Cards summary total and
-Export's footer total deliberately do **not**. Row line 2 shows BOTH source prices
+mode's running total, the price sort AND the Cards summary total all become max buy
+(the summary since 2026-09-25, owner decision — it headlines "Max buy total" and hides,
+without collapsing, its payout half, since payout is a share of CL value, not of what he
+pays); Export's footer total deliberately does **not**, because the CSV is what a buyer
+sees. Both on-screen totals go through `LensTotal` and LABEL their basis ("MAX BUY" /
+"EST. VALUE", plus "12 selected · 9 priced" when cards lack a figure): testers read
+max-buy rows while an unlabelled bar summed CY value, and called it a broken sum. Row line 2 shows BOTH source prices
 (nothing may hide a source), and the confidence slot goes **blank at its full 43pt** —
 a meter grades a source's OWN confidence in its price (CL's real 1–5 since 0.7 — it
 was pinned at 5 before), not our arithmetic, and borrowing one would also leak
@@ -763,7 +768,7 @@ appendix — not current guidance.
   credentials — gitignored, never commit or echo them. `spike/.state/` holds live
   sessions, likewise: `courtyard-session.json` is a LIVE Privy credential, not a fixture.
 - Commit messages record the test count (e.g. `83/83 tests` — the `worker/` vitest
-  total, currently 131 across 8 files; the iOS suite is a separate 215
+  total, currently 131 across 8 files; the iOS suite is a separate 219
   across 23 files / 26 test structs; pgTAP is 19, the `plan(19)` in
   supabase/tests/schema_test.sql). Re-count before writing the message rather than copying the
   last commit's numbers — they have gone stale three times

@@ -48,7 +48,9 @@ struct MainShell: View {
                 if app.isSelecting && !app.selection.isEmpty {
                     SelectionBar(
                         count: app.selection.count,
-                        totalCents: selectionTotal,
+                        totalCents: selectionTotal.cents,
+                        counted: selectionTotal.counted,
+                        basis: app.isMaxBuy ? PriceLens.maxBuy.rowLabel : "EST. VALUE",
                         group: { showGroupSheet = true },
                         remove: removeFromGroup,
                         export: exportSelection,
@@ -119,11 +121,8 @@ struct MainShell: View {
     /// `compactMap` either way: a card with no figure contributes nothing rather than
     /// a zero. Worth knowing that comps-less cards are far more common than
     /// price-less ones, so this total can cover fewer cards than are selected.
-    private var selectionTotal: Int {
-        if app.isMaxBuy {
-            return selected.compactMap { MaxBuyValue.cents(for: $0) }.reduce(0, +)
-        }
-        return selected.compactMap { $0.prices.best(preferring: app.activeSource) }.reduce(0, +)
+    private var selectionTotal: (cents: Int, counted: Int) {
+        LensTotal.of(selected, lens: app.lens)
     }
 
     private func removeFromGroup() {

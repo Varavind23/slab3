@@ -412,9 +412,13 @@ struct GroupTag: View {
 
 // MARK: - SummaryBlock
 
-/// The two money figures. Always both, never one. A group with no matched cards
-/// legitimately shows `EST. PAYOUT $0` and `0 of 4 matched` — information, not an
-/// error state.
+/// The two money figures. Always both, never one — EXCEPT under the max-buy lens.
+/// A group with no matched cards legitimately shows `EST. PAYOUT $0` and
+/// `0 of 4 matched` — information, not an error state.
+///
+/// Under MAX (owner decision, 2026-09-25) the headline is the max-buy total and the
+/// payout half is gone: payout is a percentage of what the sourcer is PAID, which is
+/// CL value, and applying it to what he intends to PAY would be a made-up figure.
 struct SummaryBlock: View {
     let totalCents: Int
     /// Nil when no payout rate is configured — the rate is a real number we don't
@@ -423,11 +427,17 @@ struct SummaryBlock: View {
     let matched: Int
     let of: Int
     var scoped: Bool = false
+    var maxBuy: Bool = false
+
+    private var title: String {
+        if maxBuy { return scoped ? "Group max buy" : "Max buy total" }
+        return scoped ? "Group total" : "Estimated total"
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: Caliper.space2) {
-                Text(scoped ? "Group total" : "Estimated total").caliperLabel()
+                Text(title).caliperLabel()
                 Text(caliperMoney(cents: totalCents))
                     .font(.figure)
                     .foregroundStyle(Caliper.textPrimary)
@@ -438,14 +448,19 @@ struct SummaryBlock: View {
             Rectangle().fill(Caliper.line).frame(height: Caliper.borderWidth)
 
             HStack(alignment: .center) {
+                // Hidden, not removed, under MAX: it holds the strip's height, so
+                // flipping the lens never shifts the list below by a line.
                 VStack(alignment: .leading, spacing: Caliper.space2) {
                     Text("Est. payout").caliperLabel()
                     Text(payoutCents == nil ? "—" : caliperMoney(cents: payoutCents))
                         .font(.figureSmall)
                         .foregroundStyle(payoutCents == nil ? Caliper.textTertiary : Caliper.payout)
                 }
+                .opacity(maxBuy ? 0 : 1)
+                .accessibilityHidden(maxBuy)
                 Spacer()
-                Text("\(matched) of \(of) matched").caliperMeta()
+                Text(maxBuy ? "\(matched) of \(of) with max buy" : "\(matched) of \(of) matched")
+                    .caliperMeta()
             }
             .padding(Caliper.space6)
         }
@@ -553,6 +568,12 @@ struct FilterPill: View {
 struct SelectionBar: View {
     let count: Int
     let totalCents: Int
+    /// How many selected cards actually contributed a figure. Shown only when it
+    /// falls short of `count`, so a short total explains itself.
+    var counted: Int? = nil
+    /// What the total IS — "MAX BUY" or "EST. VALUE". Without it a tester reading
+    /// max-buy rows took a CY value total for a broken sum (2026-09-25).
+    var basis: String = "EST. VALUE"
     var canGroup: Bool = true
     let group: () -> Void
     let remove: () -> Void
@@ -563,8 +584,9 @@ struct SelectionBar: View {
         VStack(spacing: 0) {
             Rectangle().fill(Caliper.cyan).frame(height: Caliper.borderWidth)
             HStack {
-                Text("\(count) selected").caliperLabel(Caliper.cyan)
+                Text(countLine).caliperLabel(Caliper.cyan)
                 Spacer()
+                Text(basis).caliperLabel(Caliper.textTertiary)
                 Text(caliperMoney(cents: totalCents))
                     .font(.figureSmall)
                     .foregroundStyle(Caliper.textPrimary)
@@ -585,6 +607,11 @@ struct SelectionBar: View {
             }
         }
         .background(Caliper.surface)
+    }
+
+    private var countLine: String {
+        guard let counted, counted < count else { return "\(count) selected" }
+        return "\(count) selected · \(counted) priced"
     }
 
     private var divider: some View {
