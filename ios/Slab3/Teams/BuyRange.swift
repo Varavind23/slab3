@@ -28,12 +28,13 @@ struct BuyRange: Identifiable, Equatable, Codable {
     /// Lot copies only: where it came from in the library, and its place in the lot.
     var templateId: UUID? = nil
     var sortOrder: Int? = nil
-    /// Lot copies only: the band (price group on the lot dashboard) this bucket sits in.
-    /// nil is a bucket that stands as its own band.
-    var bandId: UUID? = nil
+    /// The band this bucket sits in, as the lead typed it ("$0–$100") — buckets with
+    /// the same label group under one headline row (teams-first plan, D11). nil
+    /// stands alone. The band's span and totals are derived from its buckets.
+    var band: String? = nil
 
     enum CodingKeys: String, CodingKey {
-        case id, name, notes, bandId = "band_id"
+        case id, name, notes, band
         case valueMinCents = "value_min_cents", valueMaxCents = "value_max_cents"
         case gradeMin = "grade_min", gradeMax = "grade_max"
         case clConfMin = "cl_conf_min", clConfMax = "cl_conf_max"
@@ -48,7 +49,7 @@ struct BuyRange: Identifiable, Equatable, Codable {
         BuyRangeFields(name: name, valueMinCents: valueMinCents, valueMaxCents: valueMaxCents,
                        gradeMin: gradeMin, gradeMax: gradeMax, clConfMin: clConfMin, clConfMax: clConfMax,
                        yearMin: yearMin, yearMax: yearMax, maxCards: maxCards,
-                       budgetCents: budgetCents, notes: notes)
+                       budgetCents: budgetCents, notes: notes, band: band)
     }
 }
 
@@ -67,9 +68,10 @@ struct BuyRangeFields: Equatable, Encodable {
     var maxCards: Int
     var budgetCents: Int64
     var notes: String?
+    var band: String? = nil
 
     enum CodingKeys: String, CodingKey {
-        case name, notes
+        case name, notes, band
         case valueMinCents = "value_min_cents", valueMaxCents = "value_max_cents"
         case gradeMin = "grade_min", gradeMax = "grade_max"
         case clConfMin = "cl_conf_min", clConfMax = "cl_conf_max"
@@ -91,6 +93,7 @@ struct BuyRangeFields: Equatable, Encodable {
         try c.encode(maxCards, forKey: .maxCards)
         try c.encode(budgetCents, forKey: .budgetCents)
         try c.encode(notes, forKey: .notes)
+        try c.encode(band, forKey: .band)
     }
 }
 
@@ -195,6 +198,7 @@ struct BuyRangeDraft: Equatable {
     var maxCards = ""
     var budget = ""
     var notes = ""
+    var band = ""
 
     init() {}
 
@@ -211,6 +215,7 @@ struct BuyRangeDraft: Equatable {
         maxCards = String(range.maxCards)
         budget = Money.field(range.budgetCents)
         notes = range.notes ?? ""
+        band = range.band ?? ""
     }
 
     enum Field: Hashable { case name, value, grade, confidence, year, maxCards, budget }
@@ -266,11 +271,13 @@ struct BuyRangeDraft: Equatable {
         else { return .invalid(issues) }
 
         let trimmedNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedBand = band.trimmingCharacters(in: .whitespacesAndNewlines)
         return .valid(BuyRangeFields(
             name: trimmedName, valueMinCents: vMin, valueMaxCents: vMaxValue,
             gradeMin: gMin, gradeMax: gMax, clConfMin: cMinV, clConfMax: cMaxV,
             yearMin: yMinV, yearMax: yMaxV, maxCards: cards, budgetCents: budgetCents,
-            notes: trimmedNotes.isEmpty ? nil : trimmedNotes))
+            notes: trimmedNotes.isEmpty ? nil : trimmedNotes,
+            band: trimmedBand.isEmpty ? nil : trimmedBand))
     }
 
     private enum Parsed<T: Equatable>: Equatable { case value(T?), invalid }

@@ -16,6 +16,9 @@ struct BuyRangeEditorSheet: View {
     var readOnly = false
     /// Offered when adding a new range to a lot: also file it in the library.
     var offersSaveToLibrary = false
+    /// Band labels already used in this lot, offered as one-tap chips so two
+    /// buckets meant for one band cannot drift apart by a typo.
+    var bandSuggestions: [String] = []
     let onSave: (BuyRangeFields, _ saveToLibrary: Bool) async -> String?
     var onDelete: (() async -> String?)?
 
@@ -65,6 +68,21 @@ struct BuyRangeEditorSheet: View {
                 }
                 .padding(.horizontal, Caliper.gutter)
 
+                section("Band · optional", issue: nil) {
+                    VStack(alignment: .leading, spacing: Caliper.space4) {
+                        field("e.g. $0–$100 — same label, same row", text: $draft.band)
+                        if !readOnly && !bandSuggestions.isEmpty {
+                            HStack(spacing: Caliper.space3) {
+                                ForEach(bandSuggestions, id: \.self) { label in
+                                    Button { draft.band = label } label: {
+                                        Chip(text: label, tone: draft.band == label ? .filled : .standard)
+                                    }
+                                    .buttonStyle(CaliperPressStyle())
+                                }
+                            }
+                        }
+                    }
+                }
                 section("Notes", issue: nil) {
                     TextField("For the buyers — what to look for, what to skip",
                               text: $draft.notes, axis: .vertical)

@@ -13,13 +13,13 @@ import Testing
 @MainActor
 struct LotDashboardTests {
     private let lotId = UUID()
-    private let pokemon = UUID(), sports = UUID()
+    private let pokemon = "$0–$100", high = "$100–$240"
 
-    private func range(_ min: Int64, _ max: Int64?, budget: Int64, band: UUID?, grade: Double = 7,
+    private func range(_ min: Int64, _ max: Int64?, budget: Int64, band: String?, grade: Double = 7,
                        conf: Int? = nil, cards: Int = 400) -> BuyRange {
         BuyRange(id: UUID(), name: BuyRangeText.value(min: min, max: max), valueMinCents: min, valueMaxCents: max,
                  gradeMin: grade, gradeMax: 10, clConfMin: conf, clConfMax: nil, yearMin: nil, yearMax: nil,
-                 maxCards: cards, budgetCents: budget, notes: nil, bandId: band)
+                 maxCards: cards, budgetCents: budget, notes: nil, band: band)
     }
 
     @Test func bandsRollUpTheirBuckets() {
@@ -27,9 +27,9 @@ struct LotDashboardTests {
         let b = range(5_000, 10_000, budget: 6_672_500, band: pokemon)
         let usage = [a.id: RangeUsage(rangeId: a.id, cards: 10, usedCents: 500_000),
                      b.id: RangeUsage(rangeId: b.id, cards: 20, usedCents: 1_512_387)]
-        let cats = LotDashboard.build(bands: [LotBand(id: pokemon, lotId: lotId, category: "Pokémon", sortOrder: 0)],
-                                      ranges: [b, a], usage: usage)
-        let band = cats[0].bands[0]
+        let bands = LotDashboard.build(ranges: [b, a], usage: usage)
+        #expect(bands.count == 1, "one label, one band")
+        let band = bands[0]
         #expect(band.valueLabel == "$0 – $100", "the span comes from its buckets")
         #expect(band.usedCents == 2_012_387)
         #expect(band.allocatedCents == 8_672_500)
@@ -38,7 +38,7 @@ struct LotDashboardTests {
         #expect(band.bucketCountLabel == "2 buckets")
         #expect(band.buckets.map(\.range.valueMinCents) == [0, 5_000], "buckets in price order")
         #expect(band.rules == "7+ CERTS")
-        #expect(cats[0].gradeLine == "SLABS · GRADE 7+")
+        #expect(LotDashboard.gradeLine([a, b]) == "SLABS · GRADE 7+")
     }
 
     @Test func rulesUseTheAllocationScreensWords() {
@@ -51,25 +51,26 @@ struct LotDashboardTests {
                 "grade 1–10 is no rule at all")
     }
 
-    @Test func categoriesSplitAndLooseBucketsStandAlone() {
-        let p = range(0, 10_000, budget: 100, band: pokemon)
-        let s = range(0, 10_000, budget: 100, band: sports)
+    /// D11: the band is a label on the bucket. Same label (any case, any spacing)
+    /// is one band; no label stands alone; bands read in price order.
+    @Test func bandsGroupByTheirLabelAndLooseBucketsStandAlone() {
+        let a = range(0, 5_000, budget: 100, band: "$0–$100")
+        let b = range(5_000, 10_000, budget: 100, band: " $0–$100 ".uppercased())
         let loose = range(50_000, nil, budget: 100, band: nil)
-        let cats = LotDashboard.build(
-            bands: [LotBand(id: pokemon, lotId: lotId, category: "Pokémon", sortOrder: 0),
-                    LotBand(id: sports, lotId: lotId, category: "Sports", sortOrder: 1)],
-            ranges: [p, s, loose], usage: [:])
-        #expect(cats.map(\.title) == ["Pokémon", "Sports", "All cards"])
-        #expect(cats[2].bands[0].valueLabel == "$500+")
-        #expect(cats[0].bands[0].usedCents == 0, "nothing bought reads as $0 used, not missing")
+        let blank = range(24_000, 50_000, budget: 100, band: "   ")
+        let bands = LotDashboard.build(ranges: [loose, b, blank, a], usage: [:])
+        #expect(bands.map(\.valueLabel) == ["$0 – $100", "$240 – $500", "$500+"])
+        #expect(bands[0].buckets.count == 2)
+        #expect(bands[0].usedCents == 0, "nothing bought reads as $0 used, not missing")
+        #expect(LotDashboard.bandLabels([a, b, loose]) == ["$0–$100"], "the editor offers each label once")
     }
 
     @Test func overspendIsTruthfulButTheBarStopsAtFull() {
         let r = range(0, 100, budget: 45_100_00, band: nil)
-        let cats = LotDashboard.build(bands: [], ranges: [r],
-                                      usage: [r.id: RangeUsage(rangeId: r.id, cards: 1, usedCents: 50_100_00)])
-        #expect(cats[0].bands[0].percentUsed == 111)
-        #expect(cats[0].bands[0].fraction == 1)
+        let bands = LotDashboard.build(ranges: [r],
+                                       usage: [r.id: RangeUsage(rangeId: r.id, cards: 1, usedCents: 50_100_00)])
+        #expect(bands[0].percentUsed == 111)
+        #expect(bands[0].fraction == 1)
     }
 
     @Test func countdownReadsLikeTheOtherScreen() {
@@ -87,7 +88,7 @@ struct LotDashboardTests {
         let store = LotStore()
         let lot = Lot(id: lotId, name: "Show 7/24", deadline: Date().addingTimeInterval(429_454),
                       status: .active, createdAt: Date(), banner: "Only accepting PSA slabs: no CGC, no BGS")
-        let low = pokemon, high = UUID()
+        let low = pokemon
         var ranges = [range(0, 3_000, budget: 2_600_000, band: low),
                       range(3_000, 5_000, budget: 2_800_000, band: low),
                       range(5_000, 10_000, budget: 3_272_500, band: low)]
@@ -100,15 +101,13 @@ struct LotDashboardTests {
         for (r, cents) in zip(ranges, spent) { usage[r.id] = RangeUsage(rangeId: r.id, cards: Int(cents / 8_000), usedCents: cents) }
         let reported = try JSONDecoder().decode(RangeReport.self, from: Data(
             ("{\"lot_buy_range_id\":\"" + ranges[0].id.uuidString + "\",\"used_cents\":520000,\"card_count\":61,\"reported_at\":\"2026-09-24T09:12:00Z\"}").utf8))
-        store.seedForPreview(
-            lots: [lot], ranges: [lotId: ranges],
-            bands: [lotId: [LotBand(id: low, lotId: lotId, category: "Pokémon", sortOrder: 0),
-                            LotBand(id: high, lotId: lotId, category: "Pokémon", sortOrder: 1)]],
-            usage: usage, reports: [ranges[0].id: reported])
+        store.seedForPreview(lots: [lot], ranges: [lotId: ranges], usage: usage, reports: [ranges[0].id: reported])
 
         // No ScrollView: ImageRenderer draws a scroll view's content blank.
         let lastBucket = ranges.last!.id
-        let view = LotDashboardView(lot: lot, lots: store, expanded: [high], selected: [high: lastBucket])
+        // A band's id is its first (cheapest) bucket's.
+        let highBand = ranges[3].id
+        let view = LotDashboardView(lot: lot, lots: store, expanded: [highBand], selected: [highBand: lastBucket])
             .padding(Caliper.gutter)
             .frame(maxHeight: .infinity, alignment: .top)
             .background(Caliper.bg)

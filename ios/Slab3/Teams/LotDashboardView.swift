@@ -3,9 +3,14 @@ import SwiftUI
 /// The lot dashboard (plan §8): laid out like the allocation screen the team
 /// already works from every day, so a buyer reads it without being taught —
 /// same order, same words, same shapes. Deadline card with a live countdown; the
-/// warning banner; a CATEGORY selector beside an Allocation | Rates switch; the
-/// grade line; then each price band — its span, `$used / $allocated`, its rules,
-/// a bar, `N% used`, and `N buckets ⌄`, which opens the band's bar chart.
+/// warning banner; the grade line; then each price band — its span,
+/// `$used / $allocated`, its rules, a bar, `N% used`, and `N buckets ⌄`, which
+/// opens the band's bar chart. Shown on the lot's own screen (Teams → a lot).
+///
+/// Teams-first (2026-09-28): categories and the disabled Rates switch went with
+/// the band rows (bands are a label on the bucket now), and the lot buyer's
+/// reported numbers are hidden (owner, D23) — `LotDashboard.reported` and the
+/// server table stay, so bringing them back is only this view.
 ///
 /// Caliper, not the other screen's orange (owner decision): square, hairlines, no
 /// elevation. Bars are neutral and turn amber from 90% — the figure is our own sum,
@@ -18,8 +23,6 @@ struct LotDashboardView: View {
     /// render tests: the dashboard then reads exactly as a buyer sees it.
     var team: TeamStore? = nil
 
-    @State private var category: String?
-    @State private var reportingBucket: LotDashboard.Bucket?
     @State private var showOverLimit = false
     @State private var expanded: Set<UUID>
     @State private var selectedBucket: [UUID: UUID]
@@ -33,12 +36,8 @@ struct LotDashboardView: View {
         _selectedBucket = State(initialValue: selected)
     }
 
-    private var categories: [LotDashboard.Category] {
-        LotDashboard.build(bands: lots.bands(for: lot), ranges: lots.ranges(for: lot), usage: lots.usage)
-    }
-
-    private var current: LotDashboard.Category? {
-        categories.first { $0.name == category } ?? categories.first
+    private var bands: [LotDashboard.Band] {
+        LotDashboard.build(ranges: lots.ranges(for: lot), usage: lots.usage)
     }
 
     var body: some View {
@@ -48,13 +47,6 @@ struct LotDashboardView: View {
             if lot.status != .active { statusNote }
             if team?.isLead == true, !overLimit.isEmpty { overLimitBanner }
             allocationPanel
-        }
-        .sheet(item: $reportingBucket) { bucket in
-            ReportFiguresSheet(bucket: bucket) { used, cards in
-                guard let teamId = team?.team?.id else { return TeamError.copy(for: "not_member") }
-                return await lots.addReport(rangeId: bucket.id, usedCents: used, cardCount: cards, teamId: teamId)
-            }
-            .presentationDetents([.height(320)])
         }
         .sheet(isPresented: $showOverLimit) {
             if let team { OverLimitSheet(lot: lot, lots: lots, team: team).presentationDetents([.large]) }
@@ -142,23 +134,16 @@ struct LotDashboardView: View {
 
     private var allocationPanel: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .center) {
-                categoryPicker
-                Spacer(minLength: Caliper.space4)
-                allocationRatesSwitch
-            }
-            .padding(.bottom, Caliper.space6)
-            Hairline()
-
-            if let current {
+            let bands = bands
+            if !bands.isEmpty {
                 HStack(spacing: Caliper.space3) {
                     Image(systemName: "rectangle.portrait").font(.system(size: 10))
-                    Text(current.gradeLine).caliperLabel(Caliper.textSecondary)
+                    Text(LotDashboard.gradeLine(lots.ranges(for: lot))).caliperLabel(Caliper.textSecondary)
                 }
                 .foregroundStyle(Caliper.textSecondary)
-                .padding(.vertical, Caliper.space6)
+                .padding(.bottom, Caliper.space6)
 
-                ForEach(Array(current.bands.enumerated()), id: \.element.id) { index, band in
+                ForEach(Array(bands.enumerated()), id: \.element.id) { index, band in
                     if index > 0 { Hairline().padding(.vertical, Caliper.space6) }
                     bandView(band)
                 }
@@ -172,64 +157,6 @@ struct LotDashboardView: View {
         .padding(Caliper.rowPad + 4)
         .background(Caliper.surface)
         .overlay(Rectangle().strokeBorder(Caliper.lineStrong, lineWidth: Caliper.borderWidth))
-    }
-
-    private var categoryPicker: some View {
-        VStack(alignment: .leading, spacing: Caliper.space2) {
-            Text("Category").caliperLabel(Caliper.textTertiary)
-            // A menu only when there is something to switch to; one category is a title.
-            if categories.count > 1 {
-                Menu {
-                    ForEach(categories) { c in
-                        Button {
-                            category = c.name
-                        } label: {
-                            if c.id == current?.id { Label(c.title, systemImage: "checkmark") } else { Text(c.title) }
-                        }
-                    }
-                } label: {
-                    categoryTitle(chevron: true)
-                }
-            } else {
-                categoryTitle(chevron: false)
-            }
-        }
-    }
-
-    private func categoryTitle(chevron: Bool) -> some View {
-        HStack(spacing: Caliper.space3) {
-            Text(current?.title ?? "All cards")
-                .font(.calTitle)
-                .foregroundStyle(Caliper.textPrimary)
-                .lineLimit(1)
-            if chevron {
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Caliper.textSecondary)
-            }
-        }
-    }
-
-    /// For familiarity only: Rates is shown and disabled — there is no rates data.
-    private var allocationRatesSwitch: some View {
-        HStack(spacing: 0) {
-            Text("Allocation")
-                .font(.mono(11, .semibold))
-                .foregroundStyle(Caliper.textPrimary)
-                .padding(.horizontal, Caliper.space5)
-                .frame(height: 32)
-                .background(Caliper.surface2)
-            Text("Rates")
-                .font(.mono(11, .medium))
-                .foregroundStyle(Caliper.textTertiary)
-                .padding(.horizontal, Caliper.space5)
-                .frame(height: 32)
-                .opacity(Caliper.disabledOpacity)
-        }
-        .overlay(Rectangle().strokeBorder(Caliper.lineStrong, lineWidth: Caliper.borderWidth))
-        .clipShape(RoundedRectangle(cornerRadius: Caliper.radiusControl))
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Allocation. Rates is not available.")
     }
 
     // MARK: A band
@@ -254,9 +181,6 @@ struct LotDashboardView: View {
             }
             UsageBar(fraction: band.fraction)
                 .padding(.top, Caliper.space3)
-            if let reported = LotDashboard.reported(band.buckets, reports: lots.reports) {
-                reportedRow(reported)
-            }
             HStack {
                 Text("\(band.percentUsed)% used").font(.calBody).foregroundStyle(Caliper.textSecondary)
                 Spacer()
@@ -337,17 +261,8 @@ struct LotDashboardView: View {
                     if selected.range.name != selected.valueLabel {
                         Text(selected.range.name).caliperMeta(Caliper.textTertiary)
                     }
-                    if let reported = LotDashboard.reported([selected], reports: lots.reports) {
-                        reportedRow(reported)
-                    }
                     if let notes = selected.range.notes {
                         Text(notes).font(.calBody).foregroundStyle(Caliper.textSecondary)
-                    }
-                    if team?.isLead == true {
-                        Button("Enter reported numbers") { reportingBucket = selected }
-                            .font(.mono(10, .medium))
-                            .foregroundStyle(Caliper.textSecondary)
-                            .frame(minHeight: Caliper.hitMin)
                     }
                 }
             } else {
@@ -357,25 +272,6 @@ struct LotDashboardView: View {
         .padding(Caliper.rowPad)
         .overlay(Rectangle().strokeBorder(Caliper.line, lineWidth: Caliper.borderWidth))
         .padding(.top, Caliper.space3)
-    }
-
-    /// The buyer's own accepted figure, UNDER the team's — secondary, dated, and
-    /// with the gap spelled out when it is more than rounding.
-    private func reportedRow(_ r: LotDashboard.Reported) -> some View {
-        // The gap is the part that matters, so it is laid out FIRST and never
-        // squeezed; the dated line wraps under it rather than truncating.
-        HStack(alignment: .firstTextBaseline, spacing: Caliper.space4) {
-            Text(LotDashboard.reportedLine(r).uppercased())
-                .caliperMeta(Caliper.textTertiary)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            if r.gapMatters {
-                Text("Gap \(r.gapCents > 0 ? "+" : "−")\(Money.dollars(abs(r.gapCents)))")
-                    .caliperLabel(Caliper.confMid)
-                    .fixedSize()
-                    .layoutPriority(1)
-            }
-        }
     }
 
     private func legend(_ text: String, _ color: Color) -> some View {
@@ -430,58 +326,9 @@ struct LotPaneSwitch: View {
     }
 }
 
-/// A lead types what the lot's buyer says it has accepted for one bucket — read off
-/// their own screen. Appended, never edited: the history is the audit trail.
-struct ReportFiguresSheet: View {
-    let bucket: LotDashboard.Bucket
-    let onSave: (Int64, Int?) async -> String?
-    @Environment(\.dismiss) private var dismiss
-    @State private var used = ""
-    @State private var cards = ""
-    @State private var error: String?
-
-    var body: some View {
-        CaliperSheet(title: "Reported · \(bucket.valueLabel)") {
-            Button("Cancel") { dismiss() }
-                .font(.mono(10, .medium))
-                .foregroundStyle(Caliper.textSecondary)
-        } content: {
-            VStack(alignment: .leading, spacing: Caliper.space5) {
-                HStack(spacing: Caliper.space4) {
-                    field("Accepted $", text: $used, keyboard: .decimalPad)
-                    field("Cards", text: $cards, keyboard: .numberPad)
-                }
-                Text(error ?? "What the buyer's own screen shows as used for this bucket. Your team's total stays separate.")
-                    .caliperMeta(error == nil ? Caliper.textSecondary : Caliper.confMid)
-            }
-            .padding(.horizontal, Caliper.gutter)
-            .padding(.top, Caliper.space6)
-        } confirm: {
-            CaliperButton(title: "Save", variant: .primary, fullWidth: true,
-                          disabled: Money.cents(fromDollars: used) == nil) {
-                Task {
-                    guard let cents = Money.cents(fromDollars: used) else { return }
-                    let n = Int(cards.trimmingCharacters(in: .whitespaces))
-                    if let failure = await onSave(cents, n) { error = failure } else { dismiss() }
-                }
-            }
-        }
-    }
-
-    private func field(_ prompt: String, text: Binding<String>, keyboard: UIKeyboardType) -> some View {
-        TextField(prompt, text: text)
-            .font(.price)
-            .keyboardType(keyboard)
-            .foregroundStyle(Caliper.textPrimary)
-            .padding(.horizontal, Caliper.rowPad)
-            .frame(height: Caliper.hitMin)
-            .overlay(Rectangle().strokeBorder(Caliper.lineStrong, lineWidth: Caliper.borderWidth))
-    }
-}
-
-/// The lead's decision list for over-limit buys: who bought it, when, for what.
-/// Dropping one releases it; a confirmed copy of the same card can be dropped from
-/// the lot's Cards list instead, and the over-limit one kept for next time.
+/// Offline buys that landed after their card's three slots (or their bucket) were
+/// full (teams.md §5.1): recorded so nothing is lost, counted toward no cap until a
+/// lead decides. Leads only.
 struct OverLimitSheet: View {
     let lot: Lot
     let lots: LotStore

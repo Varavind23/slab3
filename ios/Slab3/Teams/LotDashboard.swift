@@ -44,46 +44,46 @@ enum LotDashboard {
         var bucketCountLabel: String { buckets.count == 1 ? "1 bucket" : "\(buckets.count) buckets" }
     }
 
-    struct Category: Identifiable, Equatable {
-        /// nil is bands the lead never gave a category.
-        let name: String?
-        let bands: [Band]
-        var id: String { name ?? "" }
-        var title: String { name ?? "All cards" }
-        /// `SLABS · GRADE 7+` — the lowest grade any bucket here takes.
-        var gradeLine: String {
-            let floor = bands.flatMap(\.buckets).map(\.range.gradeMin).min() ?? 1
-            return "SLABS · GRADE \(BuyRangeText.grade(floor))+"
-        }
+    /// `SLABS · GRADE 7+` — the lowest grade any bucket in the lot takes.
+    static func gradeLine(_ ranges: [BuyRange]) -> String {
+        "SLABS · GRADE \(BuyRangeText.grade(ranges.map(\.gradeMin).min() ?? 1))+"
     }
 
-    /// Categories in first-appearance order, bands by price within each.
-    static func build(bands: [LotBand], ranges: [BuyRange], usage: [UUID: RangeUsage]) -> [Category] {
+    /// Bands by price. Buckets carrying the same band label (trimmed, any case)
+    /// group into one band, named by its first bucket; a bucket with no label
+    /// stands as a band of one (teams-first plan, D11 — the label only groups;
+    /// the band's span and totals are derived here, so it can never disagree with
+    /// what it contains).
+    static func build(ranges: [BuyRange], usage: [UUID: RangeUsage]) -> [Band] {
         let bucket = { (r: BuyRange) in
             Bucket(range: r, usedCents: usage[r.id]?.usedCents ?? 0, cards: usage[r.id]?.cards ?? 0)
         }
-        let known = Set(bands.map(\.id))
-        var byCategory: [String?: [Band]] = [:]
-        var order: [String?] = []
-        func add(_ band: Band, _ category: String?) {
-            if byCategory[category] == nil { order.append(category) }
-            byCategory[category, default: []].append(band)
+        var groups: [String: [BuyRange]] = [:]
+        var order: [String] = []
+        var bands: [Band] = []
+        for range in ranges {
+            guard let label = range.band?.trimmingCharacters(in: .whitespacesAndNewlines), !label.isEmpty else {
+                bands.append(band(id: range.id, [bucket(range)]))
+                continue
+            }
+            let key = label.lowercased()
+            if groups[key] == nil { order.append(key) }
+            groups[key, default: []].append(range)
         }
+        for key in order {
+            let members = (groups[key] ?? []).sorted { $0.valueMinCents < $1.valueMinCents }
+            bands.append(band(id: members[0].id, members.map(bucket)))
+        }
+        return bands.sorted { $0.valueMinCents < $1.valueMinCents }
+    }
 
-        for lotBand in bands.sorted(by: { $0.sortOrder < $1.sortOrder }) {
-            let members = ranges.filter { $0.bandId == lotBand.id }
-                .sorted { $0.valueMinCents < $1.valueMinCents }
-            guard !members.isEmpty else { continue }   // an empty band has nothing to show
-            add(band(id: lotBand.id, members.map(bucket)), lotBand.category)
-        }
-        // A bucket with no band (or a band since deleted) stands as a band of one.
-        for range in ranges where range.bandId.map({ !known.contains($0) }) ?? true {
-            add(band(id: range.id, [bucket(range)]), nil)
-        }
-
-        return order.map { name in
-            Category(name: name, bands: (byCategory[name] ?? []).sorted { $0.valueMinCents < $1.valueMinCents })
-        }
+    /// The band labels a lot already uses, first spelling of each — the range
+    /// editor's one-tap suggestions.
+    static func bandLabels(_ ranges: [BuyRange]) -> [String] {
+        var seen: Set<String> = [], out: [String] = []
+        for label in ranges.compactMap({ $0.band?.trimmingCharacters(in: .whitespacesAndNewlines) })
+        where !label.isEmpty && seen.insert(label.lowercased()).inserted { out.append(label) }
+        return out
     }
 
     private static func band(id: UUID, _ buckets: [Bucket]) -> Band {

@@ -2,7 +2,7 @@
 -- Run: supabase test db
 
 begin;
-select plan(11);
+select plan(15);
 
 insert into auth.users (id, email) values
   ('20000000-0000-0000-0000-000000000001', 'lead@bands.test'),
@@ -66,6 +66,14 @@ reset role;
 select is(cl_grade_number('9', 'g9'), 9::numeric, 'a plain label is the grade');
 select is(cl_grade_number(null, 'g10pristine'), 10::numeric, 'a Pristine 10 counts as a 10 for lot rules');
 select is(cl_grade_number(null, 'gauthentic'), null, 'a grade with no number stays unknown');
+
+-- A bucket's band is a label on the bucket (20260928000000_bucket_band.sql).
+select has_column('lot_buy_ranges', 'band', 'a lot bucket carries its band label');
+select has_column('buy_range_templates', 'band', 'a saved bucket keeps its band into the next lot');
+select throws_ok($$update lot_buy_ranges set band = '   ' where lot_id = '22000000-0000-0000-0000-000000000001'$$,
+  '23514', null, 'a blank band is refused — no band is null, not whitespace');
+select lives_ok($$update lot_buy_ranges set band = null where lot_id = '22000000-0000-0000-0000-000000000001'$$,
+  'no band is allowed');
 
 select * from finish();
 rollback;

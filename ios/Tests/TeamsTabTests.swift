@@ -51,7 +51,7 @@ struct TeamsTabTests {
                             myUserId: me)
         let lots = LotStore()
         guard withLots else {
-            lots.seedForPreview(lots: [], ranges: [:], bands: [:], usage: [:], loadedAt: Date())
+            lots.seedForPreview(lots: [], ranges: [:], usage: [:], loadedAt: Date())
             return (team, lots, nil)
         }
         let lot = Lot(id: lotId, name: "Weekend 10/4", deadline: Date().addingTimeInterval(187_000),
@@ -67,7 +67,7 @@ struct TeamsTabTests {
             full.id: .init(rangeId: full.id, cards: 20, usedCents: 640_000),
         ]
         lots.seedForPreview(lots: [lot, other], ranges: [lotId: [low, high, full], other.id: [low]],
-                            bands: [:], usage: usage, loadedAt: Date())
+                            usage: usage, loadedAt: Date())
         return (team, lots, lot)
     }
 

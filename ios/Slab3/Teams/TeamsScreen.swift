@@ -303,7 +303,7 @@ struct CurrentLotCard: View {
 
     private var ranges: [BuyRange] { lots.ranges(for: lot) }
     private var bands: [LotDashboard.Band] {
-        LotDashboard.build(bands: lots.bands(for: lot), ranges: ranges, usage: lots.usage).flatMap(\.bands)
+        LotDashboard.build(ranges: ranges, usage: lots.usage)
     }
 
     var body: some View {

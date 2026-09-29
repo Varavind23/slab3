@@ -19,18 +19,6 @@ struct Lot: Identifiable, Equatable, Decodable {
     }
 }
 
-/// A band groups a lot's buckets under one price row (lot dashboard, §8). It has no
-/// price span or rules of its own — both come from its buckets — only a category
-/// and a place in the list.
-struct LotBand: Identifiable, Equatable, Decodable {
-    let id: UUID
-    let lotId: UUID
-    var category: String?
-    var sortOrder: Int
-
-    enum CodingKeys: String, CodingKey { case id, category, lotId = "lot_id", sortOrder = "sort_order" }
-}
-
 /// One slab in a lot, as every teammate's phone sees it — the row a buyer draws
 /// for a card that is not in their OWN inventory (plan §7.5), and the lead's
 /// whole-lot export. Display fields were frozen at claim time on the server.
@@ -109,7 +97,6 @@ final class LotStore {
     private(set) var lots: [Lot] = []
     private(set) var rangesByLot: [UUID: [BuyRange]] = [:]
     private(set) var library: [BuyRange] = []
-    private(set) var bandsByLot: [UUID: [LotBand]] = [:]
     /// Keyed by range id. A range with no entry has bought nothing yet.
     private(set) var usage: [UUID: RangeUsage] = [:]
     /// Every live slab (confirmed + over-limit) in each lot, all buyers.
@@ -126,7 +113,6 @@ final class LotStore {
     private(set) var isWorking = false
 
     func ranges(for lot: Lot) -> [BuyRange] { rangesByLot[lot.id] ?? [] }
-    func bands(for lot: Lot) -> [LotBand] { bandsByLot[lot.id] ?? [] }
     func claims(for lot: Lot) -> [TeamClaim] { claimsByLot[lot.id] ?? [] }
 
     /// What this member should see: a buyer never sees a lead's unfinished draft.
@@ -142,7 +128,7 @@ final class LotStore {
             // Not on a team is a real, loaded answer: the stamp says so, which is
             // what lets a group sync detach the lot groups of a team just left.
             loadedAt = Date(); loadedTeamId = nil
-            lots = []; rangesByLot = [:]; library = []; bandsByLot = [:]; usage = [:]
+            lots = []; rangesByLot = [:]; library = []; usage = [:]
             claimsByLot = [:]; reports = [:]
             return
         }
@@ -153,7 +139,6 @@ final class LotStore {
                 .eq("team_id", value: teamId).order("created_at", ascending: false)
                 .execute().value
             var byLot: [UUID: [BuyRange]] = [:]
-            var bands: [UUID: [LotBand]] = [:]
             var usage: [UUID: RangeUsage] = [:]
             var claims: [UUID: [TeamClaim]] = [:]
             var reports: [UUID: RangeReport] = [:]
@@ -163,9 +148,6 @@ final class LotStore {
                     .select().in("lot_id", values: ids)
                     .order("sort_order").execute().value
                 for row in ranges { byLot[row.lotId, default: []].append(row.range) }
-                let bandRows: [LotBand] = try await Backend.client.from("lot_bands")
-                    .select().in("lot_id", values: ids).order("sort_order").execute().value
-                for band in bandRows { bands[band.lotId, default: []].append(band) }
                 let used: [RangeUsage] = try await Backend.client.from("lot_range_usage")
                     .select("lot_buy_range_id, cards, used_cents").in("lot_id", values: ids)
                     .execute().value
@@ -194,7 +176,6 @@ final class LotStore {
             if self.lots != lots { self.lots = lots }
             if self.rangesByLot != byLot { self.rangesByLot = byLot }
             if self.library != library { self.library = library }
-            if self.bandsByLot != bands { self.bandsByLot = bands }
             if self.usage != usage { self.usage = usage }
             if self.claimsByLot != claims { self.claimsByLot = claims }
             if self.reports != reports { self.reports = reports }
@@ -205,11 +186,11 @@ final class LotStore {
     }
 
     /// Fill the store without a server — render tests and previews only.
-    func seedForPreview(lots: [Lot], ranges: [UUID: [BuyRange]], bands: [UUID: [LotBand]],
+    func seedForPreview(lots: [Lot], ranges: [UUID: [BuyRange]],
                         usage: [UUID: RangeUsage], reports: [UUID: RangeReport] = [:],
                         claims: [UUID: [TeamClaim]] = [:], loadedAt: Date? = nil, teamId: UUID? = nil) {
         self.loadedAt = loadedAt; loadedTeamId = teamId
-        self.lots = lots; rangesByLot = ranges; bandsByLot = bands; self.usage = usage
+        self.lots = lots; rangesByLot = ranges; self.usage = usage
         self.reports = reports; claimsByLot = claims
     }
 
@@ -315,37 +296,6 @@ final class LotStore {
         }
     }
 
-    // MARK: Bands (leads)
-
-    func addBand(to lotId: UUID, category: String?, teamId: UUID) async -> String? {
-        let order = (bandsByLot[lotId]?.map(\.sortOrder).max() ?? -1) + 1
-        return await perform(teamId: teamId) {
-            try await Backend.client.from("lot_bands")
-                .insert(BandWrite(lotId: lotId, category: category, sortOrder: order)).execute()
-        }
-    }
-
-    func updateBand(_ band: LotBand, category: String?, teamId: UUID) async -> String? {
-        await perform(teamId: teamId) {
-            try await Backend.client.from("lot_bands")
-                .update(["category": category]).eq("id", value: band.id).execute()
-        }
-    }
-
-    /// Its buckets are kept, standing as bands of their own (band_id → null).
-    func deleteBand(_ band: LotBand, teamId: UUID) async -> String? {
-        await perform(teamId: teamId) {
-            try await Backend.client.from("lot_bands").delete().eq("id", value: band.id).execute()
-        }
-    }
-
-    func moveRange(_ rangeId: UUID, toBand bandId: UUID?, teamId: UUID) async -> String? {
-        await perform(teamId: teamId) {
-            try await Backend.client.from("lot_buy_ranges")
-                .update(["band_id": bandId?.uuidString]).eq("id", value: rangeId).execute()
-        }
-    }
-
     /// Drafts only. A lot that has been open holds real buys; closing it is the
     /// way to finish it, and deleting it would cascade those buys away.
     func deleteDraft(_ lot: Lot, teamId: UUID) async -> String? {
@@ -359,7 +309,7 @@ final class LotStore {
 
     /// Adds a range to a lot as a COPY (so later library edits never move a live
     /// lot's goalposts); `saveToLibrary` also files the same criteria as a template.
-    func addRange(_ fields: BuyRangeFields, to lotId: UUID, band bandId: UUID? = nil,
+    func addRange(_ fields: BuyRangeFields, to lotId: UUID,
                   fromTemplate templateId: UUID?, saveToLibrary: Bool, teamId: UUID) async -> String? {
         let order = (rangesByLot[lotId]?.compactMap(\.sortOrder).max() ?? -1) + 1
         return await perform(teamId: teamId) {
@@ -371,7 +321,7 @@ final class LotStore {
                 source = saved.first?.id
             }
             try await Backend.client.from("lot_buy_ranges")
-                .insert(LotRangeInsert(lotId: lotId, bandId: bandId, templateId: source, sortOrder: order,
+                .insert(LotRangeInsert(id: UUID(), lotId: lotId, templateId: source, sortOrder: order,
                                        fields: fields))
                 .execute()
         }
@@ -386,6 +336,50 @@ final class LotStore {
     func deleteRange(_ id: UUID, teamId: UUID) async -> String? {
         await perform(teamId: teamId) {
             try await Backend.client.from("lot_buy_ranges").delete().eq("id", value: id).execute()
+        }
+    }
+
+    // MARK: The lot builder (one screen, one save)
+
+    /// Run the builder's changes in order and reload ONCE at the end — `perform`
+    /// reloads after every write, which for a lot of ten buckets is ten full reloads.
+    /// Stops at the first failure; what landed stays landed, and because every
+    /// bucket carries its own id a retry applies only what is missing.
+    func apply(_ ops: [LotBuilderDraft.Op], teamId: UUID) async -> String? {
+        await perform(teamId: teamId) {
+            for op in ops {
+                switch op {
+                case let .createLot(id, name, deadline, banner):
+                    try await Backend.client.from("lots")
+                        .insert(LotInsert(id: id, teamId: teamId, name: name, deadline: deadline, banner: banner))
+                        .execute()
+                case let .updateLot(id, name, deadline, banner, status):
+                    try await Backend.client.from("lots")
+                        .update(LotUpdate(name: name, deadline: deadline, banner: banner, status: status))
+                        .eq("id", value: id).execute()
+                case let .addRange(id, lotId, templateId, sortOrder, fields):
+                    try await Backend.client.from("lot_buy_ranges")
+                        .insert(LotRangeInsert(id: id, lotId: lotId, templateId: templateId, sortOrder: sortOrder,
+                                               fields: fields))
+                        .execute()
+                case let .updateRange(id, sortOrder, fields):
+                    try await Backend.client.from("lot_buy_ranges")
+                        .update(RangeUpdate(sortOrder: sortOrder, fields: fields)).eq("id", value: id).execute()
+                case let .deleteRange(id):
+                    try await Backend.client.from("lot_buy_ranges").delete().eq("id", value: id).execute()
+                }
+            }
+        }
+    }
+
+    private struct RangeUpdate: Encodable {
+        let sortOrder: Int
+        let fields: BuyRangeFields
+        enum CodingKeys: String, CodingKey { case sortOrder = "sort_order" }
+        func encode(to encoder: Encoder) throws {
+            try fields.encode(to: encoder)
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(sortOrder, forKey: .sortOrder)
         }
     }
 
@@ -429,20 +423,23 @@ final class LotStore {
         }
     }
 
+    /// The bucket's id is chosen HERE, not by the server: the lot builder applies a
+    /// list of changes that can fail halfway, and a retry must be able to tell a
+    /// bucket that already landed from one that did not (LotBuilderDraft).
     private struct LotRangeInsert: Encodable {
+        let id: UUID
         let lotId: UUID
-        let bandId: UUID?
         let templateId: UUID?
         let sortOrder: Int
         let fields: BuyRangeFields
         enum CodingKeys: String, CodingKey {
-            case lotId = "lot_id", bandId = "band_id", templateId = "template_id", sortOrder = "sort_order"
+            case id, lotId = "lot_id", templateId = "template_id", sortOrder = "sort_order"
         }
         func encode(to encoder: Encoder) throws {
             try fields.encode(to: encoder)
             var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(id, forKey: .id)
             try c.encode(lotId, forKey: .lotId)
-            try c.encode(bandId, forKey: .bandId)
             try c.encode(templateId, forKey: .templateId)
             try c.encode(sortOrder, forKey: .sortOrder)
         }
@@ -483,17 +480,6 @@ final class LotStore {
             try c.encode(rangeId, forKey: .rangeId)
             try c.encode(usedCents, forKey: .usedCents)
             try c.encode(cardCount, forKey: .cardCount)
-        }
-    }
-
-    private struct BandWrite: Encodable {
-        let lotId: UUID, category: String?, sortOrder: Int
-        enum CodingKeys: String, CodingKey { case lotId = "lot_id", category, sortOrder = "sort_order" }
-        func encode(to encoder: Encoder) throws {
-            var c = encoder.container(keyedBy: CodingKeys.self)
-            try c.encode(lotId, forKey: .lotId)
-            try c.encode(category, forKey: .category)
-            try c.encode(sortOrder, forKey: .sortOrder)
         }
     }
 }

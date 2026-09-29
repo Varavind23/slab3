@@ -10,8 +10,7 @@ struct TeamsDestination: View {
         Group {
             switch route {
             case .lot(let id): LotScreen(app: app, lotId: id)
-            // Phase 3 replaces this with the one-screen builder.
-            case .builder(let id): LotSetupSheet(team: app.team, lots: app.lots, lotId: id)
+            case .builder(let id): LotBuilderScreen(app: app, lotId: id)
             case .activity: TeamActivityScreen(app: app)
             case .activityMembers(let lotId): ActivityMembersScreen(app: app, lotId: lotId)
             case .receipt(let lotId, let userId): MemberReceiptScreen(app: app, lotId: lotId, userId: userId)
