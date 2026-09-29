@@ -59,6 +59,7 @@ struct CardDetailScreen: View {
                                connected: cardLadderConnected) { showConnect = true }
                     pricePanel
                     identityPanel
+                    LotClaimPanel(card: card)
                     groupPanel
                     notesPanel
 
@@ -253,23 +254,27 @@ struct CardDetailScreen: View {
 
     // MARK: Group
 
+    private var filableGroups: [Folder] {
+        let open = Set(app.lots.lots.filter { $0.status == .active }.map(\.id))
+        return groups.filter { g in g.teamLotId.map(open.contains) ?? true }
+    }
+
     private var groupPanel: some View {
         VStack(spacing: 0) {
             SectionLabelInline(text: "Group")
-            ForEach(groups) { group in
+            // Open team lots are offered like any group — filing claims (CardFiling).
+            ForEach(filableGroups) { group in
                 SheetRow(
                     label: group.name,
                     active: card.folder?.localId == group.localId,
                     leading: { Circle().fill(group.hue).frame(width: 8, height: 8) }
                 ) {
-                    let leaving = card.folder?.localId == group.localId
-                    card.folder = leaving ? nil : group
                     // Filing — not un-filing — is what makes this the group the
-                    // Cards swipe offers next.
-                    if !leaving { group.markUsed() }
+                    // Cards swipe offers next; CardFiling holds that rule.
+                    CardFiling.toggle(card, group: group, in: context)
                 }
             }
-            if groups.isEmpty {
+            if filableGroups.isEmpty {
                 Text("No groups yet. Select cards on Inventory to make one.")
                     .caliperMeta()
                     .frame(maxWidth: .infinity, alignment: .leading)

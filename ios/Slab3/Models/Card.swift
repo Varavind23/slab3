@@ -215,6 +215,18 @@ final class Card {
     // A card belongs to at most one group; nil shows under the "Ungrouped" filter.
     var folder: Folder?
 
+    /// Where this card stands with a TEAM LOT (teams phase 4) — `LotClaimState`.
+    /// nil for every card that was never filed into a lot. Kept on the card, not
+    /// just derived from `folder`, because a BLOCKED card is un-filed back to plain
+    /// inventory and still has to say why, and a claim must be releasable after the
+    /// card has left the group. All three additive-optional (the SwiftData rule).
+    var lotClaimStateRaw: String?
+    /// The server lot the claim (or the attempt) was made against.
+    var lotClaimLotId: UUID?
+    /// The server's full answer (`LotVerdict`, JSON): the bucket, copy count, the
+    /// three existing buys on a limit block, the candidates to pick from.
+    var lotVerdictData: Data?
+
     var grader: Grader { Grader(rawValue: graderRaw) ?? .psa }
     var lookupStatus: LookupStatus {
         get { LookupStatus(rawValue: lookupStatusRaw) ?? .pending }

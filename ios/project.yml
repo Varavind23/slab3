@@ -66,6 +66,13 @@ targets:
         GENERATE_INFOPLIST_FILE: "YES"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: "NO"
+      # DEBUG ONLY: reach the local Supabase stack on the Mac from a real iPhone
+      # (teams work, 2026-09-27). Local-network http + the local-network prompt.
+      # Release — and the Slab3 target entirely — never get either.
+      configs:
+        Debug:
+          INFOPLIST_FILE: Config/SlabsDevLocal-Info.plist
+          INFOPLIST_KEY_NSLocalNetworkUsageDescription: "Slabs Dev connects to a test server on this network."
 
   Slab3Tests:
     type: bundle.unit-test

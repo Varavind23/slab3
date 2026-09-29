@@ -30,6 +30,13 @@ struct ScanScreen: View {
     /// other screen reads it; same call `CardDetailScreen` makes for the Card
     /// Ladder connection flag.
     @AppStorage("caliper_auto_scan") private var autoScan = true
+    /// The group new scans file into (ScanFilingBar), by `Folder.localId`. Empty is
+    /// none — the default, and the Scan tab exactly as it was. Here and not in
+    /// `AppState` for the same reason as `autoScan`: no other screen reads it.
+    @AppStorage("caliper_scan_group") private var scanGroupId = ""
+    @Query(sort: \Folder.createdAt, order: .reverse) private var groups: [Folder]
+    @State private var showTargetSheet = false
+    @AppStorage(PriceService.connectedKey) private var cardLadderConnected = false
     // Held and prepared: building a generator per scan adds a perceptible lag to
     // the first buzz, which in burst mode is every buzz.
     @State private var captureHaptic = UIImpactFeedbackGenerator(style: .medium)
@@ -38,6 +45,10 @@ struct ScanScreen: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            ScanFilingBar(target: scanTarget, lot: scanLot, filedToday: filedToday,
+                          needsCardLadder: scanLot != nil && !cardLadderConnected) { showTargetSheet = true }
+                .padding(.horizontal, Caliper.gutter)
+                .padding(.bottom, Caliper.space4)
             viewport
                 .padding(.horizontal, Caliper.gutter)
             recentScans
@@ -54,6 +65,9 @@ struct ScanScreen: View {
         // The session is the authority while scanning, so the stored preference
         // has to reach it on every change — not only when the camera starts.
         .onChange(of: autoScan) { _, on in controller.autoScan = on }
+        .sheet(isPresented: $showTargetSheet) {
+            ScanTargetSheet(targetId: $scanGroupId, openLots: openLots).presentationDetents([.large])
+        }
         .sheet(isPresented: $showManualEntry) {
             ManualEntrySheet { scan in add(scan, photo: nil) }
                 .presentationDetents([.height(320)])
@@ -182,6 +196,29 @@ struct ScanScreen: View {
         }
     }
 
+    /// The chosen group, if it still exists and can still be filed into. A group
+    /// deleted or turned into a team lot since reads as none, never as a stale name.
+    private var scanTarget: Folder? {
+        guard !scanGroupId.isEmpty else { return nil }
+        return groups.first { group in
+            guard group.localId.uuidString == scanGroupId, !group.archived else { return false }
+            // A lot's group only while the lot is open — a closed lot takes nothing.
+            return group.teamLotId.map { openLots[$0] != nil } ?? true
+        }
+    }
+
+    /// Open lots by id — which lot groups can be scanned into right now.
+    private var openLots: [UUID: Lot] {
+        Dictionary(app.lots.lots.filter { $0.status == .active }.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+    }
+
+    private var scanLot: Lot? { scanTarget?.teamLotId.flatMap { openLots[$0] } }
+
+    private var filedToday: Int {
+        guard let id = scanTarget?.localId else { return 0 }
+        return cards.filter { $0.folder?.localId == id && Calendar.current.isDateInToday($0.scannedAt) }.count
+    }
+
     private var shutterHeadline: String {
         guard autoScan else { return "Tap to scan" }
         return controller.isHolding ? "Captured — lift it away" : "Hold code in frame"
@@ -290,6 +327,15 @@ struct ScanScreen: View {
         // has a picture, and an official render replaces it if one exists.
         if let photo { card.setImage(photo, from: .camera) }
         context.insert(card)
+        // The filing bar's group, if one is chosen. Through CardFiling like every
+        // other path, so a team lot claims here too. The price refresh below is
+        // marked as started FIRST: the claim waits on it (the server buckets on the
+        // CL Value it caches), and without the mark the claim could run before the
+        // refresh begins and fetch Card Ladder a second time.
+        if let scanTarget {
+            card.pricesLoading = true
+            CardFiling.file([card], into: scanTarget, in: context)
+        }
         withAnimation(Caliper.easeOut) { recentCardIDs.insert(card.localId, at: 0) }
         // A single tap, not the three-tap .success pattern — at burst cadence
         // that turns into mush.
@@ -371,7 +417,11 @@ private struct RecentScanRow: View {
                     .font(.calBody)
                     .foregroundStyle(Caliper.textPrimary)
                     .lineLimit(1)
-                Text(detail).caliperLabel(statusColor)
+                if card.lotClaimState != nil {
+                    LotVerdictLabel(card: card)
+                } else {
+                    Text(detail).caliperLabel(statusColor)
+                }
             }
             Spacer(minLength: 0)
             if card.lookupStatus == .pending {
@@ -484,6 +534,9 @@ struct ScanToastView: View {
                         }
                     }
                     Text(subtitle).caliperLabel(edgeColor)
+                    // The lot verdict, as it arrives. Usually after the toast has
+                    // gone — the row keeps it (plan §7.2–7.3).
+                    if case .captured(let card) = toast { LotVerdictLabel(card: card) }
                 }
                 .padding(Caliper.rowPad)
                 Spacer(minLength: 0)

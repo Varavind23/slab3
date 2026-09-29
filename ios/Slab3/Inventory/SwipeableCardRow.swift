@@ -63,7 +63,7 @@ struct SwipeableCardRow: View {
 
     /// The tray shows the GROUP NAME, not "File in <name>". In 84 points the verb
     /// eats the half of the label that carries the information — a render of
-    /// "Triumph 7/24" came out as "FILE IN TRIU…", which names no group at all. The
+    /// "Weekend show 7/24" came out as "FILE IN WEEK…", which names no group at all. The
     /// folder glyph above it is the verb.
     private var fileTitle: String { fileTarget?.name ?? "File…" }
 

@@ -20,12 +20,20 @@ struct SettingsScreen: View {
     @State private var showOnboarding = false
     @State private var showTesting = false
     @AppStorage(TestingGate.unlockedKey) private var testingUnlocked = false
+    @State private var showTeamOnboard = false
+    @State private var showMembers = false
+    @State private var showDisplayName = false
+    @State private var confirmRotate = false
+    @State private var teamError: String?
+    @State private var showLibrary = false
+    @State private var showLots = false
 
     var body: some View {
         VStack(spacing: 0) {
             ScreenHeader(context: "\(cards.count) cards", title: "Settings")
             ScrollView {
                 VStack(spacing: 0) {
+                    if TeamsFeature.isAvailable { teamSection }
                     SectionLabel(text: "Price sources")
                     row("Card Ladder", value: cardLadderConnected ? "Connected" : "Not connected",
                         dot: Caliper.srcCL) { showConnect = true }
@@ -49,8 +57,10 @@ struct SettingsScreen: View {
                     } ?? "Not set") { showPayout = true }
                     Hairline()
                     row("Payout provider", value: "Not set")
-                    Hairline()
-                    row("Buy ranges", value: "Not available")
+                    if app.team.team == nil {
+                        Hairline()
+                        row("Buy ranges", value: "Not available")
+                    }
 
                     SectionLabel(text: "CSV")
                     row("Default columns", value: "\(app.enabledColumns.count) selected")
@@ -61,6 +71,13 @@ struct SettingsScreen: View {
                     row("How it works", value: "Replay") { showOnboarding = true }
                     Hairline()
                     row("Version", value: Self.version)
+                    #if DEBUG
+                    Hairline()
+                    // Debug builds only: which Supabase this build is talking to.
+                    row("Server", value: Backend.serverLabel,
+                        dot: Backend.isLocal ? Caliper.confMid : nil,
+                        valueTint: Backend.isLocal ? Caliper.confMid : nil)
+                    #endif
                     Hairline()
                     // Green so the state is unmistakable: an uncalibrated buy
                     // recommendation is showing on every card, and that should
@@ -100,6 +117,27 @@ struct SettingsScreen: View {
         .sheet(isPresented: $showConnect) { CardLadderConnectView() }
         .sheet(isPresented: $showPayout) { PayoutSheet(app: app).presentationDetents([.height(260)]) }
         .sheet(isPresented: $showTesting) { TestingGateSheet() }
+        .sheet(isPresented: $showTeamOnboard) { TeamOnboardSheet(team: app.team).presentationDetents([.large]) }
+        .sheet(isPresented: $showMembers) { TeamMembersSheet(team: app.team).presentationDetents([.large]) }
+        .sheet(isPresented: $showDisplayName) {
+            TeamDisplayNameSheet(team: app.team).presentationDetents([.height(260)])
+        }
+        .sheet(isPresented: $showLibrary) {
+            BuyRangeLibrarySheet(team: app.team, lots: app.lots).presentationDetents([.large])
+        }
+        .sheet(isPresented: $showLots) {
+            LotListSheet(team: app.team, lots: app.lots).presentationDetents([.large])
+        }
+        .confirmationDialog("Rotate the team code?", isPresented: $confirmRotate, titleVisibility: .visible) {
+            Button("Rotate code") { Task { teamError = await app.team.rotateCode() } }
+        } message: {
+            Text("The old code stops working. Everyone already on the team stays on it.")
+        }
+        .alert("Team", isPresented: Binding(get: { teamError != nil }, set: { if !$0 { teamError = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(teamError ?? "")
+        }
         .fullScreenCover(isPresented: $showOnboarding) {
             OnboardingScreen { showOnboarding = false }
         }
@@ -121,9 +159,47 @@ struct SettingsScreen: View {
         return last.formatted(.dateTime.month(.abbreviated).day().hour().minute())
     }
 
+    /// Settings → Team (plan §7.7). Present only when TeamsFeature.isAvailable; a
+    /// user who is on no team sees one row and nothing else. Nothing renders until
+    /// the first load answers, so a member never sees "Join or create" flash past.
+    @ViewBuilder
+    private var teamSection: some View {
+        let store = app.team
+        if let team = store.team {
+            SectionLabel(text: "Team")
+            // A team name is rendered verbatim, like a group's — never upper-cased
+            // into a label.
+            row("Team", value: team.name, verbatim: true)
+            Hairline()
+            row("Members", value: "\(store.members.count)") { showMembers = true }
+            Hairline()
+            // Buyers see the code too (they can already read it under RLS, and
+            // passing it on at the table is how a team grows); only a lead rotates it.
+            row("Team code", value: JoinCode.display(team.joinCode),
+                tap: store.isLead ? { confirmRotate = true } : nil)
+            Hairline()
+            row("Your name", value: store.me?.displayName ?? "\u{2014}", verbatim: true) { showDisplayName = true }
+            Hairline()
+            row("Lots", value: lotsValue) { showLots = true }
+            Hairline()
+            // Replaces Payout's "Buy ranges · Not available" placeholder for team
+            // members: a buy range belongs to the team, not to a payout.
+            row("Buy ranges", value: "\(app.lots.library.count) saved") { showLibrary = true }
+        } else if store.loaded {
+            SectionLabel(text: "Team")
+            row("Join or create a team", value: "") { showTeamOnboard = true }
+        }
+    }
+
+    private var lotsValue: String {
+        let open = app.lots.lots.filter { $0.status == .active }.count
+        return open == 1 ? "1 open" : "\(open) open"
+    }
+
     @ViewBuilder
     private func row(_ label: String, value: String, dot: Color? = nil,
-                     valueTint: Color? = nil, tap: (() -> Void)? = nil) -> some View {
+                     valueTint: Color? = nil, verbatim: Bool = false,
+                     tap: (() -> Void)? = nil) -> some View {
         Button {
             tap?()
         } label: {
@@ -131,7 +207,11 @@ struct SettingsScreen: View {
                 if let dot { Circle().fill(dot).frame(width: 6, height: 6) }
                 Text(label).font(.calBody).foregroundStyle(Caliper.textPrimary)
                 Spacer(minLength: Caliper.space4)
-                Text(value).caliperLabel(valueTint ?? (tap == nil ? Caliper.textTertiary : Caliper.textSecondary))
+                if verbatim {
+                    Text(value).font(.calBody).foregroundStyle(Caliper.textSecondary).lineLimit(1)
+                } else {
+                    Text(value).caliperLabel(valueTint ?? (tap == nil ? Caliper.textTertiary : Caliper.textSecondary))
+                }
                 if tap != nil {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 9))

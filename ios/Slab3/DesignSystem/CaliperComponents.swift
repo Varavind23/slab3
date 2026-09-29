@@ -395,7 +395,7 @@ private struct HighConfidenceBloom: ViewModifier {
 // MARK: - GroupTag
 
 /// A buyer group: dot + name, always together. Names are rendered verbatim —
-/// never capitalised or reformatted, because `philcgc` and `Triumph 7/24` are
+/// never capitalised or reformatted, because `bulk cgc` and `Show 7/24` are
 /// what the user typed and how they'll search for it.
 struct GroupTag: View {
     let name: String

@@ -94,8 +94,15 @@ struct GroupSheet: View {
     var targets: [Card]?
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
-    @Query(sort: \Folder.createdAt, order: .reverse) private var groups: [Folder]
+    @Query(sort: \Folder.createdAt, order: .reverse) private var allGroups: [Folder]
     @State private var newName = ""
+
+    /// Ordinary groups, plus the groups of OPEN team lots — filing into one claims
+    /// each card (CardFiling), so the 3-per-lot check runs on this path too.
+    private var groups: [Folder] {
+        let open = Set(app.lots.lots.filter { $0.status == .active }.map(\.id))
+        return allGroups.filter { g in g.teamLotId.map(open.contains) ?? true }
+    }
 
     private var selected: [Card] { targets ?? cards.filter { app.selection.contains($0.localId) } }
 
@@ -144,17 +151,14 @@ struct GroupSheet: View {
     private func create() {
         guard !trimmed.isEmpty else { return }
         // Hue rotates through the palette so consecutive groups stay tellable apart.
-        let group = Folder(name: trimmed, hueIndex: groups.count % Caliper.groupHues.count)
+        let group = Folder(name: trimmed, hueIndex: allGroups.count % Caliper.groupHues.count)
         context.insert(group)
         assign(to: group)
     }
 
     private func assign(to group: Folder) {
-        for card in selected { card.folder = group }
-        // The Cards swipe offers "file into the group you last used" — from now on
-        // that is this one. Recorded beside every assignment, or it goes stale.
-        group.markUsed()
-        try? context.save()
+        // Recency (the swipe's "file into the group last used") is recorded inside.
+        CardFiling.file(selected, into: group, in: context)
         app.endSelecting()
         dismiss()
     }

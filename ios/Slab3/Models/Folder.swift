@@ -2,7 +2,7 @@ import Foundation
 import SwiftData
 import SwiftUI
 
-/// A destination for cards — a buyer (pete), a marketplace, a lot.
+/// A destination for cards — a buyer, a marketplace, a lot.
 ///
 /// **Caliper calls this a group**, and every user-facing string in the app says
 /// "group". The SwiftData entity keeps the name `Folder` deliberately: renaming a
@@ -11,8 +11,8 @@ import SwiftUI
 /// change is free; the entity rename is not, so it waits for a real migration
 /// (README.md, "Folder → Group").
 ///
-/// Group names are rendered verbatim, never capitalised or reformatted — `philcgc`
-/// and `Triumph 7/24` are what the user typed and how they'll look for them.
+/// Group names are rendered verbatim, never capitalised or reformatted — `bulk cgc`
+/// and `Show 7/24` are what the user typed and how they'll look for them.
 @Model
 final class Folder {
     @Attribute(.unique) var localId: UUID
@@ -37,6 +37,16 @@ final class Folder {
     /// (Slab3App uses a bare `.modelContainer(for:)`), so additive-optional is what
     /// lets SwiftData lightweight-migrate the inventories already on users' phones.
     var lastUsedAt: Date?
+
+    /// Set when this group IS a team lot (plan §1: a lot is a shared group, not a
+    /// second concept beside groups). The server's `lots.id`. `LotFolders.sync`
+    /// creates and names these from the team's lots, so every teammate's phone
+    /// carries the same group; nil for every ordinary group.
+    ///
+    /// Additive-optional for the same reason as `lastUsedAt` — no migration plan.
+    var teamLotId: UUID?
+
+    var isTeamLot: Bool { teamLotId != nil }
 
     @Relationship(deleteRule: .nullify, inverse: \Card.folder)
     var cards: [Card] = []
@@ -68,7 +78,7 @@ final class Folder {
     /// group picker instead of guessing, which is the same rule prices follow.
     static func mostRecentlyUsed(in groups: [Folder]) -> Folder? {
         groups
-            .filter { !$0.archived }
+            .filter { !$0.archived && !$0.isTeamLot }
             .compactMap { group in group.lastUsedAt.map { (group: group, used: $0) } }
             .max { $0.used < $1.used }?
             .group

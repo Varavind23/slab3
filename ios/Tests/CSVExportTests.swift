@@ -15,9 +15,9 @@ struct CSVExportTests {
     @Test func filenameCarriesScopeAndDate() {
         let day = Date(timeIntervalSince1970: 1_755_561_600) // 2025-08-19
         #expect(CSVExport.filename(scope: nil, date: day) == "inventory_2025-08-19.csv")
-        #expect(CSVExport.filename(scope: "pete", date: day) == "inventory_pete_2025-08-19.csv")
+        #expect(CSVExport.filename(scope: "buyer1", date: day) == "inventory_buyer1_2025-08-19.csv")
         // Group names are whatever the user typed; the filename has to survive them.
-        #expect(CSVExport.filename(scope: "Triumph 7/24", date: day) == "inventory_triumph-7-24_2025-08-19.csv")
+        #expect(CSVExport.filename(scope: "Show 7/24", date: day) == "inventory_show-7-24_2025-08-19.csv")
     }
 
     @Test func aMissingPriceExportsEmptyNotZero() {

@@ -20,6 +20,10 @@ struct MainShell: View {
     @State private var pendingDeletes = PendingDeletionStore()
 
     @State private var showGroupSheet = false
+    /// Teams: the connection, so offline lot scans sync the moment it returns, and
+    /// the summary of how they landed.
+    @State private var connectivity = Connectivity()
+    @State private var syncSummary: LotClaims.SyncSummary?
     @State private var shareURL: URL?
 
     /// Mirrored into `AppState.testingUnlocked` below — see there for why.
@@ -41,7 +45,8 @@ struct MainShell: View {
             .tint(Caliper.cyan)
             .padding(.bottom, Caliper.hitMin
                      + (app.isSelecting ? 96 : 0)
-                     + (pendingDeletes.pending != nil ? Caliper.hitMin : 0))
+                     + (pendingDeletes.pending != nil ? Caliper.hitMin : 0)
+                     + (syncSummary != nil && pendingDeletes.pending == nil && !app.isSelecting ? Caliper.hitMin : 0))
 
             VStack(spacing: 0) {
                 // Selection mode does NOT replace the tab bar.
@@ -60,6 +65,9 @@ struct MainShell: View {
                 }
                 // Shares the selection bar's slot, and in practice never coexists
                 // with it: a bulk delete ends selection before enqueueing.
+                if let syncSummary, pendingDeletes.pending == nil, !app.isSelecting {
+                    LotSyncBar(summary: syncSummary).transition(.move(edge: .bottom))
+                }
                 if let pending = pendingDeletes.pending {
                     UndoBar(label: pending.label) {
                         withAnimation(Caliper.easeOut) { pendingDeletes.undo() }
@@ -79,6 +87,42 @@ struct MainShell: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { pendingDeletes.flush() }
+            if phase == .active { Task { await refreshTeam() } }
+        }
+        // Teams (all inert unless TeamsFeature.isAvailable). A lot is a shared
+        // group, so the team's lots become local groups here — and only when the
+        // lot list actually CHANGED after a successful load, never on a failure.
+        .onChange(of: app.team.team?.id) { _, id in
+            Task {
+                await loadLots()
+                // Live totals only while on a team; a user with none holds no socket.
+                if let id {
+                    await app.lots.startLive(teamId: id)
+                    connectivity.start()
+                } else {
+                    await app.lots.stopLive()
+                    connectivity.stop()
+                }
+            }
+        }
+        .onChange(of: app.lots.lots) { _, lots in
+            LotFolders.sync(lots, isLead: app.team.isLead, in: context)
+        }
+        // A lead released one of this phone's slabs: the card says so.
+        .onChange(of: app.lots.loadedAt) { _, loadedAt in
+            LotClaims.reconcile(app.lots.claimsByLot, lots: app.lots.lots, loadedAt: loadedAt,
+                                myUserId: app.team.myUserId, in: context)
+        }
+        // A claim or release moved the lot's totals; the dashboard re-reads them.
+        .onReceive(NotificationCenter.default.publisher(for: LotClaims.changed)) { _ in
+            Task { await loadLots() }
+        }
+        .onChange(of: connectivity.isOnline) { _, online in
+            if online { Task { await refreshTeam() } }
+        }
+        .onChange(of: app.team.isLead) { _, isLead in
+            // A promoted lead starts seeing drafts; a demoted one stops.
+            LotFolders.sync(app.lots.lots, isLead: isLead, in: context)
         }
         .fullScreenCover(isPresented: Binding(
             get: { !app.hasSeenOnboarding },
@@ -98,7 +142,27 @@ struct MainShell: View {
         // back to the source underneath, in AppState's own didSet.
         .onChange(of: testingUnlocked) { _, unlocked in app.testingUnlocked = unlocked }
         .task { app.testingUnlocked = testingUnlocked }
+        // Returns at once, with no request, unless TeamsFeature.isAvailable.
+        .task { await refreshTeam() }
         .preferredColorScheme(.dark) // Caliper is dark-only; cyan-on-black doesn't invert.
+    }
+
+    private func refreshTeam() async {
+        guard TeamsFeature.isAvailable else { return }
+        await app.team.load()
+        await loadLots()
+        // Anything that couldn't get an answer last time (no signal, no CL price),
+        // oldest first; if offline scans were among them, say how they landed.
+        if app.team.team != nil, let summary = await LotClaims.retryPending(in: context) {
+            withAnimation(Caliper.easeOut) { syncSummary = summary }
+            try? await Task.sleep(for: .seconds(6))
+            withAnimation(Caliper.easeOut) { if syncSummary == summary { syncSummary = nil } }
+        }
+    }
+
+    private func loadLots() async {
+        guard TeamsFeature.isAvailable, app.team.lastLoadOK else { return }
+        await app.lots.load(teamId: app.team.team?.id)
     }
 
     @ViewBuilder private var screen: some View {
@@ -126,8 +190,7 @@ struct MainShell: View {
     }
 
     private func removeFromGroup() {
-        for card in selected { card.folder = nil }
-        try? context.save()
+        CardFiling.unfile(selected, in: context)
         app.endSelecting()
     }
 

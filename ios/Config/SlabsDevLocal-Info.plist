@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  SlabsDev, DEBUG ONLY (wired in project.yml under SlabsDev → configs → Debug).
+
+  Lets a Debug build of the side-by-side dev app reach the LOCAL Supabase stack on
+  the Mac over the Wi-Fi network — plain http to a local address, which App
+  Transport Security refuses by default. NSAllowsLocalNetworking allows ONLY local
+  addresses (private IPs, .local names); every internet request is still ATS-bound.
+
+  Never applied to the Slab3 target, and never to a Release build, so TestFlight
+  and the App Store binary are untouched. See Backend.swift (SLABS_BACKEND).
+-->
+<plist version="1.0">
+<dict>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+</dict>
+</plist>

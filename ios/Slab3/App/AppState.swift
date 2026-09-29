@@ -112,6 +112,13 @@ final class AppState {
     var sort: SortOrder = .recent
     var search = ""
 
+    /// The user's team, if any. App-level because the lot selector on Scan, the
+    /// lot view on Cards and Settings all read it (plan §4b). Inert — no request,
+    /// no state — unless `TeamsFeature.isAvailable`.
+    let team = TeamStore()
+    /// The team's lots, their buy ranges and the range library. Same gate.
+    let lots = LotStore()
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         let source = PriceSource(rawValue: defaults.string(forKey: Keys.source) ?? "") ?? .cl

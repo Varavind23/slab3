@@ -768,9 +768,10 @@ appendix — not current guidance.
   credentials — gitignored, never commit or echo them. `spike/.state/` holds live
   sessions, likewise: `courtyard-session.json` is a LIVE Privy credential, not a fixture.
 - Commit messages record the test count (e.g. `83/83 tests` — the `worker/` vitest
-  total, currently 131 across 8 files; the iOS suite is a separate 219
-  across 23 files / 26 test structs; pgTAP is 19, the `plan(19)` in
-  supabase/tests/schema_test.sql). Re-count before writing the message rather than copying the
+  total, currently 131 across 8 files; the iOS suite is a separate 264
+  across 29 files / 32 test structs; pgTAP is 79 — `plan(19)` in
+  supabase/tests/schema_test.sql + `plan(49)` in teams_test.sql + `plan(11)` in lot_bands_test.sql; the concurrent claim
+  race is a separate script, supabase/tests/concurrency/claim_race.sh). Re-count before writing the message rather than copying the
   last commit's numbers — they have gone stale three times
   (`grep -cE '^\s*(it|test)\(' worker/test/*.test.ts`, `grep -c '@Test' ios/Tests/*.swift`);
   tests are expected green before committing.

@@ -13,7 +13,15 @@ enum CardDeletion {
     static func commit(_ ids: Set<UUID>, in context: ModelContext) {
         guard !ids.isEmpty else { return }
         let all = (try? context.fetch(FetchDescriptor<Card>())) ?? []
-        for card in all where ids.contains(card.localId) { context.delete(card) }
+        for card in all where ids.contains(card.localId) {
+            // A card in a team lot gives its slot back when the delete becomes real
+            // — after the undo window, never on the swipe (teams plan §6).
+            if card.holdsLotSlot, let lotId = card.lotClaimLotId {
+                let cert = card.certNumber, grader = card.grader
+                Task { await LotClaims.release(lotId: lotId, cert: cert, grader: grader) }
+            }
+            context.delete(card)
+        }
         try? context.save()
         // Hygiene: the max-buy memo is keyed by card id, and a store that is emptied
         // should not leave it holding every card it ever priced.

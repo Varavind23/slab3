@@ -18,6 +18,10 @@ struct CardsScreen: View {
     @Query(sort: \Folder.createdAt, order: .reverse) private var groups: [Folder]
 
     @State private var showFilters = false
+    /// Filtered to a team lot's group: its dashboard (RANGES) or its cards (CARDS).
+    /// Ranges first — the question on opening a lot is "how full is it?" (plan §8).
+    @State private var lotPane: LotPane = .ranges
+    enum LotPane: Hashable { case ranges, cards }
     @State private var route: UUID?
     /// Whose swipe tray is open. One at a time, so a row opening closes the last.
     @State private var openRowID: UUID?
@@ -69,6 +73,20 @@ struct CardsScreen: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: Caliper.rowGap) {
+                        if let lot = filteredLot {
+                            LotPaneSwitch(pane: $lotPane)
+                            if lotPane == .ranges {
+                                FilterPill(
+                                    label: filterLabel,
+                                    color: filterHue,
+                                    isActive: true,
+                                    open: { showFilters = true },
+                                    clear: { app.filter = .all }
+                                )
+                                LotDashboardView(lot: lot, lots: app.lots, team: app.team)
+                            }
+                        }
+                        if filteredLot == nil || lotPane == .cards {
                         SummaryBlock(
                             totalCents: summary.cents,
                             payoutCents: app.payoutCents(on: summary.cents),
@@ -86,6 +104,8 @@ struct CardsScreen: View {
                         )
                         controls
                         rows
+                        if let lot = filteredLot { teammateRows(lot) }
+                        }
                     }
                     .padding(.horizontal, Caliper.gutter)
                     .padding(.bottom, Caliper.space8)
@@ -121,6 +141,14 @@ struct CardsScreen: View {
                     if !held, dragSelect.isActive { endScrub() }
                 }
                 .onDisappear { endScrub() }
+                // Selection lives only on CARDS; the dashboard has no rows to select.
+                .onChange(of: lotPane) { _, pane in
+                    if pane == .ranges { app.endSelecting() }
+                }
+                // Opening a lot lands on its dashboard.
+                .onChange(of: filteredLot?.id) { _, id in
+                    if id != nil { lotPane = .ranges }
+                }
                 // One rendered row's index and frame give the whole stack's origin
                 // and pitch. It refreshes as the list scrolls, which is what lets a
                 // finger position become a row index without tracking scroll offset
@@ -311,8 +339,7 @@ struct CardsScreen: View {
                         }
                         if card.folder != nil {
                             Button("Remove from group") {
-                                card.folder = nil
-                                try? context.save()
+                                CardFiling.unfile([card], in: context)
                             }
                         }
                         Button("Delete card", role: .destructive) { delete(card) }
@@ -338,9 +365,7 @@ struct CardsScreen: View {
             filingCard = card
             return
         }
-        card.folder = target
-        target.markUsed()
-        try? context.save()
+        CardFiling.file([card], into: target, in: context)
     }
 
     /// The row leaves the list now; the delete becomes real when the undo window
@@ -598,6 +623,43 @@ struct CardsScreen: View {
     }
     private var filterTitle: String { activeGroup?.name ?? "Inventory" }
     private var filterHue: Color? { activeGroup?.hue }
+    /// Teammates' slabs in this lot — everything claimed into it that is not in
+    /// THIS phone's inventory (plan §7.5). Read-only: no swipe, no selection. A
+    /// lead can release one; a buyer just sees what the team has.
+    @ViewBuilder
+    private func teammateRows(_ lot: Lot) -> some View {
+        let mine = Set(allCards.map(\.certNumber))
+        let theirs = app.lots.claims(for: lot).filter { !mine.contains($0.cert) }
+        if !theirs.isEmpty {
+            Text("Teammates' buys · \(theirs.count)")
+                .caliperLabel(Caliper.textTertiary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, Caliper.space6)
+            ForEach(theirs) { claim in
+                TeammateClaimRow(claim: claim,
+                                 buyer: app.team.members.first { $0.userId == claim.buyerId }?.displayName ?? "A teammate",
+                                 isMine: claim.buyerId == app.team.myUserId)
+                    .contextMenu {
+                        if app.team.isLead {
+                            Button("Release from lot", role: .destructive) {
+                                Task {
+                                    guard let teamId = app.team.team?.id else { return }
+                                    _ = await app.lots.release(claim, teamId: teamId)
+                                }
+                            }
+                        }
+                    }
+            }
+        }
+    }
+
+    /// The lot behind the current filter, when the filter is a team lot's group.
+    private var filteredLot: Lot? {
+        guard case .group(let id) = app.filter,
+              let lotId = groups.first(where: { $0.localId == id })?.teamLotId else { return nil }
+        return app.lots.lots.first { $0.id == lotId }
+    }
+
     private var filterLabel: String {
         switch app.filter {
         case .all: return "All cards"

@@ -19,7 +19,7 @@ struct ExportScreen: View {
     var body: some View {
         VStack(spacing: 0) {
             ScreenHeader(
-                context: "\(filename) · \(scoped.count) rows",
+                context: "\(filename) · \(rowCount) rows",
                 title: "Export",
                 lens: $app.lens,
                 lenses: app.availableLenses
@@ -70,7 +70,9 @@ struct ExportScreen: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: Caliper.space2) {
                     HStack(spacing: Caliper.space4) {
-                        ForEach(app.enabledColumns) { column in
+                        // The columns the file will EMIT — same list the rows use, so a
+                        // gated or lot-only column never heads a column that isn't there.
+                        ForEach(columns) { column in
                             Text(column.header)
                                 .font(.code)
                                 .foregroundStyle(column.source?.hue ?? Caliper.textSecondary)
@@ -91,9 +93,10 @@ struct ExportScreen: View {
     }
 
     private var previewRows: [String] {
-        Array(CSVExport.rows(Array(scoped.prefix(4)), columns: app.exportColumns,
+        Array(CSVExport.rows(Array(scoped.prefix(4)), columns: columns,
                              payoutPercent: app.payoutPercent,
-                             maxBuyCents: MaxBuyValue.centsByCard(Array(scoped.prefix(4)))).dropFirst())
+                             maxBuyCents: MaxBuyValue.centsByCard(Array(scoped.prefix(4))),
+                             lot: lotExport).prefix(5).dropFirst())
     }
 
     // MARK: Columns
@@ -109,11 +112,11 @@ struct ExportScreen: View {
             // TARGET is the full 44 Caliper asks for — taller than the ink, so the
             // grid doesn't turn into fifteen buttons the size of Share CSV.
             FlowLayout(spacing: Caliper.space4) {
-                ForEach(CSVColumn.available(testingUnlocked: app.testingUnlocked)) { column in
+                ForEach(CSVColumn.available(testingUnlocked: app.testingUnlocked, lot: exportLot != nil)) { column in
                     // Numbered by what the file EMITS, not the raw saved order: a
                     // max-buy column the locked gate hides would otherwise leave a
                     // gap, and the badge would name a column position the CSV lacks.
-                    let index = app.exportColumns.firstIndex(of: column)
+                    let index = columns.firstIndex(of: column)
                     Button {
                         toggle(column)
                     } label: {
@@ -151,7 +154,7 @@ struct ExportScreen: View {
         VStack(spacing: Caliper.space5) {
             Hairline()
             HStack {
-                Text("\(scoped.count) cards").caliperLabel()
+                Text("\(rowCount) cards").caliperLabel()
                 Spacer()
                 Text(caliperMoney(cents: totalCents))
                     .font(.figureSmall)
@@ -160,13 +163,14 @@ struct ExportScreen: View {
             .padding(.horizontal, Caliper.gutter)
 
             CaliperButton(title: "Share CSV", variant: .primary, icon: "square.and.arrow.up", fullWidth: true,
-                          disabled: scoped.isEmpty || app.exportColumns.isEmpty) {
+                          disabled: rowCount == 0 || columns.isEmpty) {
                 shareURL = CSVExport.write(
                     scoped,
-                    columns: app.exportColumns,
+                    columns: columns,
                     scope: activeGroup?.name,
                     payoutPercent: app.payoutPercent,
-                    maxBuyCents: MaxBuyValue.centsByCard(scoped)
+                    maxBuyCents: MaxBuyValue.centsByCard(scoped),
+                    lot: lotExport
                 )
             }
             .padding(.horizontal, Caliper.gutter)
@@ -192,6 +196,47 @@ struct ExportScreen: View {
     }
     private var totalCents: Int {
         scoped.compactMap { $0.prices.best(preferring: app.activeSource) }.reduce(0, +)
+            // Teammates' slabs carry Card Ladder's value only.
+            + (lotExport?.teammates.compactMap(\.claim.priceCents).reduce(0, +) ?? 0)
+    }
+
+    // MARK: A team lot (teams plan §7.9)
+
+    /// The lot behind the current filter, when the filter is a team lot's group.
+    private var exportLot: Lot? {
+        guard let lotId = activeGroup?.teamLotId else { return nil }
+        return app.lots.lots.first { $0.id == lotId }
+    }
+
+    /// What the file emits: lot-only columns only for a lot.
+    private var columns: [CSVColumn] {
+        exportLot == nil ? app.exportColumns.filter { !$0.isLotOnly } : app.exportColumns
+    }
+
+    private var rowCount: Int { scoped.count + (lotExport?.teammates.count ?? 0) }
+
+    /// Buyer + bucket for this phone's cards; for a LEAD, the rest of the lot too.
+    private var lotExport: CSVExport.LotExport? {
+        guard let lot = exportLot else { return nil }
+        let bucketNames = Dictionary(app.lots.ranges(for: lot).map { ($0.id, $0.valueLabel) },
+                                     uniquingKeysWith: { a, _ in a })
+        var export = CSVExport.LotExport()
+        let me = app.team.me?.displayName
+        for card in scoped {
+            if let me { export.buyerByCard[card.localId] = me }
+            if let bucket = card.lotVerdict?.rangeId.flatMap({ bucketNames[$0] }) ?? card.lotVerdict?.rangeName {
+                export.bucketByCard[card.localId] = bucket
+            }
+        }
+        if app.team.isLead {
+            let mine = Set(allCards.map(\.certNumber))
+            export.teammates = app.lots.claims(for: lot).filter { !mine.contains($0.cert) }.map { claim in
+                .init(claim: claim,
+                      buyer: app.team.members.first { $0.userId == claim.buyerId }?.displayName ?? "",
+                      bucket: claim.rangeId.flatMap { bucketNames[$0] })
+            }
+        }
+        return export
     }
     private var activeGroup: Folder? {
         if case .group(let id) = app.filter { return groups.first { $0.localId == id } }

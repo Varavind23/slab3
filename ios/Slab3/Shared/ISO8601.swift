@@ -31,4 +31,7 @@ enum ISO8601 {
         guard let raw, !raw.isEmpty else { return nil }
         return withFraction.date(from: raw) ?? plain.date(from: raw)
     }
+
+    /// The other direction, for a timestamp we SEND (a lot claim's scanned_at).
+    static func string(_ date: Date) -> String { withFraction.string(from: date) }
 }

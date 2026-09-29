@@ -95,7 +95,13 @@ struct CardRow: View {
     // Line 3 — cert, group, grade.
     private var lineThree: some View {
         HStack(spacing: Caliper.space4) {
-            Text("#\(card.certNumber)").caliperMeta(Caliper.textTertiary)
+            // A card in (or turned away from) a team lot says where it stands in
+            // place of the cert — same line, so the row's height never moves.
+            if card.lotClaimState != nil {
+                LotVerdictLabel(card: card)
+            } else {
+                Text("#\(card.certNumber)").caliperMeta(Caliper.textTertiary)
+            }
             Spacer(minLength: Caliper.space3)
             if let folder = card.folder {
                 GroupTag(name: folder.name, color: folder.hue)

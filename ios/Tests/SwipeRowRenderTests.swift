@@ -39,7 +39,7 @@ struct SwipeRowRenderTests {
     @Test func rendersTheRevealedTray() throws {
         let url = try render(
             SwipeableCardRow.SwipeTray(
-                fileTitle: "philcgc",
+                fileTitle: "bulk cgc",
                 pastCommit: false,
                 expandedWidth: 357,
                 onFile: {}, onDelete: {}
@@ -57,7 +57,7 @@ struct SwipeRowRenderTests {
     @Test func rendersALongGroupName() throws {
         let url = try render(
             SwipeableCardRow.SwipeTray(
-                fileTitle: "Triumph 7/24 consignment",
+                fileTitle: "Weekend show 7/24 consignment",
                 pastCommit: false,
                 expandedWidth: 357,
                 onFile: {}, onDelete: {}
@@ -74,7 +74,7 @@ struct SwipeRowRenderTests {
     @Test func rendersThePastCommitState() throws {
         let url = try render(
             SwipeableCardRow.SwipeTray(
-                fileTitle: "philcgc",
+                fileTitle: "bulk cgc",
                 pastCommit: true,
                 expandedWidth: 357,
                 onFile: {}, onDelete: {}
