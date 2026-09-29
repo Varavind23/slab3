@@ -371,7 +371,8 @@ when the tab changed, so the tab bar looked dead (0.7). Re-tapping the active ta
 `AppState.tabReselected`, which pops Cards and Scan back to their root. Recent scans rows
 open the card; a row that failed to identify retries instead (owner decision, 0.7).
 **Four tabs:
-Scan, Cards, Export, Settings** — a hand-built `CaliperTabBar`, not a `TabView`,
+Scan, Cards, Export, Settings — five, with Teams in the centre, for someone on a team**
+(see Teams below) — a hand-built `CaliperTabBar`, not a `TabView`,
 because the selection bar rises *above* it without replacing it. App-level state
 lives in `App/AppState.swift`; two pieces of it are load-bearing and global:
 `activeSource` (which of CL/CY leads every row and drives the sort) and `filter`
@@ -711,6 +712,47 @@ that is not warranted to hide one panel. The unlock is
 `@AppStorage("caliper_testing_unlocked")`, read by exactly two screens, so like
 `caliper_auto_scan` it is deliberately NOT in `AppState`.
 
+### Teams — lots, buy ranges, claims (LOCAL stack only)
+
+A lead's team buys into shared LOTS: each a list of buckets (buy ranges: CL-value,
+grade, conf and year bounds, plus a card cap AND a dollar budget), at most 3 of one card
+at one grade per lot. **Nothing Teams-side is on the live project**: the migrations
+`supabase/migrations/20260925*` + `20260928000000_bucket_band.sql` are applied only to
+`supabase start`, and the whole feature is gated on `TeamsFeature.isAvailable`
+(= `Backend.isLocal`, a DEBUG build launched from a "… Local" scheme). A live push, and
+raising the team's Card Ladder budget, are owner decisions, not build steps. The owner's
+design decisions (D1–D30, 2026-09-28) live in
+`~/.claude/plans/pasted-content-id-4412-for-this-indexed-rabin.md`; `teams.md` is the
+original brief and is superseded where they differ.
+
+- **A lot is a shared group.** `LotFolders.sync` mirrors each visible lot as a local
+  `Folder` (`teamLotId`). It must only run once lots are LOADED for this team
+  (`TeamSync.shouldSyncGroups`): a lead's `isLead` flips before the lots arrive, and a
+  sync against the empty launch list detached every lot group (reproduced 2026-09-28).
+  `LotFolders.repair` heals phones that split; it runs after every sync, idempotently.
+- **The server decides every claim** (`claim_lot_scan`, security definer) from its own
+  caches: identity from `cl_resolve_cache`, CL Value + confidence from `price_cache`,
+  keyed on CL's `clSourceKey` — never `card_key`. The phone sends lot, cert, grader.
+- **`CardFiling` is the only writer of `card.folder`** — filing into a lot claims,
+  leaving releases. Claims and releases run ONE AT A TIME through `LotClaimQueue` (a bulk
+  file must not burst Card Ladder); releases are written to `PendingReleaseStore`
+  BEFORE they are sent, so no signal at a show cannot orphan a slot.
+- **Teams-first UI.** The Teams tab exists only on a team (`AppTab.visible`; non-team
+  users keep the exact 4-tab app, pinned by `TeamsTabTests`). Members land on it. The
+  Scan target (`AppState.scanTargetId`) IS the current lot (`CurrentLot`); lots are
+  chosen on Teams, never in the Scan sheet; `ScanTargetRule` resumes / drops a closed lot
+  / auto-picks a single open one. Teams leads with what can still be bought
+  (`LotRoom`: either cap fills a bucket). Lots are built on one screen
+  (`LotBuilderDraft` computes the ops; buckets carry client-chosen ids so a half-failed
+  save retries without duplicates). Bands are a label on the bucket (`band`), not rows.
+- **Money in lots is CL Value at claim**, labelled so. Team activity (lead-only — UI
+  gating; RLS lets members read all claims) counts confirmed + over-limit; room left
+  counts confirmed only. The lot buyer's reported figures are hidden (data kept).
+- UI is driven end to end in the Simulator with a throwaway XCUITest target built in a
+  scratchpad copy of `ios/` (never committed): `SLABS_BACKEND=local`, a local-only test
+  account, camera pre-granted (`xcrun simctl privacy … grant camera`), and the keychain
+  reset between accounts — a stale session silently loads nobody's team.
+
 ## Design
 
 **Caliper** is the current system. `design/caliper/README.md` is the source of
@@ -768,9 +810,9 @@ appendix — not current guidance.
   credentials — gitignored, never commit or echo them. `spike/.state/` holds live
   sessions, likewise: `courtyard-session.json` is a LIVE Privy credential, not a fixture.
 - Commit messages record the test count (e.g. `83/83 tests` — the `worker/` vitest
-  total, currently 131 across 8 files; the iOS suite is a separate 264
-  across 29 files / 32 test structs; pgTAP is 79 — `plan(19)` in
-  supabase/tests/schema_test.sql + `plan(49)` in teams_test.sql + `plan(11)` in lot_bands_test.sql; the concurrent claim
+  total, currently 131 across 8 files; the iOS suite is a separate 307
+  across 34 files / 38 test structs; pgTAP is 83 — `plan(19)` in
+  supabase/tests/schema_test.sql + `plan(49)` in teams_test.sql + `plan(15)` in lot_bands_test.sql; the concurrent claim
   race is a separate script, supabase/tests/concurrency/claim_race.sh). Re-count before writing the message rather than copying the
   last commit's numbers — they have gone stale three times
   (`grep -cE '^\s*(it|test)\(' worker/test/*.test.ts`, `grep -c '@Test' ios/Tests/*.swift`);

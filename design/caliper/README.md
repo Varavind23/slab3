@@ -273,7 +273,8 @@ implies. Sectioned rows, each section headed by a `label`:
 Treat these as a proposal, not a spec — they encode assumptions you may want to change.
 
 ### Tab bar
-Four columns, 1pt `line` top border, `bg` fill. Each: a 17pt glyph over a `meta`
+Four columns — five for someone on a team, Teams in the centre (Scan · Cards · Teams ·
+Export · Settings; teams-first, 2026-09-28) — 1pt `line` top border, `bg` fill. Each: a 17pt glyph over a `meta`
 uppercase label. Active is cyan with a heavier stroke; inactive `textSecondary`.
 Selection mode does **not** replace this bar.
 

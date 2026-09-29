@@ -42,7 +42,9 @@ targets:
   #
   # It talks to the SAME live Supabase as the shipped app (same anon key, same
   # RLS), so what it shows is what real users will see — only the app on the home
-  # screen is separate, not the backend.
+  # screen is separate, not the backend. EXCEPT a Debug build launched with
+  # SLABS_BACKEND=local (the "… Local" schemes), which talks to `supabase start` on
+  # the Mac and REMEMBERS that until a scheme sets SLABS_BACKEND=live (Backend.swift).
   SlabsDev:
     type: application
     platform: iOS
