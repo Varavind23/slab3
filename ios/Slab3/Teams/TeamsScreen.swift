@@ -428,6 +428,32 @@ struct LotCountdown: View {
     }
 }
 
+/// On Cards, filtered to a lot's group: how full the lot is, one tap from its
+/// full screen on Teams (D9 — the dashboard lives there, Cards is cards).
+struct LotLinkLine: View {
+    let lot: Lot
+    let room: LotRoom.Room
+    let open: () -> Void
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: Caliper.space4) {
+                TimelineView(.periodic(from: .now, by: 60)) { context in
+                    Text(LotText.shortLine(percent: room.percentUsed, deadline: lot.deadline, now: context.date))
+                        .caliperLabel(room.isNear ? Caliper.confMid : Caliper.textSecondary)
+                }
+                Spacer(minLength: Caliper.space4)
+                Text("Open lot").caliperLabel(Caliper.textTertiary)
+                Image(systemName: "chevron.right").font(.system(size: 9)).foregroundStyle(Caliper.textTertiary)
+            }
+            .frame(minHeight: Caliper.hitMin)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(CaliperPressStyle())
+        .accessibilityHint("Opens the lot on the Teams tab")
+    }
+}
+
 /// Another open lot: tap to make it the one being scanned into; the chevron opens it.
 struct LotRow: View {
     let lot: Lot

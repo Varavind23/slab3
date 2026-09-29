@@ -267,6 +267,9 @@ struct ClaimDetailScreen: View {
                         ClaimImage(claim: claim, local: cards.first {
                             $0.certNumber == claim.cert && $0.grader.rawValue == claim.grader
                         })
+                        // A slab's shape even with no picture — the placeholder has
+                        // no size of its own and would collapse to a line.
+                        .aspectRatio(0.72, contentMode: .fit)
                         .frame(maxWidth: 220)
                         .frame(maxWidth: .infinity)
                         VStack(spacing: 0) {

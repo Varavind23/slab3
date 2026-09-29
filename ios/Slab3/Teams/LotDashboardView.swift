@@ -299,33 +299,6 @@ struct UsageBar: View {
     }
 }
 
-/// RANGES | CARDS under a lot group's title (plan §8). Neutral active fill, never
-/// cyan: the header's lens toggle already owns the screen's accent.
-struct LotPaneSwitch: View {
-    @Binding var pane: CardsScreen.LotPane
-
-    var body: some View {
-        HStack(spacing: 0) {
-            segment("Ranges", .ranges)
-            segment("Cards", .cards)
-        }
-        .overlay(Rectangle().strokeBorder(Caliper.lineStrong, lineWidth: Caliper.borderWidth))
-        .clipShape(RoundedRectangle(cornerRadius: Caliper.radiusControl))
-    }
-
-    private func segment(_ title: String, _ value: CardsScreen.LotPane) -> some View {
-        Button { pane = value } label: {
-            Text(title)
-                .caliperLabel(pane == value ? Caliper.textPrimary : Caliper.textTertiary)
-                .frame(maxWidth: .infinity, minHeight: 36)
-                .background(pane == value ? Caliper.surface2 : Color.clear)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(CaliperPressStyle())
-        .accessibilityAddTraits(pane == value ? [.isSelected] : [])
-    }
-}
-
 /// Offline buys that landed after their card's three slots (or their bucket) were
 /// full (teams.md §5.1): recorded so nothing is lost, counted toward no cap until a
 /// lead decides. Leads only.
@@ -401,6 +374,10 @@ struct TeammateClaimRow: View {
                     Text(claim.priceCents.map { Money.dollars(Int64($0)) } ?? "\u{2014}")
                         .font(.price).foregroundStyle(Caliper.srcCL)
                     Text("CL").font(.mono(8, .medium)).foregroundStyle(Caliper.srcCL.opacity(0.75))
+                    // Both sources on every row (Caliper): this phone never priced a
+                    // teammate's slab on Courtyard, so CY is an honest em dash.
+                    Text("\u{2014}").font(.price).foregroundStyle(Caliper.srcCY)
+                    Text("CY").font(.mono(8, .medium)).foregroundStyle(Caliper.srcCY.opacity(0.75))
                 }
                 Text([claim.cardYear, claim.cardSet, claim.cardNumber.map { "#\($0)" }].compactMap { $0 }.joined(separator: " · "))
                     .caliperMeta().lineLimit(1)

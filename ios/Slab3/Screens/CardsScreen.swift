@@ -18,10 +18,6 @@ struct CardsScreen: View {
     @Query(sort: \Folder.createdAt, order: .reverse) private var groups: [Folder]
 
     @State private var showFilters = false
-    /// Filtered to a team lot's group: its dashboard (RANGES) or its cards (CARDS).
-    /// Ranges first — the question on opening a lot is "how full is it?" (plan §8).
-    @State private var lotPane: LotPane = .ranges
-    enum LotPane: Hashable { case ranges, cards }
     @State private var route: UUID?
     /// Whose swipe tray is open. One at a time, so a row opening closes the last.
     @State private var openRowID: UUID?
@@ -73,20 +69,6 @@ struct CardsScreen: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: Caliper.rowGap) {
-                        if let lot = filteredLot {
-                            LotPaneSwitch(pane: $lotPane)
-                            if lotPane == .ranges {
-                                FilterPill(
-                                    label: filterLabel,
-                                    color: filterHue,
-                                    isActive: true,
-                                    open: { showFilters = true },
-                                    clear: { app.filter = .all }
-                                )
-                                LotDashboardView(lot: lot, lots: app.lots, team: app.team)
-                            }
-                        }
-                        if filteredLot == nil || lotPane == .cards {
                         SummaryBlock(
                             totalCents: summary.cents,
                             payoutCents: app.payoutCents(on: summary.cents),
@@ -102,10 +84,19 @@ struct CardsScreen: View {
                             open: { showFilters = true },
                             clear: { app.filter = .all }
                         )
+                        // A lot's group is cards only; how full the lot is lives on
+                        // Teams (teams-first plan, D9) — one tap away.
+                        if let lot = filteredLot {
+                            LotLinkLine(lot: lot, room: LotRoom.lot(ranges: app.lots.ranges(for: lot),
+                                                                    usage: app.lots.usage)) {
+                                app.tabTouched = true
+                                app.tab = .teams
+                                app.teamsPath = [.lot(lot.id)]
+                            }
+                        }
                         controls
                         rows
                         if let lot = filteredLot { teammateRows(lot) }
-                        }
                     }
                     .padding(.horizontal, Caliper.gutter)
                     .padding(.bottom, Caliper.space8)
@@ -141,14 +132,6 @@ struct CardsScreen: View {
                     if !held, dragSelect.isActive { endScrub() }
                 }
                 .onDisappear { endScrub() }
-                // Selection lives only on CARDS; the dashboard has no rows to select.
-                .onChange(of: lotPane) { _, pane in
-                    if pane == .ranges { app.endSelecting() }
-                }
-                // Opening a lot lands on its dashboard.
-                .onChange(of: filteredLot?.id) { _, id in
-                    if id != nil { lotPane = .ranges }
-                }
                 // One rendered row's index and frame give the whole stack's origin
                 // and pitch. It refreshes as the list scrolls, which is what lets a
                 // finger position become a row index without tracking scroll offset

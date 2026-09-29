@@ -181,3 +181,17 @@ struct TeamsFirstLogicTests {
         #expect(receipt.map(\.id) == [second.id, first.id])
     }
 }
+
+/// Cards' one-line pointer at a lot (teams-first plan, D9).
+@MainActor
+struct LotLinkLineTests {
+    @Test func theLineSaysHowFullAndHowLong() {
+        let now = Date(timeIntervalSince1970: 0)
+        #expect(LotText.shortLine(percent: 29, deadline: now.addingTimeInterval(86_400 * 2 + 30), now: now)
+                == "Lot · 29% · 2D left")
+        #expect(LotText.shortLine(percent: 29, deadline: now.addingTimeInterval(5 * 3_600 + 12 * 60), now: now)
+                == "Lot · 29% · 05:12 left")
+        #expect(LotText.shortLine(percent: 100, deadline: now, now: now) == "Lot · 100% · Past deadline")
+        #expect(LotText.shortLine(percent: 0, deadline: nil, now: now) == "Lot · 0%")
+    }
+}

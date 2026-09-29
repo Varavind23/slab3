@@ -38,4 +38,21 @@ enum LotText {
         let day = cal.date(byAdding: .day, value: 3, to: now) ?? now
         return cal.date(bySettingHour: 17, minute: 0, second: 0, of: day) ?? day
     }
+
+    /// Cards' lot line: `Lot · 29% · 2D left`, `Lot · 29% · 05:12 left` inside the
+    /// last day, `Lot · 29% · Past deadline`, or just `Lot · 29%` with none.
+    static func shortLine(percent: Int, deadline: Date?, now: Date = Date()) -> String {
+        var parts = ["Lot", "\(percent)%"]
+        if let deadline {
+            let seconds = Int(deadline.timeIntervalSince(now))
+            if seconds <= 0 {
+                parts.append("Past deadline")
+            } else if seconds >= 86_400 {
+                parts.append("\(seconds / 86_400)D left")
+            } else {
+                parts.append(String(format: "%02d:%02d left", seconds / 3_600, seconds % 3_600 / 60))
+            }
+        }
+        return parts.joined(separator: " · ")
+    }
 }
