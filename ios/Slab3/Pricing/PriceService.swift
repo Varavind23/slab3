@@ -38,6 +38,23 @@ enum PriceService {
         var gotAnyPrice: Bool { courtyard == .ok || cardLadder == .ok }
     }
 
+    /// Clear refresh flags left set by a refresh the app never finished.
+    ///
+    /// `pricesLoading` is a STORED property, so an app killed mid-refresh (swiped
+    /// away during a scan) saved it `true` — and nothing ever set it back. That card's
+    /// "Refresh prices now" stayed disabled for good, and a team lot claim waiting on
+    /// it sat out its full 30 seconds (found in a Simulator run, 2026-09-28; the flag
+    /// has been stored since 2026-08-22). On a fresh launch nothing is refreshing, so
+    /// every `true` is stale. Returns how many it cleared.
+    @discardableResult
+    static func clearStaleLoading(in context: ModelContext) -> Int {
+        let stuck = FetchDescriptor<Card>(predicate: #Predicate { $0.pricesLoading })
+        let cards = (try? context.fetch(stuck)) ?? []
+        for card in cards { card.pricesLoading = false }
+        if !cards.isEmpty { try? context.save() }
+        return cards.count
+    }
+
     @discardableResult
     /// `includeCardLadder: false` leaves the Card Ladder column completely
     /// untouched. A bulk run sets it once the connection has dropped, so one

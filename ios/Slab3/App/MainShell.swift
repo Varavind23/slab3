@@ -169,6 +169,8 @@ struct MainShell: View {
         // back to the source underneath, in AppState's own didSet.
         .onChange(of: testingUnlocked) { _, unlocked in app.testingUnlocked = unlocked }
         .task { app.testingUnlocked = testingUnlocked }
+        // Before anything waits on a refresh flag: none is running on a fresh launch.
+        .task { PriceService.clearStaleLoading(in: context) }
         // Returns at once, with no request, unless TeamsFeature.isAvailable.
         .task { await refreshTeam() }
         .preferredColorScheme(.dark) // Caliper is dark-only; cyan-on-black doesn't invert.

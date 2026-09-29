@@ -120,3 +120,36 @@ struct LotGroupRepairTests {
         #expect(own.teamLotId == nil)
     }
 }
+
+/// A refresh the app never finished must not leave its flag set forever.
+@MainActor
+struct StaleLoadingTests {
+    @Test func aFreshLaunchClearsRefreshFlagsLeftByAKilledApp() throws {
+        let container = try ModelContainer(for: Card.self, Folder.self,
+                                           configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let context = ModelContext(container)
+        let stuck = Card(scan: CertScan(grader: .psa, certNumber: "66581638", raw: "66581638"))
+        let fine = Card(scan: CertScan(grader: .psa, certNumber: "1", raw: "1"))
+        context.insert(stuck); context.insert(fine)
+        stuck.pricesLoading = true
+        try context.save()
+        #expect(PriceService.clearStaleLoading(in: context) == 1)
+        #expect(!stuck.pricesLoading, "Refresh prices now works again")
+        #expect(PriceService.clearStaleLoading(in: context) == 0)
+    }
+}
+
+/// Offline at a show, a lot's group must stay usable (found in a Simulator run with
+/// the local API down, 2026-09-28: it vanished from the card's Group panel).
+@MainActor
+struct FileableGroupTests {
+    @Test func aLotGroupIsTrustedUntilLotsLoadAndThenOnlyWhileOpen() {
+        let lotId = UUID()
+        let lotGroup = Folder(name: "Weekend"); lotGroup.teamLotId = lotId
+        let plain = Folder(name: "consignment")
+        #expect(LotFolders.isFileable(lotGroup, openLots: [], lotsLoaded: false), "no signal yet: trusted")
+        #expect(LotFolders.isFileable(lotGroup, openLots: [lotId], lotsLoaded: true))
+        #expect(!LotFolders.isFileable(lotGroup, openLots: [], lotsLoaded: true), "loaded and closed: not offered")
+        #expect(LotFolders.isFileable(plain, openLots: [], lotsLoaded: true))
+    }
+}

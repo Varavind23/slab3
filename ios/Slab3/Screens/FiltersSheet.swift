@@ -101,7 +101,7 @@ struct GroupSheet: View {
     /// each card (CardFiling), so the 3-per-lot check runs on this path too.
     private var groups: [Folder] {
         let open = Set(app.lots.lots.filter { $0.status == .active }.map(\.id))
-        return allGroups.filter { g in g.teamLotId.map(open.contains) ?? true }
+        return allGroups.filter { LotFolders.isFileable($0, openLots: open, lotsLoaded: app.lots.loadedAt != nil) }
     }
 
     private var selected: [Card] { targets ?? cards.filter { app.selection.contains($0.localId) } }

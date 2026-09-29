@@ -221,8 +221,7 @@ struct ScanScreen: View {
             // Until this launch has LOADED the lots (a cold start at a show with no
             // signal) the local group is trusted: dropping it would send every
             // scan to plain inventory, unclaimed, when the claim would simply queue.
-            guard let lotId = group.teamLotId else { return true }
-            return app.lots.loadedAt == nil || openLots[lotId] != nil
+            return LotFolders.isFileable(group, openLots: Set(openLots.keys), lotsLoaded: app.lots.loadedAt != nil)
         }
     }
 

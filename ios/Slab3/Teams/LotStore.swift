@@ -498,6 +498,16 @@ enum LotFolders {
         isLead ? lots : lots.filter { $0.status != .draft }
     }
 
+    /// Can cards be filed into (or seen in) this group right now? A plain group,
+    /// always. A lot's group while its lot is open — and, until this launch has
+    /// LOADED the lots (no signal at a show), always: hiding it then would strand a
+    /// buyer who needs to take a card out of the lot, and send scans to plain
+    /// inventory unclaimed. The claim or release it triggers simply queues.
+    static func isFileable(_ group: Folder, openLots: Set<UUID>, lotsLoaded: Bool) -> Bool {
+        guard let lotId = group.teamLotId else { return true }
+        return !lotsLoaded || openLots.contains(lotId)
+    }
+
     /// The local group standing for a lot, if there is one yet.
     static func folder(for lotId: UUID, in context: ModelContext) -> Folder? {
         ((try? context.fetch(FetchDescriptor<Folder>())) ?? []).first { $0.teamLotId == lotId }

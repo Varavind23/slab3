@@ -254,9 +254,14 @@ struct CardDetailScreen: View {
 
     // MARK: Group
 
+    /// The card's own group is always listed — whatever state its lot is in, the
+    /// buyer must be able to take the card out of it.
     private var filableGroups: [Folder] {
         let open = Set(app.lots.lots.filter { $0.status == .active }.map(\.id))
-        return groups.filter { g in g.teamLotId.map(open.contains) ?? true }
+        return groups.filter { g in
+            g.localId == card.folder?.localId
+                || LotFolders.isFileable(g, openLots: open, lotsLoaded: app.lots.loadedAt != nil)
+        }
     }
 
     private var groupPanel: some View {
