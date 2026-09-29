@@ -14,9 +14,9 @@ begin;
 select plan(49);
 
 -- ── Seed (as postgres) ──────────────────────────────────────────────────────
--- 1 Pete (lead)  2 Justin (buyer)  3 Sam (buyer)  4 outsider  5 member with no CL
+-- 1 Lead  2 Justin (buyer)  3 Sam (buyer)  4 outsider  5 member with no CL
 insert into auth.users (id, email) values
-  ('10000000-0000-0000-0000-000000000001', 'pete@test.dev'),
+  ('10000000-0000-0000-0000-000000000001', 'lead@test.dev'),
   ('10000000-0000-0000-0000-000000000002', 'justin@test.dev'),
   ('10000000-0000-0000-0000-000000000003', 'sam@test.dev'),
   ('10000000-0000-0000-0000-000000000004', 'outsider@test.dev'),
@@ -55,11 +55,11 @@ insert into price_cache (source_key, source, metric, price_cents, fetch_status, 
 set local role authenticated;
 set local request.jwt.claims to '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
 select ok(
-  set_config('t.team', create_team('Pete''s buyers', 'Pete')->>'team_id', true) is not null,
+  set_config('t.team', create_team('Buyers', 'Lead')->>'team_id', true) is not null,
   'create_team returns a team id');
 select is((select role::text from team_members where user_id = auth.uid()), 'lead',
   'the creator is the lead');
-select throws_ok($$select create_team('Second', 'Pete')$$, 'P0001', 'already_in_team',
+select throws_ok($$select create_team('Second', 'Lead')$$, 'P0001', 'already_in_team',
   'a user is on one team at most');
 select matches((select join_code from teams where id = current_setting('t.team')::uuid),
   '^[A-HJ-NP-Z2-9]{6}$', 'join code is six symbols with no I or O');
@@ -92,7 +92,7 @@ select throws_ok(
 set local request.jwt.claims to '{"sub":"10000000-0000-0000-0000-000000000001","role":"authenticated"}';
 select lives_ok($$
   insert into lots (id, team_id, name, status) values
-    ('f1000000-0000-0000-0000-000000000001', current_setting('t.team')::uuid, 'Triumph 9/26', 'active'),
+    ('f1000000-0000-0000-0000-000000000001', current_setting('t.team')::uuid, 'Show 9/26', 'active'),
     ('f1000000-0000-0000-0000-000000000002', current_setting('t.team')::uuid, 'Tight budget', 'active'),
     ('f1000000-0000-0000-0000-000000000003', current_setting('t.team')::uuid, 'One card', 'active'),
     ('f1000000-0000-0000-0000-000000000004', current_setting('t.team')::uuid, 'Closed', 'closed');

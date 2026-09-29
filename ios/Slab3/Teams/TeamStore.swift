@@ -4,15 +4,17 @@ import Supabase
 
 /// Whether any team code may run in this build.
 ///
-/// WHY A GATE AT ALL. Teams' tables and RPCs exist only on the LOCAL stack until
-/// the owner says the migration goes live (2026-09-25: users are on the shipped
-/// app this weekend and it must keep working). A team request against the live
-/// project would 404 at best, and every signed-in user making one is exactly the
-/// "new network call on the shipped path" this must not add. So: no local backend
-/// → no Team UI, no request, no state. When the migration ships, this becomes a
-/// real answer (plan phase 1 → rollout) — it is ONE switch on purpose.
+/// Teams went live with 0.8 (owner, 2026-09-28): its migrations are on the live
+/// project and every build may ask "am I on a team?" — one small request at launch.
+/// Being ON a team is still what turns everything else on (AppTab.visible,
+/// TeamStore.team): someone on no team gets the four-tab app with no team UI.
+///
+/// `killSwitch` is the one way to turn the whole feature off in a build — tests use
+/// it to prove the off state stays inert (no request, no state), and it is where an
+/// emergency build would flip it. Before 0.8 this was `Backend.isLocal`.
 enum TeamsFeature {
-    static var isAvailable: Bool { Backend.isLocal }
+    nonisolated(unsafe) static var killSwitch = false
+    static var isAvailable: Bool { !killSwitch }
 }
 
 /// The signed-in user's team, if they are on one (one team per user — enforced by

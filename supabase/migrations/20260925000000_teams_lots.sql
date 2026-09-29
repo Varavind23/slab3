@@ -1,9 +1,9 @@
 -- Teams, lots and buy ranges (2026-09-25).
 -- Plan: ~/.claude/plans/read-teams-md-lets-first-harmonic-horizon.md (phase 0).
 --
--- WHY THIS EXISTS. A sourcer (Pete) runs a team of buyers working different card
+-- WHY THIS EXISTS. A sourcer (the lead) runs a team of buyers working different card
 -- shows on the same weekend, all buying into one allocation from a large buyer
--- (Triumph). Triumph takes at most 3 of one card at one grade per lot, and caps
+-- (the lot's buyer). That buyer takes at most 3 of one card at one grade per lot, and caps
 -- each price range in cards and dollars. Until now every phone was an island: no
 -- buyer could see what the others had bought, and nobody could see how full a
 -- range was until everyone reported back. These tables are the shared truth.
@@ -88,7 +88,7 @@ create table team_members (
 -- Buy ranges
 --
 -- Every bound is inclusive EXCEPT value_max_cents, which is exclusive: ranges
--- are written the way Triumph writes them — "$0–$100", "$100–$240" — and a $100
+-- are written the way the lot's buyer writes them — "$0–$100", "$100–$240" — and a $100
 -- card must land in exactly one of those, not trigger a "pick a range" prompt.
 -- A NULL bound means "no limit on that side". Grade is grader-agnostic (owner
 -- decision): a PSA 9 and a CGC 9 are both 9. numeric(3,1) holds the half grades.
@@ -154,7 +154,7 @@ create table lot_buy_ranges (
 );
 create index lot_buy_ranges_lot_idx on lot_buy_ranges (lot_id, sort_order);
 
--- What TRIUMPH says it has accepted, typed in by a lead. Append-only: the latest
+-- What the LOT'S BUYER says it has accepted, typed in by a lead. Append-only: the latest
 -- row is the current figure and the history is the audit trail. Deliberately a
 -- separate number from what the team has bought (lot_claims) — they diverge the
 -- moment a submission is rejected or a card is regraded, and the UI shows both,
@@ -646,7 +646,7 @@ begin
   if v_year is null then v_warn := array_append(v_warn, 'year_unknown'); end if;
   if v_conf is null then v_warn := array_append(v_warn, 'confidence_unknown'); end if;
   -- Near an edge: within 5% or $5, whichever is larger, of either value bound.
-  -- Triumph may bucket the card differently than CL Value does. A $0 floor is
+  -- The lot's buyer may bucket the card differently than CL Value does. A $0 floor is
   -- not an edge anything can fall off.
   if (v_range.value_min_cents > 0
       and v_price - v_range.value_min_cents < greatest(500, v_price / 20))

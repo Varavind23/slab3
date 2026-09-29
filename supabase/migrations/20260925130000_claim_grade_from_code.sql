@@ -223,7 +223,7 @@ begin
   if v_year is null then v_warn := array_append(v_warn, 'year_unknown'); end if;
   if v_conf is null then v_warn := array_append(v_warn, 'confidence_unknown'); end if;
   -- Near an edge: within 5% or $5, whichever is larger, of either value bound.
-  -- Triumph may bucket the card differently than CL Value does. A $0 floor is
+  -- The lot's buyer may bucket the card differently than CL Value does. A $0 floor is
   -- not an edge anything can fall off.
   if (v_range.value_min_cents > 0
       and v_price - v_range.value_min_cents < greatest(500, v_price / 20))

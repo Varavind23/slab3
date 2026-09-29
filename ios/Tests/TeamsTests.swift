@@ -2,24 +2,28 @@ import Testing
 import Foundation
 @testable import Slab3
 
-/// Teams phase 1: the pure parts of joining a team, and the gate that keeps the
-/// whole feature inert on every build that is not pointed at the local stack.
+/// Teams: the pure parts of joining a team, and the kill switch that turns the
+/// whole feature inert.
 ///
-/// The gate matters most. Teams' tables exist only locally until the owner ships
-/// the migration, and users are live on the shipped app — so a normal build must
-/// make no team request and hold no team state. The test host is launched without
-/// SLABS_BACKEND=local, which is exactly the shipped condition.
+/// Teams is on in every build since 0.8. The switch is what an emergency build
+/// would flip, so its off state must really be off: no team request, no team state.
+/// Serialized because the switch is global.
 @MainActor
+@Suite(.serialized)
 struct TeamsTests {
 
-    // MARK: The gate
+    // MARK: The kill switch
 
-    @Test func teamsAreOffWithoutTheLocalBackend() {
-        #expect(!Backend.isLocal, "the test host runs against the live config, like a shipped build")
+    @Test func teamsAreOnUnlessSwitchedOff() {
+        #expect(TeamsFeature.isAvailable, "0.8: Teams is live")
+        TeamsFeature.killSwitch = true
+        defer { TeamsFeature.killSwitch = false }
         #expect(!TeamsFeature.isAvailable)
     }
 
     @Test func loadIsInertWhenTeamsAreOff() async {
+        TeamsFeature.killSwitch = true
+        defer { TeamsFeature.killSwitch = false }
         let store = TeamStore()
         await store.load()
         #expect(store.team == nil)
@@ -29,6 +33,8 @@ struct TeamsTests {
     }
 
     @Test func actionsRefuseWithoutAskingTheServer() async {
+        TeamsFeature.killSwitch = true
+        defer { TeamsFeature.killSwitch = false }
         let store = TeamStore()
         let failure = await store.join(code: "K7Q2MX", displayName: "Justin")
         #expect(failure == TeamError.copy(for: "unavailable"))
