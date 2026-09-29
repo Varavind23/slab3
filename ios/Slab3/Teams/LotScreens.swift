@@ -1,75 +1,5 @@
 import SwiftUI
 
-/// Settings → Team → Lots. Every lot the team has, grouped by status. A lead
-/// starts one here; it opens as a DRAFT only they can see, and becomes a group on
-/// every teammate's phone when they open it (LotFolders.sync).
-///
-/// Phase 2 puts lot setup here rather than in the group sheet (plan §7.8 said the
-/// group sheet): filing into a lot group must CLAIM, and claiming lands in phase
-/// 3–4. Until then lot groups are read-only destinations everywhere cards get filed.
-struct LotListSheet: View {
-    let team: TeamStore
-    let lots: LotStore
-    @Environment(\.dismiss) private var dismiss
-    @State private var opened: OpenLot?
-
-    enum OpenLot: Identifiable {
-        case new, existing(UUID)
-        var id: String { switch self { case .new: "new"; case .existing(let id): id.uuidString } }
-    }
-
-    var body: some View {
-        let visible = lots.visibleLots(isLead: team.isLead)
-        CaliperSheet(title: "Lots · \(visible.count)") {
-            Button("Done") { dismiss() }
-                .font(.mono(10, .medium))
-                .foregroundStyle(Caliper.textSecondary)
-        } content: {
-            VStack(spacing: 0) {
-                ForEach([LotStatus.active, .draft, .closed], id: \.self) { status in
-                    let group = visible.filter { $0.status == status }
-                    if !group.isEmpty {
-                        SectionLabel(text: LotText.statusTitle(status))
-                        ForEach(group) { lot in
-                            SheetRow(label: lot.name,
-                                     sub: LotText.summary(lot, rangeCount: lots.ranges(for: lot).count),
-                                     trailing: "›") { opened = .existing(lot.id) }
-                            Hairline()
-                        }
-                    }
-                }
-                if visible.isEmpty {
-                    Text(team.isLead
-                         ? "No lots yet. A lot is a group your whole team buys into, with its own buy ranges."
-                         : "No open lots. When your lead opens one, it shows up here and as a group.")
-                        .font(.calBody)
-                        .foregroundStyle(Caliper.textSecondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, Caliper.gutter)
-                        .padding(.vertical, Caliper.space6)
-                }
-            }
-        } confirm: {
-            if team.isLead {
-                CaliperButton(title: "New lot", variant: .primary, fullWidth: true) { opened = .new }
-            }
-        }
-        .sheet(item: $opened) { target in
-            switch target {
-            case .new: LotSetupSheet(team: team, lots: lots, lotId: nil)
-            case .existing(let id):
-                // A draft is still being built, so it opens into setup; a lot that
-                // is open or closed opens on its dashboard, with Edit for a lead.
-                if lots.lots.first(where: { $0.id == id })?.status == .draft {
-                    LotSetupSheet(team: team, lots: lots, lotId: id)
-                } else {
-                    LotDetailSheet(team: team, lots: lots, lotId: id)
-                }
-            }
-        }
-    }
-}
-
 /// Set up one lot: name, deadline, and its buy ranges (plan §7.8). New lots start
 /// as drafts; "Open lot" is the moment buyers see it. A buyer opening this sees the
 /// same screen read-only — the ranges and their notes are what they buy against.
@@ -609,37 +539,5 @@ struct BandCategorySheet: View {
         } message: {
             Text("Its buckets stay in the lot, each on its own.")
         }
-    }
-}
-
-/// A lot's dashboard as a sheet — from Settings → Team → Lots. The same view Cards
-/// shows under RANGES when filtered to the lot's group.
-struct LotDetailSheet: View {
-    let team: TeamStore
-    let lots: LotStore
-    let lotId: UUID
-    @Environment(\.dismiss) private var dismiss
-    @State private var editing = false
-
-    private var lot: Lot? { lots.lots.first { $0.id == lotId } }
-
-    var body: some View {
-        CaliperSheet(title: lot?.name ?? "Lot") {
-            Button("Done") { dismiss() }
-                .font(.mono(10, .medium))
-                .foregroundStyle(Caliper.textSecondary)
-        } content: {
-            if let lot {
-                LotDashboardView(lot: lot, lots: lots, team: team)
-                    .padding(.horizontal, Caliper.gutter)
-                    .padding(.top, Caliper.space6)
-            }
-        } confirm: {
-            if team.isLead {
-                CaliperButton(title: "Edit lot", variant: .outline, fullWidth: true) { editing = true }
-            }
-        }
-        .task { await lots.load(teamId: team.team?.id) }
-        .sheet(isPresented: $editing) { LotSetupSheet(team: team, lots: lots, lotId: lotId) }
     }
 }

@@ -33,9 +33,21 @@ struct MainShell: View {
         ZStack(alignment: .bottom) {
             Caliper.bg.ignoresSafeArea()
 
-            NavigationStack {
-                screen
-                    .toolbar(.hidden, for: .navigationBar)
+            Group {
+                if app.tab == .teams {
+                    // The one tab with a path: Cards' lot line and the Scan bar send
+                    // the user INTO it, and Team activity drills three levels deep.
+                    NavigationStack(path: $app.teamsPath) {
+                        TeamsScreen(app: app)
+                            .toolbar(.hidden, for: .navigationBar)
+                            .navigationDestination(for: TeamsRoute.self) { TeamsDestination(app: app, route: $0) }
+                    }
+                } else {
+                    NavigationStack {
+                        screen
+                            .toolbar(.hidden, for: .navigationBar)
+                    }
+                }
             }
             // One stack PER TAB. All four used to share one, so a card's detail
             // screen stayed pushed on top when the tab changed underneath it — the
@@ -74,8 +86,17 @@ struct MainShell: View {
                     }
                     .transition(.move(edge: .bottom))
                 }
-                CaliperTabBar(tab: $app.tab, onChange: { app.endSelecting() },
-                              onReselect: { app.tabReselected += 1 })
+                CaliperTabBar(tab: $app.tab, tabs: app.visibleTabs,
+                              onChange: {
+                                  app.endSelecting()
+                                  app.tabTouched = true
+                                  // Picking Teams from the bar starts it at its root.
+                                  app.teamsPath = []
+                              },
+                              onReselect: {
+                                  if app.tab == .teams { app.teamsPath = [] }
+                                  app.tabReselected += 1
+                              })
             }
         }
         // Every path that has to make a pending delete real. Leaving Cards is what
@@ -119,6 +140,11 @@ struct MainShell: View {
         .onChange(of: connectivity.isOnline) { _, online in
             if online { Task { await refreshTeam() } }
         }
+        // Left the team (or it was deleted) while looking at Teams: back to Scan,
+        // never a tab that is no longer in the bar.
+        .onChange(of: app.visibleTabs) { _, tabs in
+            if !tabs.contains(app.tab) { app.tab = .scan; app.teamsPath = [] }
+        }
         .onChange(of: app.team.isLead) { _, _ in
             // A promoted lead starts seeing drafts; a demoted one stops. On a cold
             // launch this flips BEFORE the lots arrive — syncLotGroups' gate is what
@@ -151,6 +177,15 @@ struct MainShell: View {
     private func refreshTeam() async {
         guard TeamsFeature.isAvailable else { return }
         await app.team.load()
+        if app.team.lastLoadOK {
+            let wasOnTeam = app.onTeamHint
+            let onTeam = app.team.team != nil
+            app.onTeamHint = onTeam
+            // Just found to be on a team (the first launch after joining on another
+            // device, say): land on Teams — once, and only if the user has not
+            // started doing something else (D1). Never moves anyone mid-use.
+            if onTeam, !wasOnTeam, !app.tabTouched, app.tab == .scan { app.tab = .teams }
+        }
         await loadLots()
         // Anything that couldn't get an answer last time (no signal, no CL price),
         // oldest first; if offline scans were among them, say how they landed.
@@ -196,6 +231,7 @@ struct MainShell: View {
         switch app.tab {
         case .scan: ScanScreen(app: app, pendingDeletes: pendingDeletes)
         case .cards: CardsScreen(app: app, pendingDeletes: pendingDeletes)
+        case .teams: TeamsScreen(app: app)   // drawn by its own stack in body
         case .export: ExportScreen(app: app, pendingDeletes: pendingDeletes)
         case .settings: SettingsScreen(app: app, auth: auth)
         }
@@ -253,10 +289,11 @@ struct MainShell: View {
     }
 }
 
-/// Four columns, 1pt line top border, bg fill. Active is cyan with a heavier
-/// stroke; inactive is textSecondary.
+/// Four columns — five on a team — 1pt line top border, bg fill. Active is cyan
+/// with a heavier stroke; inactive is textSecondary.
 struct CaliperTabBar: View {
     @Binding var tab: AppTab
+    var tabs: [AppTab] = AppTab.visible(teamsAvailable: false, onTeam: false)
     var onChange: () -> Void = {}
     /// The active tab was tapped again.
     var onReselect: () -> Void = {}
@@ -265,7 +302,7 @@ struct CaliperTabBar: View {
         VStack(spacing: 0) {
             Hairline()
             HStack(spacing: 0) {
-                ForEach(AppTab.allCases) { destination in
+                ForEach(tabs) { destination in
                     let active = destination == tab
                     Button {
                         if destination != tab { onChange() } else { onReselect() }
@@ -275,6 +312,8 @@ struct CaliperTabBar: View {
                             Image(systemName: destination.glyph)
                                 .font(.system(size: 17, weight: active ? .semibold : .regular))
                             Text(destination.title).caliperLabel(active ? Caliper.cyan : Caliper.textSecondary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.85)
                         }
                         .foregroundStyle(active ? Caliper.cyan : Caliper.textSecondary)
                         .frame(maxWidth: .infinity, minHeight: Caliper.hitMin)

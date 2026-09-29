@@ -512,6 +512,11 @@ enum LotFolders {
         isLead ? lots : lots.filter { $0.status != .draft }
     }
 
+    /// The local group standing for a lot, if there is one yet.
+    static func folder(for lotId: UUID, in context: ModelContext) -> Folder? {
+        ((try? context.fetch(FetchDescriptor<Folder>())) ?? []).first { $0.teamLotId == lotId }
+    }
+
     /// Returns the `localId`s of groups that STOPPED being lot groups (detached or
     /// removed), so a caller holding one — the Scan tab's target — can let go of it
     /// rather than keep filing into what is now a plain group.

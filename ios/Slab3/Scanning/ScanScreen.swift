@@ -45,7 +45,18 @@ struct ScanScreen: View {
         VStack(spacing: 0) {
             header
             ScanFilingBar(target: scanTarget, lot: scanLot, filedToday: filedToday,
-                          needsCardLadder: scanLot != nil && !cardLadderConnected) { showTargetSheet = true }
+                          needsCardLadder: scanLot != nil && !cardLadderConnected,
+                          tap: {
+                              // A lot's bar opens the lot on Teams — lots are chosen there.
+                              if scanLot != nil {
+                                  app.tabTouched = true
+                                  app.teamsPath = []
+                                  app.tab = .teams
+                              } else {
+                                  showTargetSheet = true
+                              }
+                          },
+                          swap: { showTargetSheet = true })
                 .padding(.horizontal, Caliper.gutter)
                 .padding(.bottom, Caliper.space4)
             viewport
@@ -65,7 +76,12 @@ struct ScanScreen: View {
         // has to reach it on every change — not only when the camera starts.
         .onChange(of: autoScan) { _, on in controller.autoScan = on }
         .sheet(isPresented: $showTargetSheet) {
-            ScanTargetSheet(targetId: $app.scanTargetId, explicitNone: $app.scanTargetExplicitNone, openLots: openLots).presentationDetents([.large])
+            ScanTargetSheet(targetId: $app.scanTargetId, explicitNone: $app.scanTargetExplicitNone,
+                            openTeams: app.visibleTabs.contains(.teams) ? {
+                                showTargetSheet = false
+                                app.tabTouched = true
+                                app.tab = .teams
+                            } : nil).presentationDetents([.large])
         }
         .sheet(isPresented: $showManualEntry) {
             ManualEntrySheet { scan in add(scan, photo: nil) }
@@ -340,6 +356,7 @@ struct ScanScreen: View {
             CardFiling.file([card], into: scanTarget, in: context)
         }
         withAnimation(Caliper.easeOut) { recentCardIDs.insert(card.localId, at: 0) }
+        app.tabTouched = true   // scanning is using the app: never pull them away to Teams
         // A single tap, not the three-tap .success pattern — at burst cadence
         // that turns into mush.
         captureHaptic.impactOccurred()

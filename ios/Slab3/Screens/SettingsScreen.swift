@@ -21,12 +21,6 @@ struct SettingsScreen: View {
     @State private var showTesting = false
     @AppStorage(TestingGate.unlockedKey) private var testingUnlocked = false
     @State private var showTeamOnboard = false
-    @State private var showMembers = false
-    @State private var showDisplayName = false
-    @State private var confirmRotate = false
-    @State private var teamError: String?
-    @State private var showLibrary = false
-    @State private var showLots = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -90,6 +84,8 @@ struct SettingsScreen: View {
                     }
                     Hairline()
                     Button {
+                        // The next person to sign in on this phone may be on no team.
+                        app.onTeamHint = false
                         Task { await auth.signOut() }
                     } label: {
                         HStack {
@@ -117,26 +113,11 @@ struct SettingsScreen: View {
         .sheet(isPresented: $showConnect) { CardLadderConnectView() }
         .sheet(isPresented: $showPayout) { PayoutSheet(app: app).presentationDetents([.height(260)]) }
         .sheet(isPresented: $showTesting) { TestingGateSheet() }
-        .sheet(isPresented: $showTeamOnboard) { TeamOnboardSheet(team: app.team).presentationDetents([.large]) }
-        .sheet(isPresented: $showMembers) { TeamMembersSheet(team: app.team).presentationDetents([.large]) }
-        .sheet(isPresented: $showDisplayName) {
-            TeamDisplayNameSheet(team: app.team).presentationDetents([.height(260)])
-        }
-        .sheet(isPresented: $showLibrary) {
-            BuyRangeLibrarySheet(team: app.team, lots: app.lots).presentationDetents([.large])
-        }
-        .sheet(isPresented: $showLots) {
-            LotListSheet(team: app.team, lots: app.lots).presentationDetents([.large])
-        }
-        .confirmationDialog("Rotate the team code?", isPresented: $confirmRotate, titleVisibility: .visible) {
-            Button("Rotate code") { Task { teamError = await app.team.rotateCode() } }
-        } message: {
-            Text("The old code stops working. Everyone already on the team stays on it.")
-        }
-        .alert("Team", isPresented: Binding(get: { teamError != nil }, set: { if !$0 { teamError = nil } })) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(teamError ?? "")
+        .sheet(isPresented: $showTeamOnboard) {
+            // Joined or created: straight to the new Teams tab (D28), where the
+            // one-time intro card explains the flow.
+            TeamOnboardSheet(team: app.team) { app.tabTouched = true; app.tab = .teams }
+                .presentationDetents([.large])
         }
         .fullScreenCover(isPresented: $showOnboarding) {
             OnboardingScreen { showOnboarding = false }
@@ -159,41 +140,20 @@ struct SettingsScreen: View {
         return last.formatted(.dateTime.month(.abbreviated).day().hour().minute())
     }
 
-    /// Settings → Team (plan §7.7). Present only when TeamsFeature.isAvailable; a
-    /// user who is on no team sees one row and nothing else. Nothing renders until
-    /// the first load answers, so a member never sees "Join or create" flash past.
+    /// Settings → Team. Everything about the team lives on the Teams tab now
+    /// (teams-first plan); Settings keeps the door in — "Join or create a team" —
+    /// and, for a member, one row that goes there. Present only when
+    /// TeamsFeature.isAvailable; nothing renders until the first load answers, so a
+    /// member never sees "Join or create" flash past.
     @ViewBuilder
     private var teamSection: some View {
-        let store = app.team
-        if let team = store.team {
+        if let team = app.team.team {
             SectionLabel(text: "Team")
-            // A team name is rendered verbatim, like a group's — never upper-cased
-            // into a label.
-            row("Team", value: team.name, verbatim: true)
-            Hairline()
-            row("Members", value: "\(store.members.count)") { showMembers = true }
-            Hairline()
-            // Buyers see the code too (they can already read it under RLS, and
-            // passing it on at the table is how a team grows); only a lead rotates it.
-            row("Team code", value: JoinCode.display(team.joinCode),
-                tap: store.isLead ? { confirmRotate = true } : nil)
-            Hairline()
-            row("Your name", value: store.me?.displayName ?? "\u{2014}", verbatim: true) { showDisplayName = true }
-            Hairline()
-            row("Lots", value: lotsValue) { showLots = true }
-            Hairline()
-            // Replaces Payout's "Buy ranges · Not available" placeholder for team
-            // members: a buy range belongs to the team, not to a payout.
-            row("Buy ranges", value: "\(app.lots.library.count) saved") { showLibrary = true }
-        } else if store.loaded {
+            row("Team", value: team.name, verbatim: true) { app.tabTouched = true; app.tab = .teams }
+        } else if app.team.loaded {
             SectionLabel(text: "Team")
             row("Join or create a team", value: "") { showTeamOnboard = true }
         }
-    }
-
-    private var lotsValue: String {
-        let open = app.lots.lots.filter { $0.status == .active }.count
-        return open == 1 ? "1 open" : "\(open) open"
     }
 
     @ViewBuilder

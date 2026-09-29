@@ -9,6 +9,8 @@ import SwiftUI
 /// team is the rarer path (one lead, many buyers), so joining is what it opens on.
 struct TeamOnboardSheet: View {
     let team: TeamStore
+    /// Called once the user is on the team — Settings takes them to Teams.
+    var onDone: () -> Void = {}
     @Environment(\.dismiss) private var dismiss
 
     enum Mode { case join, create }
@@ -29,7 +31,7 @@ struct TeamOnboardSheet: View {
                     SectionLabel(text: "Team code")
                     field("K7Q-2MX", text: $code, mono: true)
                         .textInputAutocapitalization(.characters)
-                    Text("Your lead finds it in Settings → Team.")
+                    Text("Your lead finds it on the Teams tab.")
                         .caliperMeta()
                         .padding(.horizontal, Caliper.gutter)
                         .padding(.top, Caliper.space4)
@@ -87,7 +89,7 @@ struct TeamOnboardSheet: View {
         case .create: await team.create(name: teamName.trimmingCharacters(in: .whitespacesAndNewlines),
                                         displayName: trimmedName)
         }
-        if let failure { error = failure } else { dismiss() }
+        if let failure { error = failure } else { dismiss(); onDone() }
     }
 
     private func field(_ prompt: String, text: Binding<String>, mono: Bool = false) -> some View {

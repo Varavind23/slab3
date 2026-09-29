@@ -87,6 +87,12 @@ final class TeamStore {
         loaded = true
     }
 
+    /// Fill the store without a server — render tests and previews only.
+    func seedForPreview(team: Team?, members: [Member], myUserId: UUID?) {
+        self.team = team; self.members = members; self.myUserId = myUserId
+        loaded = true; lastLoadOK = true
+    }
+
     // MARK: Actions — each returns user-facing copy on failure, nil on success.
 
     func create(name: String, displayName: String) async -> String? {

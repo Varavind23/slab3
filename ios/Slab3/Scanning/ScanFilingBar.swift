@@ -21,8 +21,33 @@ struct ScanFilingBar: View {
     /// claimed, and the bar must say so rather than let scans quietly go nowhere.
     var needsCardLadder = false
     let tap: () -> Void
+    /// Filing into a lot: the ⇄ at the bar's end opens the plain-group picker, the
+    /// way out of a lot without closing it (D29). Tapping the rest goes to Teams.
+    var swap: (() -> Void)? = nil
 
     var body: some View {
+        HStack(spacing: 0) {
+            main
+            if lot != nil, let swap {
+                Rectangle().fill(Caliper.lineStrong).frame(width: Caliper.borderWidth, height: Caliper.hitMin)
+                Button(action: swap) {
+                    Image(systemName: "arrow.left.arrow.right")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Caliper.textSecondary)
+                        .frame(width: Caliper.hitMin, height: Caliper.hitMin)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(CaliperPressStyle())
+                .accessibilityLabel("Stop filing into \(target?.name ?? "this lot")")
+                .accessibilityHint("Choose None or a group instead")
+            }
+        }
+        .frame(height: Caliper.hitMin)
+        .overlay(Rectangle().strokeBorder(needsCardLadder ? Caliper.confMid.opacity(0.6) : Caliper.lineStrong,
+                                          lineWidth: Caliper.borderWidth))
+    }
+
+    private var main: some View {
         Button(action: tap) {
             HStack(spacing: Caliper.space4) {
                 if let target, needsCardLadder {
@@ -66,13 +91,11 @@ struct ScanFilingBar: View {
             }
             .padding(.horizontal, Caliper.rowPad)
             .frame(height: Caliper.hitMin)
-            .overlay(Rectangle().strokeBorder(needsCardLadder ? Caliper.confMid.opacity(0.6) : Caliper.lineStrong,
-                                          lineWidth: Caliper.borderWidth))
             .contentShape(Rectangle())
         }
         .buttonStyle(CaliperPressStyle())
         .accessibilityLabel(target.map { "Filing scans into \($0.name)" } ?? "Not filing scans into a group")
-        .accessibilityHint("Choose the group new scans go into")
+        .accessibilityHint(lot != nil ? "Opens the lot on the Teams tab" : "Choose the group new scans go into")
     }
 }
 
@@ -82,17 +105,14 @@ struct ScanFilingBar: View {
 struct ScanTargetSheet: View {
     @Binding var targetId: String
     @Binding var explicitNone: Bool
-    /// Open team lots, by id. Their groups list FIRST — a buyer at a show is
-    /// almost always picking the lot — each tagged and with its deadline.
-    var openLots: [UUID: Lot] = [:]
+    /// On a team: a row that sends the user to Teams, where lots are chosen
+    /// (teams-first plan, D8). Lots are never picked here.
+    var openTeams: (() -> Void)? = nil
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \Folder.createdAt, order: .reverse) private var allGroups: [Folder]
     @State private var newName = ""
 
-    private var lotGroups: [Folder] {
-        allGroups.filter { g in g.teamLotId.map { openLots[$0] != nil } ?? false }
-    }
     private var groups: [Folder] { allGroups.filter { !$0.archived && !$0.isTeamLot } }
     private var trimmed: String { newName.trimmingCharacters(in: .whitespaces) }
 
@@ -106,19 +126,11 @@ struct ScanTargetSheet: View {
                 choose(nil)
             }
             Hairline()
-            if !lotGroups.isEmpty {
-                SectionLabel(text: "Team lots")
-                ForEach(lotGroups) { group in
-                    let lot = group.teamLotId.flatMap { openLots[$0] }
-                    SheetRow(
-                        label: group.name,
-                        sub: lot?.deadline.map { "Due " + LotText.deadline($0) } ?? "Open · no deadline",
-                        trailing: "Lot",
-                        active: targetId == group.localId.uuidString,
-                        leading: { Circle().fill(group.hue).frame(width: 8, height: 8) }
-                    ) { choose(group) }
-                    Hairline()
+            if let openTeams {
+                SheetRow(label: "A team lot", sub: "Lots are picked on the Teams tab", trailing: "Teams ›") {
+                    openTeams()
                 }
+                Hairline()
                 SectionLabel(text: "Groups")
             }
             ForEach(groups) { group in

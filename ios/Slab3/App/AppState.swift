@@ -117,6 +117,27 @@ final class AppState {
     var scanTargetUUID: UUID? { UUID(uuidString: scanTargetId) }
 
     var tab: AppTab = .scan
+    /// The Teams tab's pushed screens (lot, builder, activity…). The one tab with a
+    /// path, because other screens send the user INTO it (Cards' lot line, the Scan
+    /// bar) and Team activity drills three levels deep.
+    var teamsPath: [TeamsRoute] = []
+    /// The user has picked a tab this session — after that the app never moves
+    /// them on its own (LaunchLanding).
+    var tabTouched = false
+    /// Was this device on a team at the last successful load? Lets a team member's
+    /// launch show the Teams tab — and land on it — from the first frame, instead of
+    /// four tabs flicking to five once the team loads. Cleared on sign-out.
+    var onTeamHint: Bool {
+        didSet { defaults.set(onTeamHint, forKey: Keys.teamHint) }
+    }
+
+    /// The tab bar's tabs. Teams only for someone on a team (teams-first plan, D3):
+    /// everyone else keeps exactly the four-tab app. Before the first answer — or
+    /// after a failed load at a show with no signal — the last known answer holds.
+    var visibleTabs: [AppTab] {
+        let onTeam = team.team != nil || (!team.lastLoadOK && onTeamHint)
+        return AppTab.visible(teamsAvailable: TeamsFeature.isAvailable, onTeam: onTeam)
+    }
     /// Bumped when the tab ALREADY showing is tapped again. Screens that push a
     /// detail watch it and pop back to their list — the standard iOS reselect.
     var tabReselected = 0
@@ -139,6 +160,7 @@ final class AppState {
         activeSource = source
         hasSeenOnboarding = defaults.bool(forKey: Keys.onboarded)
         scanTargetId = defaults.string(forKey: Keys.scanGroup) ?? ""
+        onTeamHint = defaults.bool(forKey: Keys.teamHint)
         scanTargetExplicitNone = defaults.bool(forKey: Keys.scanGroupNone)
         let saved = (defaults.array(forKey: Keys.columns) as? [String]) ?? []
         let restored = saved.compactMap(CSVColumn.init(rawValue:))
@@ -159,6 +181,8 @@ final class AppState {
         } else {
             storedLens = savedLens
         }
+        // A team member lands on Teams (D1); everyone else on Scan, as always.
+        if TeamsFeature.isAvailable && onTeamHint { tab = .teams }
     }
 
     // MARK: Selection
@@ -184,19 +208,22 @@ final class AppState {
         static let columns = "caliper_csv_columns"
         static let payout = "caliper_payout_percent"
         static let scanGroup = "caliper_scan_group"
+        static let teamHint = "caliper_team_hint"
         static let scanGroupNone = "caliper_scan_group_none"
     }
 }
 
-/// Four destinations, no more (README.md, "Tab bar").
+/// Four destinations — five for someone on a team, with Teams in the centre
+/// (teams-first plan, D2/D3). Never more.
 enum AppTab: String, CaseIterable, Identifiable {
-    case scan, cards, export, settings
+    case scan, cards, teams, export, settings
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .scan: return "Scan"
         case .cards: return "Cards"
+        case .teams: return "Teams"
         case .export: return "Export"
         case .settings: return "Settings"
         }
@@ -205,10 +232,28 @@ enum AppTab: String, CaseIterable, Identifiable {
         switch self {
         case .scan: return "barcode.viewfinder"
         case .cards: return "square.stack"
+        case .teams: return "person.2"
         case .export: return "square.and.arrow.up"
         case .settings: return "slider.horizontal.3"
         }
     }
+
+    /// Everyone not on a team gets exactly the four tabs the shipped app has.
+    static func visible(teamsAvailable: Bool, onTeam: Bool) -> [AppTab] {
+        allCases.filter { $0 != .teams || (teamsAvailable && onTeam) }
+    }
+}
+
+/// A screen pushed on the Teams tab.
+enum TeamsRoute: Hashable {
+    case lot(UUID)
+    case builder(UUID?)
+    case activity
+    case activityMembers(UUID)
+    case receipt(lotId: UUID, userId: UUID)
+    case claim(UUID)
+    case members
+    case library
 }
 
 /// One filter, shared by Cards and Export. Buy ranges are named in the design but
