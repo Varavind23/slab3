@@ -33,7 +33,9 @@ struct ScanScreen: View {
     /// The group new scans file into (ScanFilingBar), by `Folder.localId`. Empty is
     /// none — the default, and the Scan tab exactly as it was. Here and not in
     /// `AppState` for the same reason as `autoScan`: no other screen reads it.
-    @AppStorage("caliper_scan_group") private var scanGroupId = ""
+    @AppStorage(ScanScreen.scanGroupKey) private var scanGroupId = ""
+    /// MainShell rewrites it when a lot group is detached or merged.
+    static let scanGroupKey = "caliper_scan_group"
     @Query(sort: \Folder.createdAt, order: .reverse) private var groups: [Folder]
     @State private var showTargetSheet = false
     @AppStorage(PriceService.connectedKey) private var cardLadderConnected = false
@@ -203,7 +205,11 @@ struct ScanScreen: View {
         return groups.first { group in
             guard group.localId.uuidString == scanGroupId, !group.archived else { return false }
             // A lot's group only while the lot is open — a closed lot takes nothing.
-            return group.teamLotId.map { openLots[$0] != nil } ?? true
+            // Until this launch has LOADED the lots (a cold start at a show with no
+            // signal) the local group is trusted: dropping it would send every
+            // scan to plain inventory, unclaimed, when the claim would simply queue.
+            guard let lotId = group.teamLotId else { return true }
+            return app.lots.loadedAt == nil || openLots[lotId] != nil
         }
     }
 

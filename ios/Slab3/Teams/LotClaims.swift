@@ -178,6 +178,9 @@ enum LotClaims {
         // bucket) filled as over-limit, for a lead to decide, rather than turning
         // away a slab the buyer already paid for (teams.md §5.1).
         let offline = card.lotVerdict?.reason == "network" || card.lotVerdict?.offline == true
+        // Filed straight back after being taken out: the release never needs to
+        // reach the server (it still holds the claim, and returns it to this buyer).
+        PendingReleaseStore.shared.cancel(lotId: lotId, cert: card.certNumber, grader: card.grader.rawValue)
         card.lotClaimLotId = lotId
         card.lotClaimState = .checking
         try? context.save()
@@ -187,6 +190,7 @@ enum LotClaims {
         // Cold server cache (a card filed long after it was priced, or scanned with
         // no signal): one cache-first refresh warms it, then ask once more.
         if verdict.outcome == "pending", verdict.reason == "pending_price", !card.pricesLoading {
+            await spaceColdRefresh()
             await PriceService.refresh(card, in: context)
             verdict = await request(card, lotId: lotId, rangeId: rangeId, offline: offline)
         }
@@ -195,13 +199,43 @@ enum LotClaims {
     }
 
     /// Give a slot back — the card was un-filed, moved to another group, or is
-    /// being deleted. Values, not the card, so it still works after a delete.
-    static func release(lotId: UUID, cert: String, grader: Grader) async {
-        guard TeamsFeature.isAvailable else { return }
-        _ = try? await Backend.client.rpc("release_lot_claim", params: [
-            "p_lot_id": lotId.uuidString, "p_cert": cert, "p_grader": grader.rawValue,
-        ]).execute()
-        NotificationCenter.default.post(name: changed, object: nil)
+    /// being deleted. Recorded durably FIRST, then sent through the serial queue;
+    /// whatever does not land is retried with `retryPending` (PendingReleaseStore).
+    static func queueRelease(lotId: UUID, cert: String, grader: Grader) {
+        let release = PendingRelease(lotId: lotId, cert: cert, grader: grader.rawValue)
+        PendingReleaseStore.shared.add(release)
+        LotClaimQueue.shared.enqueue(.release(release))
+    }
+
+    /// One release request. Only the queue calls this.
+    static func release(_ release: PendingRelease) async -> ReleaseOutcome {
+        guard TeamsFeature.isAvailable else { return .retry }
+        struct Reply: Decodable { let outcome: String }
+        let result: ReleaseOutcome
+        do {
+            let data = try await Backend.client.rpc("release_lot_claim", params: [
+                "p_lot_id": release.lotId.uuidString, "p_cert": release.cert, "p_grader": release.grader,
+            ]).execute().data
+            result = .classify(outcome: (try? JSONDecoder().decode(Reply.self, from: data))?.outcome, errorCode: nil)
+        } catch let error as PostgrestError {
+            result = .classify(outcome: nil, errorCode: error.message)
+        } catch {
+            result = .classify(outcome: nil, errorCode: nil)
+        }
+        if result == .done { NotificationCenter.default.post(name: changed, object: nil) }
+        return result
+    }
+
+    /// Cold-cache refreshes (a claim that found no CL price on the server) are
+    /// spaced a second apart — Card Ladder's ≤1 request/second rule. The queue
+    /// already runs claims one at a time; this keeps a run of them from bunching.
+    private static var lastColdRefresh: Date?
+    private static func spaceColdRefresh() async {
+        if let last = lastColdRefresh {
+            let wait = 1.0 - Date().timeIntervalSince(last)
+            if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
+        }
+        lastColdRefresh = Date()
     }
 
     /// How a batch of offline scans landed — the reconnect summary (teams.md §10).
@@ -226,6 +260,11 @@ enum LotClaims {
     @discardableResult
     static func retryPending(in context: ModelContext) async -> SyncSummary? {
         guard TeamsFeature.isAvailable else { return nil }
+        // Releases first: a slot given back offline must be free on the server
+        // before this phone's own waiting claims compete for it.
+        for release in PendingReleaseStore.shared.all {
+            await LotClaimQueue.shared.submit(.release(release), in: context)
+        }
         let all = (try? context.fetch(FetchDescriptor<Card>())) ?? []
         let waiting = all
             .filter { $0.lotClaimState == .pending || $0.lotClaimState == .checking }
@@ -235,7 +274,7 @@ enum LotClaims {
         for card in waiting {
             guard let lotId = card.lotClaimLotId else { continue }
             let wasOffline = card.lotVerdict?.reason == "network" || card.lotVerdict?.offline == true
-            await claim(card, lotId: lotId, in: context)
+            await LotClaimQueue.shared.submit(.claim(cardId: card.localId, lotId: lotId, rangeId: nil), in: context)
             guard wasOffline else { continue }
             summary.synced += 1
             switch card.lotClaimState {

@@ -60,14 +60,16 @@ struct LotClaimPanel: View {
                     ForEach(candidates) { c in
                         CaliperButton(title: "\(c.name) · \(c.cardsLeft) cards · \(Money.dollars(c.centsLeft)) left",
                                       variant: .outline, fullWidth: true) {
-                            Task { await LotClaims.claim(card, lotId: lotId, rangeId: c.rangeId, in: context) }
+                            LotClaimQueue.shared.enqueue(.claim(cardId: card.localId, lotId: lotId, rangeId: c.rangeId),
+                                                         in: context)
                         }
                     }
                 }
 
                 if state == .pending {
                     CaliperButton(title: "Check again", variant: .outline, icon: "arrow.clockwise", fullWidth: true) {
-                        Task { await LotClaims.claim(card, lotId: lotId, in: context) }
+                        LotClaimQueue.shared.enqueue(.claim(cardId: card.localId, lotId: lotId, rangeId: nil),
+                                                     in: context)
                     }
                 }
 

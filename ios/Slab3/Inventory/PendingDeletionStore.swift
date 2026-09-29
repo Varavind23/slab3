@@ -17,8 +17,7 @@ enum CardDeletion {
             // A card in a team lot gives its slot back when the delete becomes real
             // — after the undo window, never on the swipe (teams plan §6).
             if card.holdsLotSlot, let lotId = card.lotClaimLotId {
-                let cert = card.certNumber, grader = card.grader
-                Task { await LotClaims.release(lotId: lotId, cert: cert, grader: grader) }
+                LotClaims.queueRelease(lotId: lotId, cert: card.certNumber, grader: card.grader)
             }
             context.delete(card)
         }

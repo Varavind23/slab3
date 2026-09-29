@@ -105,9 +105,7 @@ struct MainShell: View {
                 }
             }
         }
-        .onChange(of: app.lots.lots) { _, lots in
-            LotFolders.sync(lots, isLead: app.team.isLead, in: context)
-        }
+        .onChange(of: app.lots.lots) { _, _ in syncLotGroups() }
         // A lead released one of this phone's slabs: the card says so.
         .onChange(of: app.lots.loadedAt) { _, loadedAt in
             LotClaims.reconcile(app.lots.claimsByLot, lots: app.lots.lots, loadedAt: loadedAt,
@@ -115,14 +113,17 @@ struct MainShell: View {
         }
         // A claim or release moved the lot's totals; the dashboard re-reads them.
         .onReceive(NotificationCenter.default.publisher(for: LotClaims.changed)) { _ in
-            Task { await loadLots() }
+            guard TeamsFeature.isAvailable, app.team.lastLoadOK, let id = app.team.team?.id else { return }
+            app.lots.requestReload(teamId: id)
         }
         .onChange(of: connectivity.isOnline) { _, online in
             if online { Task { await refreshTeam() } }
         }
-        .onChange(of: app.team.isLead) { _, isLead in
-            // A promoted lead starts seeing drafts; a demoted one stops.
-            LotFolders.sync(app.lots.lots, isLead: isLead, in: context)
+        .onChange(of: app.team.isLead) { _, _ in
+            // A promoted lead starts seeing drafts; a demoted one stops. On a cold
+            // launch this flips BEFORE the lots arrive — syncLotGroups' gate is what
+            // keeps that from detaching every lot group.
+            syncLotGroups()
         }
         .fullScreenCover(isPresented: Binding(
             get: { !app.hasSeenOnboarding },
@@ -158,6 +159,26 @@ struct MainShell: View {
             try? await Task.sleep(for: .seconds(6))
             withAnimation(Caliper.easeOut) { if syncSummary == summary { syncSummary = nil } }
         }
+    }
+
+    /// Mirror the team's lots as local groups — only once `lots` is known to be
+    /// THIS team's loaded list (TeamSync) — then heal any group an earlier build
+    /// split, and keep Scan's stored group pointing at something real.
+    private func syncLotGroups() {
+        guard TeamSync.shouldSyncGroups(teamLoadOK: app.team.lastLoadOK, teamId: app.team.team?.id,
+                                        lotsLoadedAt: app.lots.loadedAt,
+                                        lotsTeamId: app.lots.loadedTeamId) else { return }
+        let released = LotFolders.sync(app.lots.lots, isLead: app.team.isLead, in: context)
+        let repair = LotFolders.repair(app.lots.lots, isLead: app.team.isLead, in: context)
+        let key = ScanScreen.scanGroupKey
+        let stored = UserDefaults.standard.string(forKey: key).flatMap(UUID.init(uuidString:))
+        if let stored, let kept = repair.merged[stored] {
+            UserDefaults.standard.set(kept.uuidString, forKey: key)
+        } else if let stored, released.contains(stored), !repair.reattached.contains(stored) {
+            // That group is not a lot any more; filing into it would skip the claim.
+            UserDefaults.standard.set("", forKey: key)
+        }
+        if repair.requeued > 0 { Task { await refreshTeam() } }
     }
 
     private func loadLots() async {

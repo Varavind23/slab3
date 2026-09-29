@@ -119,6 +119,10 @@ final class LotStore {
     /// When the last SUCCESSFUL load started — a claim confirmed after this may
     /// legitimately be missing from `claimsByLot` (LotClaims.reconcile).
     private(set) var loadedAt: Date?
+    /// The team `lots` was loaded FOR. Set with `loadedAt`, before `lots` is
+    /// published, so a reader never sees one team's lot list stamped as another's
+    /// (TeamSync.shouldSyncGroups).
+    private(set) var loadedTeamId: UUID?
     private(set) var isWorking = false
 
     func ranges(for lot: Lot) -> [BuyRange] { rangesByLot[lot.id] ?? [] }
@@ -135,6 +139,9 @@ final class LotStore {
     func load(teamId: UUID?) async {
         guard TeamsFeature.isAvailable else { return }
         guard let teamId else {
+            // Not on a team is a real, loaded answer: the stamp says so, which is
+            // what lets a group sync detach the lot groups of a team just left.
+            loadedAt = Date(); loadedTeamId = nil
             lots = []; rangesByLot = [:]; library = []; bandsByLot = [:]; usage = [:]
             claimsByLot = [:]; reports = [:]
             return
@@ -179,6 +186,9 @@ final class LotStore {
             }
             let library: [BuyRange] = try await Backend.client.from("buy_range_templates")
                 .select().eq("team_id", value: teamId).order("name").execute().value
+            // Stamp FIRST: MainShell's group sync reads the stamp when `lots` changes.
+            loadedAt = started
+            loadedTeamId = teamId
             // Assign only on change: MainShell syncs the lot groups when `lots`
             // changes, and a no-op reload should not touch the store.
             if self.lots != lots { self.lots = lots }
@@ -188,7 +198,6 @@ final class LotStore {
             if self.usage != usage { self.usage = usage }
             if self.claimsByLot != claims { self.claimsByLot = claims }
             if self.reports != reports { self.reports = reports }
-            loadedAt = started
         } catch {
             // Keep what we had. A lot view with yesterday's numbers beats a blank one,
             // and nothing about scanning waits on this.
@@ -198,7 +207,8 @@ final class LotStore {
     /// Fill the store without a server — render tests and previews only.
     func seedForPreview(lots: [Lot], ranges: [UUID: [BuyRange]], bands: [UUID: [LotBand]],
                         usage: [UUID: RangeUsage], reports: [UUID: RangeReport] = [:],
-                        claims: [UUID: [TeamClaim]] = [:]) {
+                        claims: [UUID: [TeamClaim]] = [:], loadedAt: Date? = nil, teamId: UUID? = nil) {
+        self.loadedAt = loadedAt; loadedTeamId = teamId
         self.lots = lots; rangesByLot = ranges; bandsByLot = bands; self.usage = usage
         self.reports = reports; claimsByLot = claims
     }
@@ -220,11 +230,24 @@ final class LotStore {
         liveTask = Task { [weak self] in
             for await _ in changes {
                 guard let self else { return }
-                await self.load(teamId: teamId)
+                self.requestReload(teamId: teamId)
             }
         }
         try? await channel.subscribeWithError()
     }
+
+    /// Coalesce reloads: every claim, release and realtime event asks for one, and a
+    /// bulk file of N cards would otherwise run 2N full reloads of six requests each.
+    /// The last ask within the window wins.
+    func requestReload(teamId: UUID) {
+        reloadTask?.cancel()
+        reloadTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(750))
+            guard !Task.isCancelled, let self else { return }
+            await self.load(teamId: teamId)
+        }
+    }
+    private var reloadTask: Task<Void, Never>?
 
     func stopLive() async {
         liveTask?.cancel(); liveTask = nil
@@ -273,11 +296,12 @@ final class LotStore {
     // MARK: Lots (leads)
 
     /// Creates a DRAFT lot and returns its id — buyers see nothing until it opens.
-    func createLot(name: String, deadline: Date?, teamId: UUID) async -> (id: UUID?, error: String?) {
+    func createLot(name: String, deadline: Date?, banner: String? = nil,
+                   teamId: UUID) async -> (id: UUID?, error: String?) {
         let id = UUID()
         let failure = await perform(teamId: teamId) {
             try await Backend.client.from("lots")
-                .insert(LotInsert(id: id, teamId: teamId, name: name, deadline: deadline)).execute()
+                .insert(LotInsert(id: id, teamId: teamId, name: name, deadline: deadline, banner: banner)).execute()
         }
         return failure.map { (nil, $0) } ?? (id, nil)
     }
@@ -424,15 +448,18 @@ final class LotStore {
         }
     }
 
-    private struct LotInsert: Encodable {
-        let id: UUID, teamId: UUID, name: String, deadline: Date?
-        enum CodingKeys: String, CodingKey { case id, teamId = "team_id", name, deadline }
+    /// Internal (not private) so a test can pin the wire shape: the banner typed
+    /// at creation used to be dropped here and only saved on the next status change.
+    struct LotInsert: Encodable {
+        let id: UUID, teamId: UUID, name: String, deadline: Date?, banner: String?
+        enum CodingKeys: String, CodingKey { case id, teamId = "team_id", name, deadline, banner }
         func encode(to encoder: Encoder) throws {
             var c = encoder.container(keyedBy: CodingKeys.self)
             try c.encode(id, forKey: .id)
             try c.encode(teamId, forKey: .teamId)
             try c.encode(name, forKey: .name)
             try c.encode(deadline, forKey: .deadline)
+            try c.encode(banner, forKey: .banner)
         }
     }
 
@@ -485,7 +512,11 @@ enum LotFolders {
         isLead ? lots : lots.filter { $0.status != .draft }
     }
 
-    static func sync(_ lots: [Lot], isLead: Bool, in context: ModelContext) {
+    /// Returns the `localId`s of groups that STOPPED being lot groups (detached or
+    /// removed), so a caller holding one — the Scan tab's target — can let go of it
+    /// rather than keep filing into what is now a plain group.
+    @discardableResult
+    static func sync(_ lots: [Lot], isLead: Bool, in context: ModelContext) -> Set<UUID> {
         let wanted = visible(lots, isLead: isLead)
         let folders = (try? context.fetch(FetchDescriptor<Folder>())) ?? []
         let byLot = Dictionary(folders.compactMap { f in f.teamLotId.map { ($0, f) } },
@@ -504,10 +535,81 @@ enum LotFolders {
         }
 
         let keep = Set(wanted.map(\.id))
+        var released: Set<UUID> = []
         for folder in folders {
             guard let lotId = folder.teamLotId, !keep.contains(lotId) else { continue }
+            released.insert(folder.localId)
             if folder.cards.isEmpty { context.delete(folder) } else { folder.teamLotId = nil }
         }
         try? context.save()
+        return released
+    }
+
+    /// What `repair` changed: groups it re-attached, and duplicates it folded into
+    /// them (`removed → kept`, so a stored scan target can follow).
+    struct RepairReport: Equatable {
+        var reattached: Set<UUID> = []
+        var merged: [UUID: UUID] = [:]
+        var requeued = 0
+        var isEmpty: Bool { reattached.isEmpty && merged.isEmpty && requeued == 0 }
+    }
+
+    /// Undo the split a lead's cold launch used to cause (fixed 2026-09-28): the
+    /// group sync ran against an empty lot list the moment `isLead` flipped, so each
+    /// lot group with cards was DETACHED into a plain group of the same name, and a
+    /// fresh empty lot group was made beside it. Scans kept filing into the plain
+    /// one — no claim, no 3-limit.
+    ///
+    /// Recognised by what cannot happen any other way: a PLAIN group, named like a
+    /// visible lot, holding a card that still says it is in that lot
+    /// (`lotClaimLotId`) — every legitimate way out of a lot clears that field
+    /// (CardFiling.releaseSlot, a block, a release). Idempotent, so it runs after
+    /// every sync and heals any phone that already split, however many times.
+    @discardableResult
+    static func repair(_ lots: [Lot], isLead: Bool, in context: ModelContext) -> RepairReport {
+        var report = RepairReport()
+        let folders = (try? context.fetch(FetchDescriptor<Folder>())) ?? []
+        for lot in visible(lots, isLead: isLead) {
+            let detached = folders.filter { f in
+                f.teamLotId == nil && f.name == lot.name
+                    && f.cards.contains { $0.lotClaimLotId == lot.id }
+            }
+            guard let keeper = detached.max(by: { $0.cards.count < $1.cards.count }) else { continue }
+            let attached = folders.filter { $0.teamLotId == lot.id }
+            keeper.teamLotId = lot.id
+            report.reattached.insert(keeper.localId)
+            // The duplicate the split made (and any second detached copy): its cards
+            // move across as a plain reassignment — NOT through CardFiling, which
+            // would release and re-claim slabs the server already holds.
+            for dup in attached + detached where dup !== keeper {
+                for card in dup.cards { card.folder = keeper }
+                report.merged[dup.localId] = keeper.localId
+                context.delete(dup)
+            }
+            // Scans that landed in the plain group after the split were never
+            // claimed. Queue them; retryPending claims them one at a time.
+            for card in keeper.cards where card.lotClaimLotId == nil {
+                card.lotClaimLotId = lot.id
+                card.lotClaimState = .pending
+                report.requeued += 1
+            }
+        }
+        if !report.isEmpty { try? context.save() }
+        return report
+    }
+}
+
+/// When the lot groups may be re-synced (teams-first plan, phase 0).
+///
+/// WHY. A lead's cold launch loads the team, THEN its lots. `isLead` flips true
+/// the moment members arrive, while `lots` is still the empty launch value — and a
+/// sync against that list reads "every lot is gone", detaching every lot group.
+/// Reproduced in the Simulator 2026-09-28. So a sync needs proof that `lots` IS
+/// this team's list: the team load succeeded and the lot list was stamped for the
+/// same team. Not on a team (nil == nil) is a real answer too — that is what lets
+/// leaving a team detach its groups.
+enum TeamSync {
+    static func shouldSyncGroups(teamLoadOK: Bool, teamId: UUID?, lotsLoadedAt: Date?, lotsTeamId: UUID?) -> Bool {
+        teamLoadOK && lotsLoadedAt != nil && lotsTeamId == teamId
     }
 }

@@ -411,7 +411,9 @@ struct LotSetupSheet: View {
     private func create() async {
         guard let teamId else { return }
         error = nil
-        let created = await lots.createLot(name: trimmedName, deadline: hasDeadline ? deadline : nil, teamId: teamId)
+        let trimmedBanner = banner.trimmingCharacters(in: .whitespacesAndNewlines)
+        let created = await lots.createLot(name: trimmedName, deadline: hasDeadline ? deadline : nil,
+                                           banner: trimmedBanner.isEmpty ? nil : trimmedBanner, teamId: teamId)
         if let id = created.id { lotId = id } else { error = created.error }
     }
 

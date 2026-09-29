@@ -19,7 +19,8 @@ enum CardFiling {
     /// Teams (phase 4): a card LEAVING a lot for this group gives its slot back,
     /// and a card entering a lot group is claimed. The claim runs after this
     /// returns — the card is in the group now and shows "Checking lot…" until the
-    /// server answers; a block moves it back out (LotClaims.apply).
+    /// server answers; a block moves it back out (LotClaims.apply). Claims go through
+    /// LotClaimQueue, one at a time, so a bulk file never bursts Card Ladder.
     static func file(_ cards: [Card], into group: Folder, in context: ModelContext, at time: Date = Date()) {
         guard !cards.isEmpty else { return }
         for card in cards where card.folder?.localId != group.localId { releaseSlot(of: card) }
@@ -31,7 +32,7 @@ enum CardFiling {
         for card in cards where needsClaim(card, lotId: lotId) {
             card.lotClaimLotId = lotId
             card.lotClaimState = .checking
-            Task { await LotClaims.claim(card, lotId: lotId, in: context) }
+            LotClaimQueue.shared.enqueue(.claim(cardId: card.localId, lotId: lotId, rangeId: nil), in: context)
         }
         try? context.save()
     }
@@ -63,8 +64,7 @@ enum CardFiling {
     private static func releaseSlot(of card: Card) {
         guard let lotId = card.lotClaimLotId else { return }
         if card.holdsLotSlot {
-            let cert = card.certNumber, grader = card.grader
-            Task { await LotClaims.release(lotId: lotId, cert: cert, grader: grader) }
+            LotClaims.queueRelease(lotId: lotId, cert: card.certNumber, grader: card.grader)
         }
         card.lotClaimLotId = nil
         card.lotClaimState = nil
