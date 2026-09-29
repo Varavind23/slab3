@@ -229,10 +229,14 @@ struct ExportScreen: View {
             }
         }
         if app.team.isLead {
-            let mine = Set(allCards.map(\.certNumber))
-            export.teammates = app.lots.claims(for: lot).filter { !mine.contains($0.cert) }.map { claim in
-                .init(claim: claim,
-                      buyer: app.team.members.first { $0.userId == claim.buyerId }?.displayName ?? "",
+            // Teammates are claims by SOMEONE ELSE — never "a cert this phone does
+            // not hold": a lead who scanned a teammate's slab and was turned away
+            // (duplicate) still has that cert in inventory, and the slab must not
+            // drop out of the file sent to the lot's buyer.
+            let names = Dictionary(app.team.members.map { ($0.userId, $0.displayName) }, uniquingKeysWith: { a, _ in a })
+            let me = app.team.myUserId
+            export.teammates = app.lots.claims(for: lot).filter { $0.buyerId != me }.map { claim in
+                .init(claim: claim, buyer: names[claim.buyerId] ?? "Former member",
                       bucket: claim.rangeId.flatMap { bucketNames[$0] })
             }
         }

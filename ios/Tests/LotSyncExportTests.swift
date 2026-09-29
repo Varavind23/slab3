@@ -97,6 +97,30 @@ struct LotSyncExportTests {
         #expect(justClaimed.folder === group)
     }
 
+    /// Inventory is per phone: signed into a second account, the phone still holds
+    /// the first account's lot cards. Those are not this account's to call released.
+    @Test func anotherAccountsClaimOnThisPhoneIsLeftAlone() throws {
+        let context = try store()
+        let group = Folder(name: "Show 7/24"); group.teamLotId = lotId; context.insert(group)
+        let loadedAt = Date()
+        let theirs = heldCard("33333333", answeredAt: loadedAt.addingTimeInterval(-60), in: context, group: group)
+        theirs.lotVerdict?.buyerId = UUID()                      // claimed by someone else
+        let lot = Lot(id: lotId, name: "Show 7/24", deadline: nil, status: .active, createdAt: Date())
+
+        LotClaims.reconcile([lotId: []], lots: [lot], loadedAt: loadedAt, myUserId: me, in: context)
+
+        #expect(theirs.lotClaimState == .confirmed, "never labelled 'released by a lead'")
+        #expect(theirs.folder === group)
+    }
+
+    @Test func aClaimRemembersWhoHoldsIt() throws {
+        let buyer = UUID()
+        let verdict = try LotVerdict.decode(Data("""
+        {"outcome":"confirmed","claim":{"lot_buy_range_id":null,"warn_reasons":[],"buyer_id":"\(buyer)"},"copies":1}
+        """.utf8))
+        #expect(verdict.buyerId == buyer)
+    }
+
     // MARK: The lead's whole-lot CSV
 
     private func claim(_ cert: String, price: Int?) -> TeamClaim {

@@ -44,11 +44,12 @@ bugs shipped green three times because nothing asserted on layout.
 
 ## Teams — deferred from the teams-first overhaul (2026-09-28)
 
-Everything Teams is LOCAL-only until the owner ships it (CLAUDE.md, "Teams").
-
-- **Going live** is a separate, owner-approved release: `db push` of the four Teams
-  migrations, then a build with `TeamsFeature` answering from something other than
-  `Backend.isLocal`. Plan it as its own step; nothing here assumes it.
+- **Went live 2026-09-28** (migrations pushed; 0.8 turns Teams on). Still open from
+  the plan: offline, the Teams tab shows only what this phone knew at the last load
+  (lots are not cached locally) — scanning into the chosen lot still works and syncs.
+- **A card interrupted mid-refresh** (app killed during a scan) keeps no name or
+  prices until its detail screen's "Refresh prices now" is tapped; nothing re-fetches
+  it automatically. Predates Teams.
 - **Team Card Ladder budget.** Every lot claim may refresh CL on a cold cache, against
   the 200/day per-user budget. Raising it for team members is an Edge Function deploy.
 - **`lot_bands` is unread** since `20260928000000_bucket_band.sql` (bands are a label on
@@ -58,9 +59,6 @@ Everything Teams is LOCAL-only until the owner ships it (CLAUDE.md, "Teams").
 - **Reported numbers UI is hidden** (owner, D23): `RangeReport`, `LotDashboard.reported`
   and `lot_range_reports` are kept; bringing them back is only `LotDashboardView`.
 - **Screenshot import** of the lot buyer's allocation screen (teams.md §7) — not built.
-- **The two-account end-to-end check** (lead + buyer, real CL-connected claims, the
-  3-per-lot block, an offline release draining on reconnect) needs a Card Ladder
-  account on the local stack; the Simulator runs so far used seeded claims.
 
 ## Courtyard cleanup — three known gaps (deferred 2026-09-03)
 

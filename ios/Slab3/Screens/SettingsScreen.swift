@@ -150,7 +150,9 @@ struct SettingsScreen: View {
         if let team = app.team.team {
             SectionLabel(text: "Team")
             row("Team", value: team.name, verbatim: true) { app.tabTouched = true; app.tab = .teams }
-        } else if app.team.loaded {
+        } else if app.team.loaded, app.team.lastLoadOK {
+            // Only once the server has SAID "no team": a member opening the app with
+            // no signal must not be offered to join a team they are already on.
             SectionLabel(text: "Team")
             row("Join or create a team", value: "") { showTeamOnboard = true }
         }

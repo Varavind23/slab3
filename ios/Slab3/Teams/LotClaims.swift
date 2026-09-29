@@ -45,6 +45,10 @@ struct LotVerdict: Codable, Equatable {
     var offline: Bool? = nil
     /// When this answer arrived — lets reconcile tell a stale list from a release.
     var answeredAt: Date? = nil
+    /// Who holds the claim (the server's `buyer_id`). Inventory is per PHONE, not
+    /// per account, so a phone signed into a second account still carries the first
+    /// account's lot cards; reconcile must judge only this account's own claims.
+    var buyerId: UUID? = nil
 
     var state: LotClaimState {
         switch outcome {
@@ -69,12 +73,13 @@ struct LotVerdict: Codable, Equatable {
             candidates: (reply.candidates ?? []).map {
                 Candidate(rangeId: $0.range_id, name: $0.name, cardsLeft: $0.cards_left, centsLeft: $0.cents_left)
             },
-            priceCents: reply.price_cents, grade: reply.grade, by: reply.by)
+            priceCents: reply.price_cents, grade: reply.grade, by: reply.by,
+            buyerId: reply.claim?.buyer_id)
     }
 
     private struct Reply: Decodable {
         struct RangeRef: Decodable { let range_id: UUID; let name: String }
-        struct ClaimRow: Decodable { let lot_buy_range_id: UUID?; let warn_reasons: [String]? }
+        struct ClaimRow: Decodable { let lot_buy_range_id: UUID?; let warn_reasons: [String]?; let buyer_id: UUID? }
         struct ExistingRow: Decodable { let buyer: String?; let scanned_at: String? }
         struct CandidateRow: Decodable { let range_id: UUID; let name: String; let cards_left: Int; let cents_left: Int64 }
         let outcome: String
@@ -172,31 +177,59 @@ enum LotClaims {
     /// caches — asking first would only come back "pending".
     static func claim(_ card: Card, lotId: UUID, rangeId: UUID? = nil, in context: ModelContext) async {
         guard TeamsFeature.isAvailable else { return }
+        // Only for a card still in THIS lot's group: it may have been moved or
+        // un-filed while this claim waited in the queue.
+        guard isAlive(card), card.folder?.teamLotId == lotId else { return }
+        // Values, not the card, go to the server: the card can be deleted while
+        // this waits on its price (a swipe-delete commits after 5s).
+        let slab = Slab(cert: card.certNumber, grader: card.grader, scannedAt: card.scannedAt)
 
         // A claim that could not reach the server before is an OFFLINE replay: the
         // server then records a buy that arrives after its card's slots (or its
         // bucket) filled as over-limit, for a lead to decide, rather than turning
         // away a slab the buyer already paid for (teams.md §5.1).
         let offline = card.lotVerdict?.reason == "network" || card.lotVerdict?.offline == true
-        // Filed straight back after being taken out: the release never needs to
-        // reach the server (it still holds the claim, and returns it to this buyer).
-        PendingReleaseStore.shared.cancel(lotId: lotId, cert: card.certNumber, grader: card.grader.rawValue)
         card.lotClaimLotId = lotId
         card.lotClaimState = .checking
         try? context.save()
 
         await waitForPrices(card)
-        var verdict = await request(card, lotId: lotId, rangeId: rangeId, offline: offline)
+        // It may have left the lot — or been deleted — while its price loaded.
+        guard isAlive(card), card.folder?.teamLotId == lotId else { return }
+        var verdict = await request(slab, lotId: lotId, rangeId: rangeId, offline: offline)
         // Cold server cache (a card filed long after it was priced, or scanned with
         // no signal): one cache-first refresh warms it, then ask once more.
-        if verdict.outcome == "pending", verdict.reason == "pending_price", !card.pricesLoading {
+        if verdict.outcome == "pending", verdict.reason == "pending_price", isAlive(card), !card.pricesLoading {
             await spaceColdRefresh()
-            await PriceService.refresh(card, in: context)
-            verdict = await request(card, lotId: lotId, rangeId: rangeId, offline: offline)
+            if isAlive(card) { await PriceService.refresh(card, in: context) }
+            verdict = await request(slab, lotId: lotId, rangeId: rangeId, offline: offline)
         }
         verdict.offline = offline || verdict.reason == "network"
+        // The card went while the server answered — deleted, moved to another group
+        // or un-filed. Its new state was already set by that move; a slot the
+        // server just granted anyway is handed straight back, never left orphaned.
+        guard isAlive(card), card.folder?.teamLotId == lotId else {
+            if verdict.state == .confirmed || verdict.state == .overLimit {
+                queueRelease(lotId: lotId, cert: slab.cert, grader: slab.grader)
+            }
+            return
+        }
+        // Filed straight back after being taken out while offline: the server has
+        // (re)confirmed this slab for this buyer, so a release still waiting in the
+        // queue must not now take it away. Only once the claim is HELD — if it came
+        // back blocked (the lot closed meanwhile), the release still has to land.
+        if verdict.state == .confirmed || verdict.state == .overLimit {
+            PendingReleaseStore.shared.cancel(lotId: lotId, cert: slab.cert, grader: slab.grader.rawValue)
+        }
         apply(verdict, to: card, lotId: lotId, in: context)
     }
+
+    /// What a claim sends — read from the card once, before any wait.
+    struct Slab { let cert: String; let grader: Grader; let scannedAt: Date }
+
+    /// Still a live object in the store. A SwiftData model deleted and saved must
+    /// not be written to afterwards.
+    static func isAlive(_ card: Card) -> Bool { card.modelContext != nil && !card.isDeleted }
 
     /// Give a slot back — the card was un-filed, moved to another group, or is
     /// being deleted. Recorded durably FIRST, then sent through the serial queue;
@@ -265,7 +298,9 @@ enum LotClaims {
         for release in PendingReleaseStore.shared.all {
             await LotClaimQueue.shared.submit(.release(release), in: context)
         }
-        let all = (try? context.fetch(FetchDescriptor<Card>())) ?? []
+        // Only cards with a lot state — never the whole inventory. This runs on
+        // every return to the app, for every user, and most cards are in no lot.
+        let all = (try? context.fetch(FetchDescriptor<Card>(predicate: #Predicate { $0.lotClaimStateRaw != nil }))) ?? []
         let waiting = all
             .filter { $0.lotClaimState == .pending || $0.lotClaimState == .checking }
             .filter { card in card.lotClaimLotId.map { card.folder?.teamLotId == $0 } ?? false }
@@ -291,7 +326,7 @@ enum LotClaims {
     // MARK: Internals
 
     private static func waitForPrices(_ card: Card) async {
-        for _ in 0..<120 where card.pricesLoading {   // ≤30s; a refresh times out well before
+        for _ in 0..<120 where isAlive(card) && card.pricesLoading {   // ≤30s; a refresh times out well before
             try? await Task.sleep(for: .milliseconds(250))
         }
     }
@@ -301,10 +336,10 @@ enum LotClaims {
         let p_range_id: UUID?, p_offline: Bool
     }
 
-    private static func request(_ card: Card, lotId: UUID, rangeId: UUID?, offline: Bool) async -> LotVerdict {
+    private static func request(_ slab: Slab, lotId: UUID, rangeId: UUID?, offline: Bool) async -> LotVerdict {
         do {
-            let params = ClaimParams(p_lot_id: lotId, p_cert: card.certNumber, p_grader: card.grader.rawValue,
-                                     p_scanned_at: ISO8601.string(card.scannedAt),
+            let params = ClaimParams(p_lot_id: lotId, p_cert: slab.cert, p_grader: slab.grader.rawValue,
+                                     p_scanned_at: ISO8601.string(slab.scannedAt),
                                      p_range_id: rangeId, p_offline: offline)
             let data = try await Backend.client.rpc("claim_lot_scan", params: params).execute().data
             return try LotVerdict.decode(data)
@@ -331,11 +366,15 @@ enum LotClaims {
         // after a lot load — which is itself gated — has produced a list to check.
         guard let loadedAt, let myUserId else { return }
         let known = Set(lots.map(\.id))
-        let all = (try? context.fetch(FetchDescriptor<Card>())) ?? []
+        // Only cards with a lot state — never the whole inventory. This runs on
+        // every return to the app, for every user, and most cards are in no lot.
+        let all = (try? context.fetch(FetchDescriptor<Card>(predicate: #Predicate { $0.lotClaimStateRaw != nil }))) ?? []
         var changed = false
         for card in all where card.holdsLotSlot {
             guard let lotId = card.lotClaimLotId, known.contains(lotId),
                   let answered = card.lotVerdict?.answeredAt, answered < loadedAt else { continue }
+            // Another account's claim, made on this phone: not this account's to judge.
+            if let owner = card.lotVerdict?.buyerId, owner != myUserId { continue }
             let held = (claimsByLot[lotId] ?? []).contains {
                 $0.cert == card.certNumber && $0.grader == card.grader.rawValue && $0.buyerId == myUserId
             }

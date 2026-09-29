@@ -606,13 +606,13 @@ struct CardsScreen: View {
     }
     private var filterTitle: String { activeGroup?.name ?? "Inventory" }
     private var filterHue: Color? { activeGroup?.hue }
-    /// Teammates' slabs in this lot — everything claimed into it that is not in
-    /// THIS phone's inventory (plan §7.5). Read-only: no swipe, no selection. A
-    /// lead can release one; a buyer just sees what the team has.
+    /// Teammates' slabs in this lot — everything claimed into it by someone ELSE
+    /// (plan §7.5). By buyer, not by "cert not on this phone": a slab this phone
+    /// scanned and was turned away from (a teammate had it) is still theirs to list.
+    /// Read-only: no swipe, no selection. A lead can release one.
     @ViewBuilder
     private func teammateRows(_ lot: Lot) -> some View {
-        let mine = Set(allCards.map(\.certNumber))
-        let theirs = app.lots.claims(for: lot).filter { !mine.contains($0.cert) }
+        let theirs = app.lots.claims(for: lot).filter { $0.buyerId != app.team.myUserId }
         if !theirs.isEmpty {
             Text("Teammates' buys · \(theirs.count)")
                 .caliperLabel(Caliper.textTertiary)

@@ -72,7 +72,9 @@ struct TeamsScreen: View {
     }
 
     private var headerContext: String {
-        guard let team = app.team.team else { return "Loading team…" }
+        guard let team = app.team.team else {
+            return app.team.loaded && !app.team.lastLoadOK ? "No connection" : "Loading team…"
+        }
         let n = app.team.members.count
         return "\(team.name) · \(n) \(n == 1 ? "member" : "members")"
     }
@@ -115,20 +117,29 @@ struct TeamsContent: View {
 
     private var visible: [Lot] { lots.visibleLots(isLead: team.isLead) }
     private var open: [Lot] {
-        visible.filter { $0.status == .active }.sorted { a, b in
-            switch (a.deadline, b.deadline) {
-            case let (x?, y?): return x < y
-            case (_?, nil): return true
-            case (nil, _?): return false
-            case (nil, nil): return a.createdAt > b.createdAt
-            }
-        }
+        visible.filter { $0.status == .active }.sorted(by: Lot.soonestFirst)
     }
     /// The card on top: the lot being scanned into, else the most urgent open one.
     private var featured: Lot? { current ?? open.first }
 
+    /// The last try to reach the team failed (no signal at a show). What is shown
+    /// is what this phone already knew; scans still file into the chosen lot and
+    /// sync when the connection returns.
+    private var offline: Bool { team.loaded && !team.lastLoadOK }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if offline {
+                HStack(spacing: Caliper.space4) {
+                    Image(systemName: "wifi.slash").font(.system(size: 11))
+                    Text("No connection · scans still go into your lot and sync when you're back online")
+                        .caliperMeta(Caliper.confMid)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .foregroundStyle(Caliper.confMid)
+                .padding(.horizontal, Caliper.gutter)
+                .padding(.bottom, Caliper.space5)
+            }
             if showIntro {
                 TeamIntroCard(teamName: team.team?.name, dismiss: { send(.dismissIntro) })
                     .padding(.horizontal, Caliper.gutter)
@@ -189,7 +200,9 @@ struct TeamsContent: View {
                 }
             }
 
-            teamSection
+            // Only once the team has loaded: rows of zeros and dashes that open empty
+            // screens say nothing true about the team.
+            if team.team != nil { teamSection }
         }
     }
 
@@ -225,15 +238,17 @@ struct TeamsContent: View {
 
     private var emptyLots: some View {
         VStack(alignment: .leading, spacing: Caliper.space5) {
-            Text(team.isLead ? "No open lots" : "Nothing to buy into yet")
+            Text(offline ? "Can't reach your team" : team.isLead ? "No open lots" : "Nothing to buy into yet")
                 .font(.calHeading)
                 .foregroundStyle(Caliper.textPrimary)
-            Text(team.isLead
+            Text(offline
+                 ? "Lots show here once you're back online. Anything you scan into a lot meanwhile is kept and checked then."
+                 : team.isLead
                  ? "Build a lot from your saved buy ranges, then open it. Your buyers see it here the moment it opens."
                  : "When your lead opens a lot, it shows here with what's left to buy.")
                 .font(.calBody)
                 .foregroundStyle(Caliper.textSecondary)
-            if team.isLead {
+            if team.isLead && !offline {
                 // The screen's one primary action when there is nothing to scan into.
                 CaliperButton(title: "New lot", variant: .primary, icon: "plus", fullWidth: true) {
                     send(.push(.builder(nil)))
@@ -596,8 +611,11 @@ extension AppState {
     /// Make `lot` the one new scans file into — the team's current lot.
     func makeCurrent(_ lot: Lot, in context: ModelContext) {
         var folder = LotFolders.folder(for: lot.id, in: context)
-        if folder == nil {
-            // The lot opened moments ago and its group has not been made yet.
+        // The lot opened moments ago and its group has not been made yet — make it,
+        // but only through the same gate as every other sync: against an unloaded
+        // or another team's lot list, a sync detaches every lot group.
+        if folder == nil, TeamSync.shouldSyncGroups(teamLoadOK: team.lastLoadOK, teamId: team.team?.id,
+                                                    lotsLoadedAt: lots.loadedAt, lotsTeamId: lots.loadedTeamId) {
             LotFolders.sync(lots.lots, isLead: team.isLead, in: context)
             folder = LotFolders.folder(for: lot.id, in: context)
         }

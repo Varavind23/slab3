@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import SwiftData
 @testable import Slab3
 
 /// Releases that must survive no signal, and claims that must never burst
@@ -118,5 +119,37 @@ struct LotClaimQueueTests {
                                         deadline: nil, banner: "PSA only")
         let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(insert)) as? [String: Any]
         #expect(json?["banner"] as? String == "PSA only")
+    }
+
+    // MARK: A claim for a card that moved on
+
+    private func context() throws -> ModelContext {
+        ModelContext(try ModelContainer(for: Card.self, Folder.self,
+                                        configurations: ModelConfiguration(isStoredInMemoryOnly: true)))
+    }
+
+    /// Filed into a lot, then moved out before its queued claim ran: the claim must
+    /// not send anything or mark the card — the card is no longer in that lot.
+    @Test func aClaimForACardThatLeftTheLotDoesNothing() async throws {
+        let ctx = try context()
+        let card = Card(scan: CertScan(grader: .psa, certNumber: "66581638", raw: "66581638"))
+        ctx.insert(card)
+        card.folder = Folder(name: "consignment")            // a plain group now
+        await LotClaims.claim(card, lotId: UUID(), in: ctx)
+        #expect(card.lotClaimState == nil, "no 'checking', no request")
+        #expect(card.lotClaimLotId == nil)
+    }
+
+    /// A card deleted (the undo window committed) while its claim waited must never
+    /// be written to again.
+    @Test func aDeletedCardIsNotAlive() throws {
+        let ctx = try context()
+        let card = Card(scan: CertScan(grader: .psa, certNumber: "1", raw: "1"))
+        ctx.insert(card)
+        try ctx.save()
+        #expect(LotClaims.isAlive(card))
+        ctx.delete(card)
+        try ctx.save()
+        #expect(!LotClaims.isAlive(card))
     }
 }

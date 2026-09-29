@@ -7,8 +7,8 @@ import Supabase
 enum Backend {
     static let client = SupabaseClient(supabaseURL: endpoint.url, supabaseKey: endpoint.key)
 
-    /// True only in a DEBUG build launched against the local stack (below). Teams
-    /// is gated on it until its migration reaches the live project.
+    /// True only in a DEBUG build launched against the local stack (below). Shown in
+    /// Settings → Server. (Teams was gated on it until 0.8, when it went live.)
     static let isLocal: Bool = endpoint.isLocal
 
     /// What Settings shows in a DEBUG build, so which server a test is hitting is

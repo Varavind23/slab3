@@ -19,6 +19,19 @@ struct Lot: Identifiable, Equatable, Decodable {
     }
 }
 
+extension Lot {
+    /// Open lots in the order a buyer works them: soonest deadline first, then the
+    /// ones with no deadline, newest first. Used by Teams and Team activity alike.
+    static func soonestFirst(_ a: Lot, _ b: Lot) -> Bool {
+        switch (a.deadline, b.deadline) {
+        case let (x?, y?): return x < y
+        case (_?, nil): return true
+        case (nil, _?): return false
+        case (nil, nil): return a.createdAt > b.createdAt
+        }
+    }
+}
+
 /// One slab in a lot, as every teammate's phone sees it — the row a buyer draws
 /// for a card that is not in their OWN inventory (plan §7.5), and the lead's
 /// whole-lot export. Display fields were frozen at claim time on the server.
@@ -113,6 +126,12 @@ final class LotStore {
     private(set) var isWorking = false
 
     func ranges(for lot: Lot) -> [BuyRange] { rangesByLot[lot.id] ?? [] }
+    /// The lots that take cards right now — the ONE list every "can this group be
+    /// filed into?" asks (LotFolders.isFileable), so Scan, the detail screen and the
+    /// Group sheet can never disagree.
+    var openLotIds: Set<UUID> { Set(lots.filter { $0.status == .active }.map(\.id)) }
+    /// The launch value is not an answer: until lots have loaded, lot groups are trusted.
+    var hasLoaded: Bool { loadedAt != nil }
     func claims(for lot: Lot) -> [TeamClaim] { claimsByLot[lot.id] ?? [] }
 
     /// What this member should see: a buyer never sees a lead's unfinished draft.
@@ -122,8 +141,24 @@ final class LotStore {
 
     // MARK: Load
 
+    /// One load at a time per team: launch, the app coming forward, the team id
+    /// appearing and a claim landing can all ask at once, and each load is six
+    /// requests. A second ask for the same team joins the one already running.
     func load(teamId: UUID?) async {
         guard TeamsFeature.isAvailable else { return }
+        if let running = inFlight, running.teamId == teamId {
+            await running.task.value
+            return
+        }
+        let token = UUID()
+        let task = Task { await self.performLoad(teamId: teamId) }
+        inFlight = (token, teamId, task)
+        await task.value
+        if inFlight?.token == token { inFlight = nil }
+    }
+    private var inFlight: (token: UUID, teamId: UUID?, task: Task<Void, Never>)?
+
+    private func performLoad(teamId: UUID?) async {
         guard let teamId else {
             // Not on a team is a real, loaded answer: the stamp says so, which is
             // what lets a group sync detach the lot groups of a team just left.
@@ -204,10 +239,17 @@ final class LotStore {
     /// re-reads the lot figures — cheap, and it keeps ONE code path for what the
     /// dashboard shows. Claims are still decided on the server; this is display.
     func startLive(teamId: UUID) async {
-        guard TeamsFeature.isAvailable, live == nil else { return }
+        guard TeamsFeature.isAvailable else { return }
+        if live != nil {
+            // Already listening for THIS team; a different team (left one, joined
+            // another between two loads) must not keep reloading the old team's lots.
+            guard liveTeamId != teamId else { return }
+            await stopLive()
+        }
         let channel = Backend.client.channel("lot-claims-\(teamId.uuidString)")
         let changes = channel.postgresChange(AnyAction.self, schema: "public", table: "lot_claims")
         live = channel
+        liveTeamId = teamId
         liveTask = Task { [weak self] in
             for await _ in changes {
                 guard let self else { return }
@@ -230,7 +272,10 @@ final class LotStore {
     }
     private var reloadTask: Task<Void, Never>?
 
+    private var liveTeamId: UUID?
+
     func stopLive() async {
+        liveTeamId = nil
         liveTask?.cancel(); liveTask = nil
         if let live { await Backend.client.removeChannel(live) }
         live = nil

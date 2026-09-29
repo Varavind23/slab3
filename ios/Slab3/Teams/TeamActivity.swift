@@ -43,14 +43,7 @@ enum TeamActivity {
     /// Every lot a lead can review, open ones first by deadline (soonest, then no
     /// deadline), then closed ones newest first. Drafts have no buys to show.
     static func boxes(lots: [Lot], claimsByLot: [UUID: [TeamClaim]]) -> [LotBox] {
-        let open = lots.filter { $0.status == .active }.sorted {
-            switch ($0.deadline, $1.deadline) {
-            case let (a?, b?): return a < b
-            case (_?, nil): return true
-            case (nil, _?): return false
-            case (nil, nil): return $0.createdAt > $1.createdAt
-            }
-        }
+        let open = lots.filter { $0.status == .active }.sorted(by: Lot.soonestFirst)
         let closed = lots.filter { $0.status == .closed }.sorted { $0.createdAt > $1.createdAt }
         return (open + closed).map { lot in
             let claims = counted(claimsByLot[lot.id] ?? [])

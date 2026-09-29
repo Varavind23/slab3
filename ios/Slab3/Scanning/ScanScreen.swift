@@ -30,9 +30,8 @@ struct ScanScreen: View {
     /// other screen reads it; same call `CardDetailScreen` makes for the Card
     /// Ladder connection flag.
     @AppStorage("caliper_auto_scan") private var autoScan = true
-    /// The group new scans file into (ScanFilingBar), by `Folder.localId`. Empty is
-    /// none — the default, and the Scan tab exactly as it was. Here and not in
-    /// `AppState` for the same reason as `autoScan`: no other screen reads it.
+    /// Every group, for the filing bar's target (`AppState.scanTargetId`, which is
+    /// also the team's current lot — it lives in AppState so Teams can read it).
     @Query(sort: \Folder.createdAt, order: .reverse) private var groups: [Folder]
     @State private var showTargetSheet = false
     @AppStorage(PriceService.connectedKey) private var cardLadderConnected = false
@@ -221,7 +220,7 @@ struct ScanScreen: View {
             // Until this launch has LOADED the lots (a cold start at a show with no
             // signal) the local group is trusted: dropping it would send every
             // scan to plain inventory, unclaimed, when the claim would simply queue.
-            return LotFolders.isFileable(group, openLots: Set(openLots.keys), lotsLoaded: app.lots.loadedAt != nil)
+            return LotFolders.isFileable(group, openLots: app.lots.openLotIds, lotsLoaded: app.lots.hasLoaded)
         }
     }
 
@@ -351,7 +350,7 @@ struct ScanScreen: View {
         // CL Value it caches), and without the mark the claim could run before the
         // refresh begins and fetch Card Ladder a second time.
         if let scanTarget {
-            card.pricesLoading = true
+            if scanTarget.isTeamLot { card.pricesLoading = true }
             CardFiling.file([card], into: scanTarget, in: context)
         }
         withAnimation(Caliper.easeOut) { recentCardIDs.insert(card.localId, at: 0) }

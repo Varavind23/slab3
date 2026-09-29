@@ -176,8 +176,15 @@ struct MainShell: View {
         .preferredColorScheme(.dark) // Caliper is dark-only; cyan-on-black doesn't invert.
     }
 
+    /// Launch, the app coming forward, the connection returning and a repair can
+    /// all ask at once; a second run while one is going would re-submit every
+    /// waiting claim and count offline scans twice in the sync bar. One at a time.
+    @State private var refreshingTeam = false
+
     private func refreshTeam() async {
-        guard TeamsFeature.isAvailable else { return }
+        guard TeamsFeature.isAvailable, !refreshingTeam else { return }
+        refreshingTeam = true
+        defer { refreshingTeam = false }
         await app.team.load()
         if app.team.lastLoadOK {
             let wasOnTeam = app.onTeamHint

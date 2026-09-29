@@ -49,7 +49,8 @@ xcodebuild -project ios/Slab3.xcodeproj -scheme Slab3 \
 # id AND separate SwiftData store) so a TestFlight build and a dev build coexist on
 # one device. It talks to the SAME live Supabase as the shipped app.
 # Shipping version + build live ONLY in ios/project.yml (MARKETING_VERSION /
-# CURRENT_PROJECT_VERSION, currently 0.7 / 9, on the release/0.5 branch — 0.7 is
+# CURRENT_PROJECT_VERSION, currently 0.8 / 10, on the release/0.5 branch — 0.8 is
+# Teams going live (teams-first overhaul, 2026-09-28); 0.7 (7-9) was
 # the max-buy lens plus the 2026-09-23 review fixes; V5 was 0.5 / 5-6 (6 the
 # selection-mode scroll fix in 564520b); V4 was 0.4 / 4, on TestFlight since
 # 2026-09-06); bump BOTH targets together
@@ -712,15 +713,19 @@ that is not warranted to hide one panel. The unlock is
 `@AppStorage("caliper_testing_unlocked")`, read by exactly two screens, so like
 `caliper_auto_scan` it is deliberately NOT in `AppState`.
 
-### Teams — lots, buy ranges, claims (LOCAL stack only)
+### Teams — lots, buy ranges, claims (LIVE since 2026-09-28, app 0.8)
 
 A lead's team buys into shared LOTS: each a list of buckets (buy ranges: CL-value,
 grade, conf and year bounds, plus a card cap AND a dollar budget), at most 3 of one card
-at one grade per lot. **Nothing Teams-side is on the live project**: the migrations
-`supabase/migrations/20260925*` + `20260928000000_bucket_band.sql` are applied only to
-`supabase start`, and the whole feature is gated on `TeamsFeature.isAvailable`
-(= `Backend.isLocal`, a DEBUG build launched from a "… Local" scheme). A live push, and
-raising the team's Card Ladder budget, are owner decisions, not build steps. The owner's
+at one grade per lot. **It is on the live project**: the migrations
+`supabase/migrations/20260925*` + `20260928000000_bucket_band.sql` were pushed
+2026-09-28 (owner's yes), so real teams' lots and claims now live in those tables —
+change them the way you would change `price_cache`: a new migration, never an edit of an
+applied one, and a push only with a yes. `TeamsFeature.isAvailable` is on in every build
+(`killSwitch` turns it inert; tests prove the off state makes no request). Every
+signed-in user asks once per foreground whether they are on a team; being ON one is what
+shows any team UI. Raising the team's Card Ladder budget is still an owner decision (an
+Edge Function deploy). The owner's
 design decisions (D1–D30, 2026-09-28) live in
 `~/.claude/plans/pasted-content-id-4412-for-this-indexed-rabin.md`; `teams.md` is the
 original brief and is superseded where they differ.
