@@ -81,6 +81,7 @@ struct ScanFilingBar: View {
 /// one tap, not a hunt for how to clear it.
 struct ScanTargetSheet: View {
     @Binding var targetId: String
+    @Binding var explicitNone: Bool
     /// Open team lots, by id. Their groups list FIRST — a buyer at a show is
     /// almost always picking the lot — each tagged and with its deadline.
     var openLots: [UUID: Lot] = [:]
@@ -152,6 +153,7 @@ struct ScanTargetSheet: View {
 
     private func choose(_ group: Folder?) {
         targetId = group?.localId.uuidString ?? ""
+        explicitNone = group == nil
         dismiss()
     }
 }

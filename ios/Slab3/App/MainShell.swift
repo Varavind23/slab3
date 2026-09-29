@@ -170,14 +170,20 @@ struct MainShell: View {
                                         lotsTeamId: app.lots.loadedTeamId) else { return }
         let released = LotFolders.sync(app.lots.lots, isLead: app.team.isLead, in: context)
         let repair = LotFolders.repair(app.lots.lots, isLead: app.team.isLead, in: context)
-        let key = ScanScreen.scanGroupKey
-        let stored = UserDefaults.standard.string(forKey: key).flatMap(UUID.init(uuidString:))
-        if let stored, let kept = repair.merged[stored] {
-            UserDefaults.standard.set(kept.uuidString, forKey: key)
-        } else if let stored, released.contains(stored), !repair.reattached.contains(stored) {
+        var stored = app.scanTargetUUID
+        if let id = stored, let kept = repair.merged[id] {
+            stored = kept
+        } else if let id = stored, released.contains(id), !repair.reattached.contains(id) {
             // That group is not a lot any more; filing into it would skip the claim.
-            UserDefaults.standard.set("", forKey: key)
+            stored = nil
         }
+        // Resume, drop a closed lot, or pick the only open one (ScanTargetRule).
+        let groups = ((try? context.fetch(FetchDescriptor<Folder>())) ?? []).map(GroupRef.init)
+        let target = ScanTargetRule.resolve(stored: stored, explicitNone: app.scanTargetExplicitNone,
+                                            groups: groups, lots: app.lots.lots, lotsLoaded: true,
+                                            onTeam: app.team.team != nil)
+        let targetId = target?.uuidString ?? ""
+        if app.scanTargetId != targetId { app.scanTargetId = targetId }
         if repair.requeued > 0 { Task { await refreshTeam() } }
     }
 

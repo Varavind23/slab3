@@ -33,9 +33,6 @@ struct ScanScreen: View {
     /// The group new scans file into (ScanFilingBar), by `Folder.localId`. Empty is
     /// none — the default, and the Scan tab exactly as it was. Here and not in
     /// `AppState` for the same reason as `autoScan`: no other screen reads it.
-    @AppStorage(ScanScreen.scanGroupKey) private var scanGroupId = ""
-    /// MainShell rewrites it when a lot group is detached or merged.
-    static let scanGroupKey = "caliper_scan_group"
     @Query(sort: \Folder.createdAt, order: .reverse) private var groups: [Folder]
     @State private var showTargetSheet = false
     @AppStorage(PriceService.connectedKey) private var cardLadderConnected = false
@@ -68,7 +65,7 @@ struct ScanScreen: View {
         // has to reach it on every change — not only when the camera starts.
         .onChange(of: autoScan) { _, on in controller.autoScan = on }
         .sheet(isPresented: $showTargetSheet) {
-            ScanTargetSheet(targetId: $scanGroupId, openLots: openLots).presentationDetents([.large])
+            ScanTargetSheet(targetId: $app.scanTargetId, explicitNone: $app.scanTargetExplicitNone, openLots: openLots).presentationDetents([.large])
         }
         .sheet(isPresented: $showManualEntry) {
             ManualEntrySheet { scan in add(scan, photo: nil) }
@@ -201,9 +198,9 @@ struct ScanScreen: View {
     /// The chosen group, if it still exists and can still be filed into. A group
     /// deleted or turned into a team lot since reads as none, never as a stale name.
     private var scanTarget: Folder? {
-        guard !scanGroupId.isEmpty else { return nil }
+        guard !app.scanTargetId.isEmpty else { return nil }
         return groups.first { group in
-            guard group.localId.uuidString == scanGroupId, !group.archived else { return false }
+            guard group.localId.uuidString == app.scanTargetId, !group.archived else { return false }
             // A lot's group only while the lot is open — a closed lot takes nothing.
             // Until this launch has LOADED the lots (a cold start at a show with no
             // signal) the local group is trusted: dropping it would send every

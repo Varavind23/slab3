@@ -102,6 +102,20 @@ final class AppState {
 
     // MARK: Session state
 
+    /// The group new scans file into, by `Folder.localId` ("" = none). Moved here
+    /// from ScanScreen (teams-first plan) because it is also the team's CURRENT
+    /// LOT — Teams, the Scan bar and Team activity read it (CurrentLot). Same
+    /// UserDefaults key as before, so a chosen group survives the update.
+    var scanTargetId: String {
+        didSet { defaults.set(scanTargetId, forKey: Keys.scanGroup) }
+    }
+    /// The user picked None on purpose. Stops the single-open-lot auto-pick
+    /// (ScanTargetRule) from overriding a deliberate choice.
+    var scanTargetExplicitNone: Bool {
+        didSet { defaults.set(scanTargetExplicitNone, forKey: Keys.scanGroupNone) }
+    }
+    var scanTargetUUID: UUID? { UUID(uuidString: scanTargetId) }
+
     var tab: AppTab = .scan
     /// Bumped when the tab ALREADY showing is tapped again. Screens that push a
     /// detail watch it and pop back to their list — the standard iOS reselect.
@@ -124,6 +138,8 @@ final class AppState {
         let source = PriceSource(rawValue: defaults.string(forKey: Keys.source) ?? "") ?? .cl
         activeSource = source
         hasSeenOnboarding = defaults.bool(forKey: Keys.onboarded)
+        scanTargetId = defaults.string(forKey: Keys.scanGroup) ?? ""
+        scanTargetExplicitNone = defaults.bool(forKey: Keys.scanGroupNone)
         let saved = (defaults.array(forKey: Keys.columns) as? [String]) ?? []
         let restored = saved.compactMap(CSVColumn.init(rawValue:))
         enabledColumns = restored.isEmpty ? CSVColumn.defaults : restored
@@ -167,6 +183,8 @@ final class AppState {
         static let onboarded = "caliper_seen_onboarding"
         static let columns = "caliper_csv_columns"
         static let payout = "caliper_payout_percent"
+        static let scanGroup = "caliper_scan_group"
+        static let scanGroupNone = "caliper_scan_group_none"
     }
 }
 
