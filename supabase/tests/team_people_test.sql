@@ -9,7 +9,7 @@
 -- refuses two different accounts; a person with credit cannot be removed.
 
 begin;
-select plan(41);
+select plan(44);
 
 -- ── Seed (as postgres) ──────────────────────────────────────────────────────
 -- 1 Lead  2 Buyer  3 Consignor (has the app, not on the team)  4 Other consignor
@@ -104,6 +104,14 @@ select is(invite_person((select v from ids where k = 'mike'))->>'code', (select 
 set local request.jwt.claims to '{"sub":"40000000-0000-0000-0000-000000000002","role":"authenticated"}';
 select throws_ok($$select invite_person((select v from ids where k = 'mike'))$$,
   'P0001', 'not_lead', 'a buyer cannot make an invite');
+-- Workflow test 2026-10-06: a member entering a person's code would absorb their credit.
+select is(link_person((select v from codes where k = 'mike'))->>'error', 'on_this_team',
+  'a team member cannot link themselves to a virtual person');
+set local request.jwt.claims to '{"sub":"40000000-0000-0000-0000-000000000001","role":"authenticated"}';
+select is(link_person((select v from codes where k = 'mike'))->>'error', 'on_this_team',
+  'nor can the lead, trying their own code');
+select is((select user_id from team_people where id = (select v from ids where k = 'mike')), null,
+  'and the person stays virtual, the code still good for them');
 
 set local request.jwt.claims to '{"sub":"40000000-0000-0000-0000-000000000003","role":"authenticated"}';
 select is(my_credited_cards(), '[]'::jsonb, 'before linking, a consignor sees nothing');

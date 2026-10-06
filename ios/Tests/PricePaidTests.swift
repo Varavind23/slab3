@@ -91,4 +91,40 @@ struct PricePaidTests {
         #expect(CSVExport.total([c], preferring: .cl, tracksPaid: true).paidCount == 0)
         #expect(CSVExport.rows([c], columns: [.paid], payoutPercent: nil, tracksPaid: true).last == "")
     }
+
+    // MARK: Typing a figure (workflow test 2026-10-06: "99.99" was stored as $9,999)
+
+    @Test func typingKeepsTheDecimalPoint() {
+        let us = Locale(identifier: "en_US")
+        // Every prefix a person passes through on the way to 99.99.
+        #expect(["9", "99", "99.", "99.9", "99.99"].map { PaidEntry.cents(from: $0, locale: us) }
+                == [900, 9_900, 9_900, 9_990, 9_999])
+        #expect(PaidEntry.cents(from: "1,250.50", locale: us) == 125_050)
+        #expect(PaidEntry.cents(from: "$1250.5", locale: us) == 125_050)
+        #expect(PaidEntry.cents(from: ".5", locale: us) == 50)
+    }
+
+    @Test func commaDecimalRegions() {
+        let de = Locale(identifier: "de_DE")
+        #expect(PaidEntry.cents(from: "99,99", locale: de) == 9_999)
+        #expect(PaidEntry.cents(from: "1.250,50", locale: de) == 125_050)
+    }
+
+    @Test func nonsenseIsClearedNeverAWrongAmount() {
+        let us = Locale(identifier: "en_US")
+        for junk in ["", " ", ".", "1.2.3", "-5", "abc", "12a", "100000000", "٣"] {
+            #expect(PaidEntry.cents(from: junk, locale: us) == nil, "\(junk)")
+        }
+        #expect(PaidEntry.cents(from: "0", locale: us) == 0)
+    }
+
+    @Test func displayRoundTrips() {
+        let us = Locale(identifier: "en_US")
+        #expect(PaidEntry.display(nil, locale: us) == "")
+        #expect(PaidEntry.display(125_000, locale: us) == "1,250")
+        #expect(PaidEntry.display(125_050, locale: us) == "1,250.50")
+        for cents in [0, 1, 99, 9_999, 125_050, 9_999_999_99] {
+            #expect(PaidEntry.cents(from: PaidEntry.display(cents, locale: us), locale: us) == cents)
+        }
+    }
 }

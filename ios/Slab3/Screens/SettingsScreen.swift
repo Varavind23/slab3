@@ -121,7 +121,7 @@ struct SettingsScreen: View {
         .sheet(isPresented: $showConnect) { CardLadderConnectView() }
         .sheet(isPresented: $showPayout) { PayoutSheet(app: app).presentationDetents([.height(260)]) }
         .sheet(isPresented: $showMaxBuy, onDismiss: { maxBuySummary = MaxBuyDefaults.summary }) {
-            MaxBuySettingsSheet()
+            MaxBuySettingsSheet(isLead: app.team.isLead)
         }
         .sheet(isPresented: $showTeamOnboard) {
             // Joined or created: straight to the new Teams tab (D28), where the

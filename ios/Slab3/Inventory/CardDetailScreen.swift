@@ -218,7 +218,7 @@ struct CardDetailScreen: View {
             HStack {
                 Text("Year").caliperLabel()
                 Spacer()
-                TextField("Year", value: $card.year, format: .number)
+                TextField("Year", value: $card.year, format: .number.grouping(.never))
                     .font(.price)
                     .keyboardType(.numberPad)
                     .multilineTextAlignment(.trailing)
@@ -235,11 +235,7 @@ struct CardDetailScreen: View {
         HStack {
             Text("Paid").caliperLabel()
             Spacer()
-            TextField("—", value: dollars, format: .number.precision(.fractionLength(0...2)))
-                .font(.price)
-                .keyboardType(.decimalPad)
-                .multilineTextAlignment(.trailing)
-                .foregroundStyle(Caliper.textPrimary)
+            PaidField(card: card)
         }
         .padding(Caliper.rowPad)
         .caliperPanel()
@@ -313,17 +309,68 @@ struct CardDetailScreen: View {
                 set: { card[keyPath: keyPath] = $0.isEmpty ? nil : $0 })
     }
 
-    /// Price paid in dollars and cents, stored in `paidCents`. Cleared input is
-    /// nil, never 0.
-    private var dollars: Binding<Double?> {
-        Binding(
-            get: { card.paidCents.map { Double($0) / 100 } },
-            // Out-of-range input (negative, non-finite, or past Int — a long paste
-            // would trap) is treated as cleared, never stored.
-            set: { card.paidCents = $0.flatMap { d in
-                d.isFinite && d >= 0 && d < 100_000_000 ? Int((d * 100).rounded()) : nil
-            } }
-        )
+}
+
+/// The Paid entry. TEXT-backed on purpose (workflow test 2026-10-06): a
+/// `TextField(value:format:)` re-parses and re-formats on every keystroke, so
+/// "99." became "99" before the next digit arrived and typing 99.99 stored
+/// $9,999 — straight into Export's total and the CSV. Here the field keeps exactly
+/// what was typed, `paidCents` follows it live (`PaidEntry.cents`), and the
+/// tidy formatted figure comes back only when the field loses focus.
+private struct PaidField: View {
+    @Bindable var card: Card
+    @State private var text = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        TextField("—", text: $text)
+            .font(.price)
+            .keyboardType(.decimalPad)
+            .multilineTextAlignment(.trailing)
+            .foregroundStyle(Caliper.textPrimary)
+            .focused($focused)
+            .onAppear { text = PaidEntry.display(card.paidCents) }
+            .onChange(of: card.localId) { _, _ in text = PaidEntry.display(card.paidCents) }
+            .onChange(of: text) { _, new in
+                guard focused else { return }
+                card.paidCents = PaidEntry.cents(from: new)
+            }
+            .onChange(of: focused) { _, isFocused in
+                if !isFocused { text = PaidEntry.display(card.paidCents) }
+            }
+    }
+}
+
+/// Reading and writing the Paid figure as text. Pure, so the rules are tested
+/// (PricePaidTests) without a field.
+enum PaidEntry {
+    /// Cents from what the user typed, in their region's notation ("1,250.50" or
+    /// "1.250,50"), with or without a "$". A trailing separator ("99.") is fine —
+    /// it is mid-typing. Empty, nonsense, negative, or past $100M (a long paste
+    /// would overflow) is nil: cleared, never stored as 0 or a wrong amount.
+    static func cents(from text: String, locale: Locale = .current) -> Int? {
+        let decimal = locale.decimalSeparator ?? "."
+        let grouping = locale.groupingSeparator ?? ","
+        var s = text.replacingOccurrences(of: "$", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !grouping.isEmpty, grouping != decimal {
+            s = s.replacingOccurrences(of: grouping, with: "")
+                .replacingOccurrences(of: "\u{00A0}", with: "")   // fr/ru grouping space
+        }
+        if decimal != "." { s = s.replacingOccurrences(of: decimal, with: ".") }
+        guard !s.isEmpty, s != ".", s.filter({ $0 == "." }).count <= 1,
+              s.allSatisfy({ $0.isASCII && ($0.isNumber || $0 == ".") }),
+              let dollars = Double(s), dollars.isFinite, dollars < 100_000_000 else { return nil }
+        return Int((dollars * 100).rounded())
+    }
+
+    /// "1,250" for whole dollars, "1,250.50" otherwise; "" for none (the "—"
+    /// placeholder shows).
+    static func display(_ cents: Int?, locale: Locale = .current) -> String {
+        guard let cents else { return "" }
+        let whole = cents % 100 == 0
+        return (Decimal(cents) / 100).formatted(
+            .number.precision(.fractionLength(whole ? 0 : 2)).locale(locale))
     }
 }
 

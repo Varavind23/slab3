@@ -188,6 +188,14 @@ begin
     insert into join_attempts (user_id) values (v_uid);
     return jsonb_build_object('error', 'invalid_code');
   end if;
+  -- A code is for someone OUTSIDE the team. A member (the lead trying it out, or a
+  -- buyer handed it) who linked would have every slab credited to that person
+  -- folded into their own buys, the entry gone from the lead's roster, and no way
+  -- back: unlink refuses a member's row, remove refuses a person with credit
+  -- (workflow test 2026-10-06). Not counted: the code was real.
+  if is_team_member(v_row.team_id) then
+    return jsonb_build_object('error', 'on_this_team');
+  end if;
   if exists (select 1 from team_people where team_id = v_row.team_id and user_id = v_uid) then
     return jsonb_build_object('error', 'already_linked');
   end if;

@@ -164,6 +164,9 @@ enum MaxBuyDefaults {
 /// Was the second half of the testing-passcode sheet until 0.9, when max buy
 /// became available to everyone (owner, 2026-10-01).
 struct MaxBuySettingsSheet: View {
+    /// The lead reads where to change the team's pair, not "set by your team lead"
+    /// (workflow test 2026-10-06: the lead was told their own setting was someone else's).
+    var isLead = false
     @Environment(\.dismiss) private var dismiss
 
     @State private var knobs = MaxBuyDefaults.phone
@@ -204,7 +207,7 @@ struct MaxBuySettingsSheet: View {
                     // the phone's own would only be a number that does nothing.
                     labelled("Skew to the low end", value: percent(team.skew)) { EmptyView() }
                     labelled("Margin", value: percent(team.margin)) { EmptyView() }
-                    Text("Skew and margin are set by your team lead.").caliperMeta()
+                    Text(isLead ? "You set skew and margin for the whole team in Teams → Max buy." : "Skew and margin are set by your team lead.").caliperMeta()
                 } else {
                     labelled("Skew to the low end", value: percent(knobs.skew)) {
                         MaxBuyKnobSlider(value: $knobs.skew)

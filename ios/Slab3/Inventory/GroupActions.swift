@@ -78,6 +78,10 @@ struct GroupManageMenu: ViewModifier {
     var pending: PendingDeletionStore?
     /// Run after a choice, e.g. to close the sheet the row is in.
     var after: () -> Void = {}
+    /// Run after "…and its cards" only: the Undo bar lives under any sheet, and its
+    /// 5s window ran out unseen behind an open Filters sheet (workflow test
+    /// 2026-10-06), so the sheet closes to show it.
+    var revealUndo: () -> Void = {}
     @Environment(\.modelContext) private var context
     @State private var confirmDelete = false
 
@@ -105,7 +109,7 @@ struct GroupManageMenu: ViewModifier {
                     if let pending, !group.cards.isEmpty {
                         let n = group.cards.count
                         Button("Delete group and its \(n) \(n == 1 ? "card" : "cards")", role: .destructive) {
-                            GroupActions.deleteWithCards(group, app: app, pending: pending, in: context); after()
+                            GroupActions.deleteWithCards(group, app: app, pending: pending, in: context); after(); revealUndo()
                         }
                     }
                 } message: {
@@ -121,7 +125,8 @@ struct GroupManageMenu: ViewModifier {
 
 extension View {
     func groupManageMenu(_ group: Folder, app: AppState, pending: PendingDeletionStore? = nil,
-                         after: @escaping () -> Void = {}) -> some View {
-        modifier(GroupManageMenu(group: group, app: app, pending: pending, after: after))
+                         after: @escaping () -> Void = {},
+                         revealUndo: @escaping () -> Void = {}) -> some View {
+        modifier(GroupManageMenu(group: group, app: app, pending: pending, after: after, revealUndo: revealUndo))
     }
 }

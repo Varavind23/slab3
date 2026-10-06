@@ -422,6 +422,7 @@ enum TeamError {
         case "invalid_link_code": return "That code isn't valid. Codes work once and expire after 7 days."
         case "too_many_attempts": return "Too many wrong codes. Try again in an hour."
         case "already_linked": return "Already linked to this team."
+        case "on_this_team": return "You're on this team, so there's nothing to link. This code is for the person it was made for."
         case "has_credit": return "They have cards tagged to them. Merge them into someone, or untag the cards first."
         case "linked_to_different_accounts": return "Both are linked to different accounts — they're two people."
         case "is_member": return "They're on the team. Remove them from the team instead."

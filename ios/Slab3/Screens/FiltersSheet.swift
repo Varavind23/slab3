@@ -93,7 +93,7 @@ struct FiltersSheet: View {
                 active: app.filter == .group(group.localId),
                 leading: { Circle().fill(group.hue).frame(width: 8, height: 8) }
             ) { app.filter = .group(group.localId) }
-            .groupManageMenu(group, app: app, pending: pendingDeletes)
+            .groupManageMenu(group, app: app, pending: pendingDeletes, revealUndo: { dismiss() })
             Hairline()
         }
     }
@@ -154,7 +154,7 @@ struct GroupSheet: View {
                     trailing: "›",
                     leading: { Circle().fill(group.hue).frame(width: 8, height: 8) }
                 ) { assign(to: group) }
-                .groupManageMenu(group, app: app, pending: pendingDeletes)
+                .groupManageMenu(group, app: app, pending: pendingDeletes, revealUndo: { dismiss() })
                 Hairline()
             }
             if groups.isEmpty {
