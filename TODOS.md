@@ -177,3 +177,19 @@ plus a place to put it, so it waits for a design decision.
   (2.98.2) has no `functions logs`, and reading the PAT was blocked. Upgrading the
   CLI would let us confirm the 403 rate before/after the fix, i.e. whether the UA
   wall was *the* bug or merely *a* bug.
+
+## Price paid — deferred from v1 (2026-10-02)
+
+Opt-in per-card "Paid" (Settings → Payout → Track price paid; stored in
+`Card.manualPriceCents`). v1 reaches Export only: the CSV `paid_usd` column, the
+`payout_usd` value and the Export total.
+
+* **Team lots ignore it.** Lot money is CL Value at claim, decided server-side by
+  `claim_lot_scan` from its own caches. To make Paid count toward lot budgets, the
+  phone would have to send it and the lot tables would need a migration. That's a
+  production release, so it waits for a client to ask for it.
+* **Bulk entry.** "Set paid to __% of CL" on a selection fits the 90% habit. It would
+  be a one-time snapshot, so later CL changes wouldn't move it. Entry is card detail
+  only until someone finds that too slow.
+* **Cards totals and sort stay on market value** (`LensTotal`, the selection bar), so
+  a selection total and the Export total can differ for the same cards.

@@ -31,6 +31,8 @@ struct SwipeableCardRow: View {
     let lens: PriceLens
     var selectable: Bool = false
     var selected: Bool = false
+    /// Price paid, already gated on the Settings toggle (`AppState.paidCents`).
+    var paidCents: Int? = nil
     /// Where a file action would put this card. `nil` = nothing has ever been
     /// filed, so the action opens the picker rather than inventing a destination.
     let fileTarget: Folder?
@@ -79,7 +81,7 @@ struct SwipeableCardRow: View {
             // the row at all, which is what stops the actions showing through it.
             if trayMounted { tray }
 
-            CardRow(card: card, lens: lens, selectable: selectable, selected: selected)
+            CardRow(card: card, lens: lens, selectable: selectable, selected: selected, paidCents: paidCents)
                 // Full width BEFORE the hit shape is taken. The row's own trailing
                 // content — price, meter, grade chip — sits against the right edge,
                 // and without this the tappable rect could stop short of it, which

@@ -53,6 +53,12 @@ struct SettingsScreen: View {
                         $0.formatted(.number.precision(.fractionLength(1))) + "%"
                     } ?? "Not set") { showPayout = true }
                     Hairline()
+                    // Opt-in (2026-10-02): a per-card "Paid" figure that Export
+                    // uses over market value. Off, it exists nowhere in the app.
+                    row("Track price paid", value: app.tracksPaid ? "On" : "Off") {
+                        app.tracksPaid.toggle()
+                    }
+                    Hairline()
                     row("Payout provider", value: "Not set")
                     if app.team.team == nil {
                         Hairline()
@@ -84,6 +90,8 @@ struct SettingsScreen: View {
                     Button {
                         // The next person to sign in on this phone may be on no team.
                         app.onTeamHint = false
+                        // Nothing queued may run under the next account's session.
+                        LotClaimQueue.shared.reset()
                         Task { await auth.signOut() }
                     } label: {
                         HStack {

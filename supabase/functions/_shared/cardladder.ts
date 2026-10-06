@@ -30,7 +30,14 @@ export type FetchLike = typeof fetch;
 interface Deps {
   fetch?: FetchLike;
 }
-const f = (d?: Deps): FetchLike => d?.fetch ?? fetch;
+/** Every outbound call gives up after this long (review 2026-10-02). There was no
+ *  timeout at all: a hung Google endpoint held the Edge Function until the
+ *  platform killed it. An abort surfaces as ClError("network") — transient, so
+ *  nothing is cached and no shown price is cleared. */
+export const FETCH_TIMEOUT_MS = 10_000;
+const timedFetch: FetchLike = (input, init) =>
+  fetch(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+const f = (d?: Deps): FetchLike => d?.fetch ?? timedFetch;
 
 // ── Typed failures. Callers map these to the pipeline's SourceError kinds. ──────
 export type ClErrorKind =
@@ -210,7 +217,14 @@ async function callFn(name: string, data: unknown, idToken: string, deps?: Deps)
   if (status === "UNAUTHENTICATED" || status === "PERMISSION_DENIED") throw new ClError("auth_expired", body.error.message);
   if (body?.error) throw new ClError("network", body.error.message ?? `${name} error`);
   if (!res.ok) throw new ClError("network", `${name} ${res.status}`);
-  return body?.result;
+  // A callable always answers {result: …} — `null` is a real answer ("no such
+  // cert"). No `result` key at all is not an answer: an edge page or a changed
+  // envelope, which used to read as "no price" and was cached for 24h, for every
+  // user (review 2026-10-02). Transient instead: nothing cached, nothing cleared.
+  if (!body || typeof body !== "object" || !("result" in body)) {
+    throw new ClError("network", `${name} returned no result`);
+  }
+  return body.result;
 }
 
 /** Scanned cert + grader → Card Ladder card identity (profileId + grade code).
@@ -302,6 +316,9 @@ export async function estimate(
     idToken,
     deps,
   );
+  // "Known card, no value" arrives as an object of nulls (fixture
+  // cardladder-estimate-novalue.json). Anything else is not an estimate.
+  if (!r || typeof r !== "object") throw new ClError("network", "httpcardestimate returned no estimate");
   return parseEstimate(r, window);
 }
 
@@ -354,6 +371,9 @@ export async function fetchProfileSales(
   deps?: Deps,
 ): Promise<ClSale[]> {
   const r = await callFn("httpprofilesales", { cert, grader }, idToken, deps);
+  // An empty archive is `{sales: []}` and is cached as "no comps". A reply with
+  // no list at all is not that answer, and must not be cached as it.
+  if (!Array.isArray(r?.sales)) throw new ClError("network", "httpprofilesales returned no sales list");
   return parseSales(r);
 }
 

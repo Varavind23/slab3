@@ -152,4 +152,54 @@ struct LotClaimQueueTests {
         try ctx.save()
         #expect(!LotClaims.isAlive(card))
     }
+
+    // MARK: Review 2026-10-02
+
+    /// A claim whose answer never came back may be committed on the server, so a
+    /// card in that state still has a slot to give back when it leaves the lot.
+    @Test func anUnansweredClaimMayHoldASlot() throws {
+        let card = Card(scan: CertScan(grader: .psa, certNumber: "1", raw: "1"))
+        for (state, may) in [(LotClaimState.pending, true), (.checking, true), (.confirmed, true),
+                             (.overLimit, true), (.blocked, false), (.chooseRange, false)] {
+            card.lotClaimState = state
+            #expect(card.mayHoldLotSlot == may, "\(state)")
+        }
+        card.lotClaimState = nil
+        #expect(!card.mayHoldLotSlot)
+    }
+
+    /// A release is only sent as the account that made it; one stored before the
+    /// owner was recorded is sent as before.
+    @Test func aReleaseBelongsToItsAccount() throws {
+        let me = UUID(), other = UUID()
+        let mine = PendingRelease(lotId: UUID(), cert: "1", grader: "psa", userId: me)
+        #expect(mine.belongs(to: me))
+        #expect(!mine.belongs(to: other))
+        #expect(!mine.belongs(to: nil), "signed out: wait")
+        let legacy = try JSONDecoder().decode(PendingRelease.self, from: Data(
+            #"{"lotId":"\#(UUID().uuidString)","cert":"1","grader":"psa","queuedAt":0}"#.utf8))
+        #expect(legacy.userId == nil)
+        #expect(legacy.belongs(to: other))
+    }
+
+    /// Filing a big batch of stale cards into a lot must not become a bulk refresh.
+    @Test func coldRefreshesAreRationed() {
+        let start = Date(timeIntervalSince1970: 2_000_000_000)
+        let granted = (0..<(LotClaims.coldRefreshLimit + 5)).filter { _ in LotClaims.takeColdRefresh(now: start) }
+        #expect(granted.count == LotClaims.coldRefreshLimit)
+        #expect(LotClaims.takeColdRefresh(now: start.addingTimeInterval(LotClaims.coldRefreshWindow + 1)),
+                "the allowance comes back once the window has passed")
+    }
+
+    /// Sign-out drops what is queued and lets anyone waiting on it go.
+    @Test func resetDropsQueuedOpsAndFreesWaiters() async {
+        let queue = LotClaimQueue()
+        queue.perform = { _, _ in try? await Task.sleep(for: .milliseconds(50)) }
+        queue.enqueue(.claim(cardId: UUID(), lotId: UUID(), rangeId: nil))
+        async let waited: Void = queue.submit(.claim(cardId: UUID(), lotId: UUID(), rangeId: nil))
+        try? await Task.sleep(for: .milliseconds(5))
+        queue.reset()
+        await waited
+        #expect(queue.pending.isEmpty)
+    }
 }

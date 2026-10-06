@@ -66,7 +66,7 @@ enum PriceService {
         includeCardLadder: Bool = true
     ) async -> Result {
         card.pricesLoading = true
-        defer { card.pricesLoading = false }
+        defer { if isAlive(card) { card.pricesLoading = false } }
         var result = Result()
         result.courtyard = await refreshCourtyard(card, force: force)
         if includeCardLadder {
@@ -85,7 +85,11 @@ enum PriceService {
         // knows this cert or it does not. That retires the whole `identify()`
         // problem for this source — the Algolia path could only ever answer with
         // "a slab of the same card", and when it guessed it priced someone else's.
-        switch await scanner.lookup(cert: card.certNumber, grader: card.grader, force: force) {
+        let answer = await scanner.lookup(cert: card.certNumber, grader: card.grader, force: force)
+        // Deleted while it was asked (the undo window commits in 5s; a lookup can
+        // take longer): a deleted, saved model must not be written to.
+        guard isAlive(card) else { return .unavailable }
+        switch answer {
         case .unavailable:
             // Their GemRate upstream, or ours. Keeps the last value, marks stale.
             applyCourtyard(.unreachable, to: card)
@@ -114,7 +118,9 @@ enum PriceService {
             // Courtyard's OWN 1-5 confidence — the figure its app buckets to
             // low/medium/high. The old match-quality tiers are gone with the
             // matching: a cert hit is this slab, so there is nothing to discount.
-            card.courtyardConfidence = price.confidence ?? 5
+            // Absent means unknown: an empty meter, never a made-up 5 (the CL
+            // branch's rule, and CLAUDE.md's "never fabricate").
+            card.courtyardConfidence = price.confidence ?? 0
             applyScannerIdentity(identity, to: card)
             applyScannerSales(groups, to: card)
             applyScannerPopulation(groups, identity: identity, to: card)
@@ -182,7 +188,7 @@ enum PriceService {
 
         if let raw = scannerImageUrl, let url = URL(string: raw) {
             guard let (data, response) = try? await URLSession.shared.data(from: url),
-                  (response as? HTTPURLResponse)?.statusCode == 200
+                  (response as? HTTPURLResponse)?.statusCode == 200, isAlive(card)
             else { return }
             card.setImage(ImageDownscale.normalized(data), url: url, from: .courtyard)
             return
@@ -190,7 +196,8 @@ enum PriceService {
 
         guard case .match(let match) = await courtyard.lookup(
             grader: card.grader, certNumber: card.certNumber, name: card.name,
-            set: card.set, grade: card.grade, year: card.year, cardNumber: card.cardNumber)
+            set: card.set, grade: card.grade, year: card.year, cardNumber: card.cardNumber),
+              isAlive(card)
         else { return }
         await applyCourtyardImage(match, to: card)
     }
@@ -209,7 +216,7 @@ enum PriceService {
         }
         guard let url = match.imageUrl,
               let (data, response) = try? await URLSession.shared.data(from: url),
-              (response as? HTTPURLResponse)?.statusCode == 200
+              (response as? HTTPURLResponse)?.statusCode == 200, isAlive(card)
         else { return }
         card.setImage(ImageDownscale.normalized(data), url: url, from: .courtyard)
     }
@@ -232,7 +239,7 @@ enum PriceService {
         )
         guard let url = identity.imageUrl,
               let (data, response) = try? await URLSession.shared.data(from: url),
-              (response as? HTTPURLResponse)?.statusCode == 200
+              (response as? HTTPURLResponse)?.statusCode == 200, isAlive(card)
         else { return }
         card.setImage(ImageDownscale.normalized(data), url: url, from: .cardLadder)
     }
@@ -255,6 +262,7 @@ enum PriceService {
         // Courtyard does to card_key can move the row this call reads. It used to
         // matter, and getting it wrong is what served a PSA 9 the PSA 10's price.
         let outcome = await cardLadder.price(cert: card.certNumber, grader: card.grader, force: force)
+        guard isAlive(card) else { return .unavailable }
         switch outcome {
         case .ok(let price, let identity):
             applyCardLadder(.price(price.valueCents), to: card)
@@ -332,14 +340,16 @@ enum PriceService {
         if card.cardLadderSales != nil && card.courtyardSales != nil && !force { return }
 
         card.salesLoading = true
-        defer { card.salesLoading = false }
+        defer { if isAlive(card) { card.salesLoading = false } }
 
         // Courtyard first: unauthenticated, costs no budget, and independent of
         // whether the user has connected Card Ladder at all.
         if card.courtyardSales == nil || force {
-            card.courtyardSales = await courtyard.recentSales(
+            let sales = await courtyard.recentSales(
                 name: card.name, set: card.set, grader: card.grader, grade: card.grade,
                 certNumber: card.certNumber, year: card.year, cardNumber: card.cardNumber)
+            guard isAlive(card) else { return }
+            card.courtyardSales = sales
         }
 
         guard UserDefaults.standard.bool(forKey: connectedKey) else {
@@ -349,6 +359,7 @@ enum PriceService {
 
         let outcome = await cardLadder.sales(
             cert: card.certNumber, grader: card.grader, force: force)
+        guard isAlive(card) else { return }
         switch outcome {
         case .ok(let sales):
             card.cardLadderSales = sales
@@ -361,6 +372,11 @@ enum PriceService {
         }
         try? context.save()
     }
+
+    /// Still in the store. Every write after a network wait checks it: a card can
+    /// be deleted (and the delete saved) while its answer is in flight, and
+    /// writing to that model can trap. Same rule as `LotClaims.isAlive`.
+    static func isAlive(_ card: Card) -> Bool { LotClaims.isAlive(card) }
 
     // MARK: Write-back (rule lives in PriceWriteback, tested there)
 

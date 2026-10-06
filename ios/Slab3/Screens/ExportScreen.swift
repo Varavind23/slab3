@@ -96,7 +96,7 @@ struct ExportScreen: View {
         Array(CSVExport.rows(Array(scoped.prefix(4)), columns: columns,
                              payoutPercent: app.payoutPercent,
                              maxBuyCents: MaxBuyValue.centsByCard(Array(scoped.prefix(4))),
-                             lot: lotExport).prefix(5).dropFirst())
+                             lot: lotExport, tracksPaid: app.tracksPaid).prefix(5).dropFirst())
     }
 
     // MARK: Columns
@@ -112,7 +112,7 @@ struct ExportScreen: View {
             // TARGET is the full 44 Caliper asks for — taller than the ink, so the
             // grid doesn't turn into fifteen buttons the size of Share CSV.
             FlowLayout(spacing: Caliper.space4) {
-                ForEach(CSVColumn.available(lot: exportLot != nil)) { column in
+                ForEach(CSVColumn.available(lot: exportLot != nil, tracksPaid: app.tracksPaid)) { column in
                     // Numbered by what the file EMITS, not the raw saved order: a
                     // max-buy column the locked gate hides would otherwise leave a
                     // gap, and the badge would name a column position the CSV lacks.
@@ -155,6 +155,9 @@ struct ExportScreen: View {
             Hairline()
             HStack {
                 Text("\(rowCount) cards").caliperLabel()
+                if ownTotal.paidCount > 0 {
+                    Text("· \(ownTotal.paidCount) at price paid").caliperMeta(Caliper.textTertiary)
+                }
                 Spacer()
                 Text(caliperMoney(cents: totalCents))
                     .font(.figureSmall)
@@ -171,7 +174,8 @@ struct ExportScreen: View {
                     payoutPercent: app.payoutPercent,
                     maxBuyCents: MaxBuyValue.centsByCard(scoped),
                     buyers: buyers,
-                    lot: lotExport
+                    lot: lotExport,
+                    tracksPaid: app.tracksPaid
                 )
             }
             .padding(.horizontal, Caliper.gutter)
@@ -195,8 +199,11 @@ struct ExportScreen: View {
             }
         }
     }
+    private var ownTotal: (cents: Int, paidCount: Int) {
+        CSVExport.total(scoped, preferring: app.activeSource, tracksPaid: app.tracksPaid)
+    }
     private var totalCents: Int {
-        scoped.compactMap { $0.prices.best(preferring: app.activeSource) }.reduce(0, +)
+        ownTotal.cents
             // Teammates' slabs carry Card Ladder's value only.
             + (lotExport?.teammates.compactMap(\.claim.priceCents).reduce(0, +) ?? 0)
     }

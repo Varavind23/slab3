@@ -52,6 +52,22 @@ struct CardLadderClient {
         }
     }
 
+    /// Remove the stored credentials server-side. True once the server has
+    /// deleted them. A local flag alone used to be "disconnect": the server kept
+    /// the encrypted login and the next launch's `isConnected` switched Card
+    /// Ladder back on (review 2026-10-02).
+    func disconnect() async -> Bool {
+        struct Reply: Decodable { let ok: Bool }
+        do {
+            let reply: Reply = try await Backend.client.functions.invoke(
+                "cardladder-connect", options: .init(method: .delete)
+            )
+            return reply.ok
+        } catch {
+            return false
+        }
+    }
+
     // MARK: Price
 
     /// Everything the price call returns about the number itself. `valueCents`

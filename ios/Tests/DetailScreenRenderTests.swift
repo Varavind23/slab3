@@ -113,6 +113,24 @@ struct DetailScreenRenderTests {
         #expect(FileManager.default.fileExists(atPath: url.path))
     }
 
+    /// Price paid on line 3 beside the cert — what to look at is that it
+    /// truncates before it pushes the group tag or grade badge.
+    @Test func rendersPricePaidLine() throws {
+        let card = card(in: store.mainContext)
+        card.paidCents = 4_572
+        let url = try render(
+            VStack(spacing: Caliper.rowGap) {
+                CardRow(card: card, lens: .cl)
+                CardRow(card: card, lens: .cl, paidCents: 4_572)
+                CardRow(card: card, lens: .cl, paidCents: 1_234_567)
+            }
+            .padding(Caliper.gutter)
+            .background(Caliper.bg),
+            named: "price-paid-row", height: 380
+        )
+        #expect(FileManager.default.fileExists(atPath: url.path))
+    }
+
     @Test func rendersCourtyardEmptyState() throws {
         let card = card(in: store.mainContext)
         card.courtyardSales = []

@@ -45,6 +45,12 @@ final class AppState {
     var payoutPercent: Double? {
         didSet { defaults.set(payoutPercent ?? -1, forKey: Keys.payout) }
     }
+    /// Opt-in "price paid" per card (2026-10-02). A few buyers offer a share of CL
+    /// Value and need their real cost on the sheet; everyone else never sees the
+    /// field, the row line or the CSV column. Off by default, device-local.
+    var tracksPaid: Bool {
+        didSet { defaults.set(tracksPaid, forKey: Keys.tracksPaid) }
+    }
 
     // MARK: The max-buy lens
 
@@ -80,7 +86,7 @@ final class AppState {
     /// lot-only columns outside a lot. `enabledColumns` stays the raw persisted
     /// order.
     var exportColumns: [CSVColumn] {
-        let allowed = CSVColumn.available()
+        let allowed = CSVColumn.available(tracksPaid: tracksPaid)
         return enabledColumns.filter(allowed.contains)
     }
 
@@ -151,6 +157,7 @@ final class AppState {
         enabledColumns = restored.isEmpty ? CSVColumn.defaults : restored
         let stored = defaults.double(forKey: Keys.payout)
         payoutPercent = stored > 0 ? stored : nil
+        tracksPaid = defaults.bool(forKey: Keys.tracksPaid)
 
         storedLens = PriceLens(rawValue: defaults.string(forKey: Keys.lens) ?? "") ?? PriceLens(source)
         // A team member lands on Teams (D1); everyone else on Scan, as always.
@@ -173,12 +180,20 @@ final class AppState {
         return Int((Double(grossCents) * payoutPercent / 100).rounded())
     }
 
+    /// What this card cost, or nil when price paid is off or none was entered. The
+    /// ONE read of `paidCents`, so switching the feature off makes every
+    /// consumer ignore stored values at once — without clearing them.
+    func paidCents(_ card: Card) -> Int? {
+        tracksPaid ? card.paidCents : nil
+    }
+
     private enum Keys {
         static let source = "caliper_active_source"
         static let lens = "caliper_price_lens"
         static let onboarded = "caliper_seen_onboarding"
         static let columns = "caliper_csv_columns"
         static let payout = "caliper_payout_percent"
+        static let tracksPaid = "caliper_track_paid"
         static let scanGroup = "caliper_scan_group"
         static let teamHint = "caliper_team_hint"
         static let scanGroupNone = "caliper_scan_group_none"

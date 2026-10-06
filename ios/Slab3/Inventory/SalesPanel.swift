@@ -54,7 +54,7 @@ struct SalesPanel: View {
                 emptyNote("Loading sales\u{2026}")
             } else if let sales, !sales.isEmpty {
                 VStack(spacing: 0) {
-                    ForEach(Array(sales.prefix(5).enumerated()), id: \.element.id) { index, sale in
+                    ForEach(Array(sales.prefix(5).enumerated()), id: \.offset) { index, sale in
                         if index > 0 { Hairline() }
                         saleRow(sale)
                     }

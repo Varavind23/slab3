@@ -15,7 +15,14 @@ struct PendingRelease: Codable, Hashable {
     let lotId: UUID
     let cert: String
     let grader: String
+    /// The account that gave the slab back. Sent only while that account is signed
+    /// in — another account would be refused (`not_member`/`not_lead`), and that
+    /// refusal counts as done, silently dropping it. Nil on releases queued before
+    /// this field existed: sent as before.
+    var userId: UUID? = nil
     var queuedAt: Date = Date()
+
+    func belongs(to user: UUID?) -> Bool { userId == nil || userId == user }
 
     /// One slab in one lot — what dedupes and what a re-claim cancels.
     var key: String { "\(lotId.uuidString)|\(grader)|\(cert)" }
@@ -129,6 +136,14 @@ final class LotClaimQueue {
         }
     }
 
+    /// Sign-out: nothing queued may run as the next account. Waiting releases stay
+    /// in `PendingReleaseStore`, stamped with their owner; waiters are let go.
+    func reset() {
+        let dropped = items
+        items = []
+        dropped.forEach { $0.waiters.forEach { $0.resume() } }
+    }
+
     /// Wait for everything queued so far. Tests only.
     func drain() async {
         while let current = worker { await current.value }
@@ -159,6 +174,8 @@ final class LotClaimQueue {
         case .release(let release):
             // Cancelled while it waited (the slab was claimed back): nothing to do.
             guard PendingReleaseStore.shared.contains(release) else { return }
+            // Another account's, queued before a sign-out: kept for when it is back.
+            guard release.belongs(to: LotClaims.currentUserId) else { return }
             if await LotClaims.release(release) == .done { PendingReleaseStore.shared.remove(release) }
         case .claim(let cardId, let lotId, let rangeId):
             guard let context else { return }

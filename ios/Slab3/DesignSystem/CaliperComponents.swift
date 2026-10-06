@@ -332,8 +332,8 @@ struct PriceRest: View {
                 .font(.meta)
                 // A price must never wrap. With one trailing source there was always
                 // room; with two four-figure ones there is not, and the money broke
-                // mid-number ("$1,32 / 0.00") and grew the row — which also breaks
-                // the drag-scrub's assumption that rows are a uniform height.
+                // mid-number ("$1,32 / 0.00") and grew the row — rows are meant to
+                // be a uniform height.
                 // metaLine beside this already truncates, so it absorbs the squeeze.
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)

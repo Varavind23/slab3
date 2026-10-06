@@ -34,6 +34,24 @@ struct CSVExportTests {
         let with = CSVExport.rows([card], columns: [.payoutUsd], payoutPercent: 12.5).last
         #expect(with == "12.50")
     }
+
+    /// `card_number` once exported the set name as a stand-in, after the field existed.
+    @Test func cardNumberColumnIsTheCardNumber() {
+        let card = Card(scan: CertScan(grader: .psa, certNumber: "84920117", raw: "84920117"))
+        card.set = "Pokemon Rocket"
+        card.cardNumber = "12"
+        #expect(CSVExport.rows([card], columns: [.cardNumber], payoutPercent: nil).last == "12")
+    }
+
+    /// Text cells are typed by people (a teammate's display name reaches the lead's
+    /// file), so one that starts like a formula is shown, never run.
+    @Test func aFormulaLookingCellIsNeutralised() {
+        let card = Card(scan: CertScan(grader: .psa, certNumber: "84920117", raw: "84920117"))
+        card.name = "=HYPERLINK(\"x\")"
+        #expect(CSVExport.rows([card], columns: [.name], payoutPercent: nil).last == "\"'=HYPERLINK(\"\"x\"\")\"")
+        card.name = "Charizard"
+        #expect(CSVExport.rows([card], columns: [.name], payoutPercent: nil).last == "Charizard")
+    }
 }
 
 /// The row reads both sources through one index; totals read `best`.

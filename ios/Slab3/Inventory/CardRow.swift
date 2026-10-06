@@ -24,6 +24,10 @@ struct CardRow: View {
     let lens: PriceLens
     var selectable: Bool = false
     var selected: Bool = false
+    /// What the user paid, passed in already gated (`AppState.paidCents`) so the
+    /// row stays a pure view. Quiet meta on line 3 — not a source, so no hue, and
+    /// it never leads or sorts.
+    var paidCents: Int? = nil
 
     /// The source underneath the lens, for the parts of the row that are still
     /// per-source. Max buy has none, and those parts branch rather than guess.
@@ -101,6 +105,22 @@ struct CardRow: View {
                 LotVerdictLabel(card: card)
             } else {
                 Text("#\(card.certNumber)").caliperMeta(Caliper.textTertiary)
+            }
+            if let paidCents {
+                // Narrows rather than truncates: "Paid $12,345.…" reads as a
+                // different amount. Whole dollars, then without the label; only
+                // past that does it truncate — before it can squeeze the grade
+                // badge onto two lines and change the row's height
+                // (render: price-paid-row).
+                let dollars = Int((Double(paidCents) / 100).rounded())
+                ViewThatFits(in: .horizontal) {
+                    Text("Paid \(caliperMoney(cents: paidCents))")
+                    Text("Paid \(caliperMoney(dollars))")
+                    Text(caliperMoney(dollars))
+                }
+                .caliperMeta(Caliper.textTertiary)
+                .lineLimit(1)
+                .layoutPriority(-1)
             }
             Spacer(minLength: Caliper.space3)
             if let folder = card.folder {

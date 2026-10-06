@@ -24,8 +24,8 @@
 // OWN Card Ladder account get data, cache hits included.
 
 import { fetchProfileSales, resolveCert, clSourceKey, ClError } from "../_shared/cardladder.ts";
-import { acquireIdToken, type SessionState } from "../_shared/session.ts";
-import { admin, callerId, encKey, json } from "../_shared/http.ts";
+import { acquireIdToken, sealSession, type SessionState } from "../_shared/session.ts";
+import { admin, callerId, encKey, isSlab, json, logWrite } from "../_shared/http.ts";
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // matches the price cache.
 const DAILY_CAP = 200; // shares the per-user Card Ladder budget with prices.
@@ -52,27 +52,30 @@ Deno.serve(async (req) => {
     return json({ status: "bad_request" }, 400);
   }
   const { cert, grader, force = false } = body;
-  if (!cert || !grader) return json({ status: "bad_request" }, 400);
+  if (!isSlab(cert, grader)) return json({ status: "bad_request" }, 400);
 
   const db = admin();
 
-  // 1) Require an active Card Ladder connection for THIS user.
-  const { data: cred } = await db
+  // 1) Require an active Card Ladder connection for THIS user. A failed read is
+  //    transient, never "not connected" (see cardladder-price).
+  const { data: cred, error: credError } = await db
     .from("cardladder_credentials")
     .select("encrypted_blob, session_state, failure_count")
     .eq("user_id", userId)
     .maybeSingle();
+  if (credError) return json({ status: "source_error" });
   if (!cred) return json({ status: "not_connected" });
 
   // 2) Which card + grade is this slab? Cert-keyed and immutable, so this is
   //    normally already warm: cardladder-price fills it on the scan that put the
   //    card in the list, long before anyone opens its detail screen.
-  const { data: known } = await db
+  const { data: known, error: knownError } = await db
     .from("cl_resolve_cache")
     .select("profile_id, grade")
     .eq("grader", grader)
     .eq("cert", cert)
     .maybeSingle();
+  if (knownError) return json({ status: "source_error" });
   let sourceKey = known ? clSourceKey(known.profile_id, known.grade) : null;
 
   // 3) Cache-first. An empty array is a real cached answer — "Card Ladder has no
@@ -93,18 +96,16 @@ Deno.serve(async (req) => {
     return json({ status: "ok", sales: cached.sales ?? [], cached: true });
   }
 
-  // 4) Per-user daily budget (shared with cardladder-price).
-  const today = new Date();
-  today.setUTCHours(0, 0, 0, 0);
-  const windowStart = today.toISOString();
-  const { data: budget } = await db
-    .from("scrape_budget")
-    .select("request_count")
-    .eq("source", "cardladder")
-    .eq("user_id", userId)
-    .eq("window_start", windowStart)
-    .maybeSingle();
-  if (budget && budget.request_count >= DAILY_CAP) {
+  // 4) Per-user daily budget (shared with cardladder-price), taken atomically
+  //    before the call — see cardladder-price step 4.
+  const { data: used, error: budgetError } = await db.rpc("spend_cardladder_budget", {
+    p_user_id: userId, p_cap: DAILY_CAP,
+  });
+  if (budgetError) {
+    if (cached?.sales) return json({ status: "ok", sales: cached.sales, cached: true, stale: true });
+    return json({ status: "source_error" });
+  }
+  if (used > DAILY_CAP) {
     // Serve a stale list rather than nothing: an old real comp beats an empty
     // panel, same rule prices follow when a refresh fails.
     if (cached?.sales) return json({ status: "ok", sales: cached.sales, cached: true, stale: true });
@@ -126,37 +127,27 @@ Deno.serve(async (req) => {
   }
   await db
     .from("cardladder_credentials")
-    .update({ session_state: sessionState, last_ok_at: new Date().toISOString(), failure_count: 0, updated_at: new Date().toISOString() })
+    .update({ session_state: await sealSession(sessionState, encKey()), last_ok_at: new Date().toISOString(), failure_count: 0, updated_at: new Date().toISOString() })
     .eq("user_id", userId);
-
-  // One outbound lookup = one unit of budget, whether or not it needed a resolve
-  // first. Matches cardladder-price: the cap is a ceiling on CARDS per day.
-  const spend = () =>
-    db.from("scrape_budget").upsert(
-      { source: "cardladder", user_id: userId, window_start: windowStart, request_count: (budget?.request_count ?? 0) + 1, cap: DAILY_CAP },
-      { onConflict: "source,user_id,window_start" },
-    );
 
   // 6) Resolve the cert if this slab has never been priced, so the comps land
   //    under the same key a price would use rather than a second key shape.
   if (!sourceKey) {
     try {
       const identity = await resolveCert(idToken, cert, grader);
-      if (!identity) {
-        await spend();
-        return json({ status: "ok", sales: [] });
-      }
-      await db.from("cl_resolve_cache").upsert({
+      if (!identity) return json({ status: "ok", sales: [] });
+      logWrite("cl_resolve_cache", (await db.from("cl_resolve_cache").upsert({
         grader, cert, profile_id: identity.profileId, grade: identity.grade,
         grade_label: identity.gradeLabel ?? null, label: identity.label ?? null,
         player: identity.player ?? null, card_set: identity.set ?? null,
         card_year: identity.year ?? null, card_number: identity.number ?? null,
         image_url: identity.imageUrl ?? null, fetched_at: new Date().toISOString(),
-      });
+      })).error);
       sourceKey = clSourceKey(identity.profileId, identity.grade);
-    } catch {
-      await spend();
-      return json({ status: "source_error" });
+    } catch (e) {
+      // Say WHY: an expired connection or Card Ladder's quota is something the
+      // app acts on; "source_error" hid both (review 2026-10-02).
+      return json({ status: statusFor(e) });
     }
   }
 
@@ -165,23 +156,27 @@ Deno.serve(async (req) => {
   try {
     sales = await fetchProfileSales(idToken, cert, grader);
   } catch (e) {
-    const kind = e instanceof ClError ? e.kind : "network";
     // A failed fetch must not erase a list the user already saw.
     if (cached?.sales) return json({ status: "ok", sales: cached.sales, cached: true, stale: true });
-    if (kind === "rate_limited") return json({ status: "rate_limited" });
-    if (kind === "auth_expired" || kind === "invalid_credentials") return json({ status: "auth_expired" });
-    return json({ status: "source_error" });
-  } finally {
-    await spend();
+    return json({ status: statusFor(e) });
   }
 
-  await db.from("card_sales_cache").upsert({
+  logWrite("card_sales_cache", (await db.from("card_sales_cache").upsert({
     source_key: sourceKey,
     source: "cardladder",
     sales,
     fetch_status: "ok",
     fetched_at: new Date().toISOString(),
-  });
+  })).error);
 
   return json({ status: "ok", sales });
 });
+
+/** Typed CL failure → the degraded status the app already handles (as in
+ *  cardladder-price). */
+function statusFor(e: unknown): string {
+  const kind = e instanceof ClError ? e.kind : "network";
+  if (kind === "rate_limited") return "rate_limited";
+  if (kind === "auth_expired" || kind === "invalid_credentials") return "auth_expired";
+  return "source_error";
+}

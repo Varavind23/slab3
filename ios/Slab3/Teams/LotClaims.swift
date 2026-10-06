@@ -139,6 +139,7 @@ enum LotVerdictText {
         case "no_cl_value": return "no Card Ladder value"
         case "no_cy_value": return "no Courtyard value"
         case "lot_closed": return "lot is closed"
+        case "bad_cert": return "not a cert number"
         case "not_member": return "not on this team"
         case "released": return "released by a lead"
         case "no_matching_range":
@@ -168,6 +169,15 @@ extension Card {
 
     /// Holds a slot on the server that must be given back if the card leaves.
     var holdsLotSlot: Bool { lotClaimState == .confirmed || lotClaimState == .overLimit }
+
+    /// Might hold one: also a claim whose answer never came back (no signal, or the
+    /// app killed mid-request) — the server may have committed it. Leaving the lot
+    /// sends a release for these too; one that held nothing answers `not_claimed`,
+    /// which is done (review 2026-10-02: an un-filed "Unverified" card used to
+    /// leave its slot taken on the server for good).
+    var mayHoldLotSlot: Bool {
+        holdsLotSlot || lotClaimState == .pending || lotClaimState == .checking
+    }
 }
 
 /// Claims and releases (teams phase 4). Called ONLY through `CardFiling` and
@@ -207,7 +217,8 @@ enum LotClaims {
         var verdict = await request(slab, lotId: lotId, rangeId: rangeId, offline: offline, maxBuy: maxBuy)
         // Cold server cache (a card filed long after it was priced, or scanned with
         // no signal): one cache-first refresh warms it, then ask once more.
-        if verdict.outcome == "pending", verdict.reason == "pending_price", isAlive(card), !card.pricesLoading {
+        if verdict.outcome == "pending", verdict.reason == "pending_price", isAlive(card), !card.pricesLoading,
+           takeColdRefresh() {
             await spaceColdRefresh()
             if isAlive(card) { await PriceService.refresh(card, in: context) }
             verdict = await request(slab, lotId: lotId, rangeId: rangeId, offline: offline,
@@ -236,6 +247,10 @@ enum LotClaims {
     /// What a claim sends — read from the card once, before any wait.
     struct Slab { let cert: String; let grader: Grader; let scannedAt: Date }
 
+    /// The signed-in account, read from the stored session (no request). Stamped
+    /// on every release so one is only ever sent as the account that made it.
+    static var currentUserId: UUID? { Backend.client.auth.currentUser?.id }
+
     /// Still a live object in the store. A SwiftData model deleted and saved must
     /// not be written to afterwards.
     static func isAlive(_ card: Card) -> Bool { card.modelContext != nil && !card.isDeleted }
@@ -244,7 +259,8 @@ enum LotClaims {
     /// being deleted. Recorded durably FIRST, then sent through the serial queue;
     /// whatever does not land is retried with `retryPending` (PendingReleaseStore).
     static func queueRelease(lotId: UUID, cert: String, grader: Grader) {
-        let release = PendingRelease(lotId: lotId, cert: cert, grader: grader.rawValue)
+        let release = PendingRelease(lotId: lotId, cert: cert, grader: grader.rawValue,
+                                     userId: currentUserId)
         PendingReleaseStore.shared.add(release)
         LotClaimQueue.shared.enqueue(.release(release))
     }
@@ -280,6 +296,19 @@ enum LotClaims {
         lastColdRefresh = Date()
     }
 
+    /// Filing 200 old cards into a lot would otherwise be 200 full refreshes — the
+    /// bulk refresh CLAUDE.md removed. A rolling allowance; past it a card stays
+    /// "pending" and the next foreground's `retryPending` takes the next share.
+    static let coldRefreshLimit = 30
+    static let coldRefreshWindow: TimeInterval = 600
+    private static var coldRefreshes: [Date] = []
+    static func takeColdRefresh(now: Date = Date()) -> Bool {
+        coldRefreshes.removeAll { now.timeIntervalSince($0) > coldRefreshWindow }
+        guard coldRefreshes.count < coldRefreshLimit else { return false }
+        coldRefreshes.append(now)
+        return true
+    }
+
     /// How a batch of offline scans landed — the reconnect summary (teams.md §10).
     struct SyncSummary: Equatable {
         var synced = 0, inLot = 0, overLimit = 0, notInLot = 0, pickBucket = 0, stillWaiting = 0
@@ -304,7 +333,8 @@ enum LotClaims {
         guard TeamsFeature.isAvailable else { return nil }
         // Releases first: a slot given back offline must be free on the server
         // before this phone's own waiting claims compete for it.
-        for release in PendingReleaseStore.shared.all {
+        let me = currentUserId
+        for release in PendingReleaseStore.shared.all where release.belongs(to: me) {
             await LotClaimQueue.shared.submit(.release(release), in: context)
         }
         // Only cards with a lot state — never the whole inventory. This runs on
@@ -319,7 +349,9 @@ enum LotClaims {
             guard let lotId = card.lotClaimLotId else { continue }
             let wasOffline = card.lotVerdict?.reason == "network" || card.lotVerdict?.offline == true
             await LotClaimQueue.shared.submit(.claim(cardId: card.localId, lotId: lotId, rangeId: nil), in: context)
-            guard wasOffline else { continue }
+            // Deleted while its claim ran (a swipe-delete commits after 5s): a
+            // deleted, saved model must not be read.
+            guard wasOffline, isAlive(card) else { continue }
             summary.synced += 1
             switch card.lotClaimState {
             case .confirmed: summary.inLot += 1
@@ -361,6 +393,10 @@ enum LotClaims {
             case "cl_not_connected": return LotVerdict(outcome: "pending", reason: "cl_not_connected")
             default: return LotVerdict(outcome: "pending", reason: "error")
             }
+        } catch is DecodingError {
+            // The server answered, in a shape this build cannot read. Not "offline":
+            // that would replay it as an offline buy and could mint over-limit rows.
+            return LotVerdict(outcome: "pending", reason: "error")
         } catch {
             return LotVerdict(outcome: "pending", reason: "network")
         }

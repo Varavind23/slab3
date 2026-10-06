@@ -11,6 +11,9 @@ import SwiftData
 /// server, and leaving one releases it (phase 4). A rule six call sites must each
 /// remember is a rule one of them forgets, and the one that forgets it is a card in
 /// a lot that skipped the 3-per-lot check. So they all come through here.
+///
+/// One exception: deleting a group (`GroupActions`) ungroups its cards through the
+/// relationship's `.nullify`. Safe only because team lots can never be deleted there.
 @MainActor
 enum CardFiling {
     /// File `cards` into `group`. Recency is recorded here, so the Cards swipe
@@ -28,8 +31,14 @@ enum CardFiling {
         group.markUsed(at: time)
         try? context.save()
 
-        guard let lotId = group.teamLotId else { return }
+        // Kill switch: a lot group files like any other group, and no card is left
+        // saying "Checking lot…" for a claim that will never be sent.
+        guard TeamsFeature.isAvailable, let lotId = group.teamLotId else { return }
         for card in cards where needsClaim(card, lotId: lotId) {
+            // Filed straight back into the lot it just left: a release still
+            // waiting for signal would land first (releases go first on reconnect)
+            // and give the slot away. Cancelled, the claim replays the held one.
+            PendingReleaseStore.shared.cancel(lotId: lotId, cert: card.certNumber, grader: card.grader.rawValue)
             card.lotClaimLotId = lotId
             card.lotClaimState = .checking
             LotClaimQueue.shared.enqueue(.claim(cardId: card.localId, lotId: lotId, rangeId: nil), in: context)
@@ -63,7 +72,7 @@ enum CardFiling {
     /// that leaves a lot has nothing left to say about it.
     private static func releaseSlot(of card: Card) {
         guard let lotId = card.lotClaimLotId else { return }
-        if card.holdsLotSlot {
+        if card.mayHoldLotSlot {
             LotClaims.queueRelease(lotId: lotId, cert: card.certNumber, grader: card.grader)
         }
         card.lotClaimLotId = nil

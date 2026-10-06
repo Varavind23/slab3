@@ -23,8 +23,8 @@
 // renders a no-price state).
 
 import { resolveCert, estimate, clSourceKey, ClError, type ClCardIdentity } from "../_shared/cardladder.ts";
-import { acquireIdToken, type SessionState } from "../_shared/session.ts";
-import { admin, callerId, encKey, json } from "../_shared/http.ts";
+import { acquireIdToken, sealSession, type SessionState } from "../_shared/session.ts";
+import { admin, callerId, encKey, isSlab, json, logWrite } from "../_shared/http.ts";
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // Card Ladder Value moves slowly.
 const DAILY_CAP = 200; // per-user request ceiling (keeps volume human-shaped, D10).
@@ -87,16 +87,20 @@ Deno.serve(async (req) => {
     return json({ status: "bad_request" }, 400);
   }
   const { cert, grader, force = false } = body;
-  if (!cert || !grader) return json({ status: "bad_request" }, 400);
+  if (!isSlab(cert, grader)) return json({ status: "bad_request" }, 400);
 
   const db = admin();
 
   // 1) Require an active Card Ladder connection for THIS user.
-  const { data: cred } = await db
+  const { data: cred, error: credError } = await db
     .from("cardladder_credentials")
     .select("encrypted_blob, session_state, failure_count")
     .eq("user_id", userId)
     .maybeSingle();
+  // Could not ASK is not "not connected": that answer clears the user's CL
+  // prices on screen, so a database hiccup must read as transient (review
+  // 2026-10-02 — every CL price used to blank on one PostgREST timeout).
+  if (credError) return json({ status: "source_error" });
   if (!cred) return json({ status: "not_connected" });
 
   // 2) Who is this slab? Cert-keyed and immutable, so a known cert answers from
@@ -105,12 +109,15 @@ Deno.serve(async (req) => {
   //    anything. A forced refresh does NOT re-resolve: the cert→card mapping
   //    cannot go stale, and re-resolving would spend the budget the user is
   //    forcing a refresh in order to spend on the price.
-  const { data: known } = await db
+  const { data: known, error: knownError } = await db
     .from("cl_resolve_cache")
     .select("profile_id, grade, grade_label, label, player, card_set, card_year, card_number, image_url")
     .eq("grader", grader)
     .eq("cert", cert)
     .maybeSingle();
+  // Unknown and unreadable are different: re-resolving would spend budget on a
+  // cert we probably know, and "not found" from a failed read would be a lie.
+  if (knownError) return json({ status: "source_error" });
 
   // 3) Cache-first on the price, but only once we know the key it lives under.
   if (known && !force) {
@@ -144,18 +151,16 @@ Deno.serve(async (req) => {
     }
   }
 
-  // 4) Per-user daily budget.
-  const today = new Date();
-  today.setUTCHours(0, 0, 0, 0);
-  const windowStart = today.toISOString();
-  const { data: budget } = await db
-    .from("scrape_budget")
-    .select("request_count")
-    .eq("source", "cardladder")
-    .eq("user_id", userId)
-    .eq("window_start", windowStart)
-    .maybeSingle();
-  if (budget && budget.request_count >= DAILY_CAP) return json({ status: "rate_limited" });
+  // 4) Per-user daily budget. One outbound lookup = one unit, whether or not it
+  //    needs a resolve as well: the cap is a ceiling on how many CARDS a user
+  //    prices in a day. Taken BEFORE the call, in one atomic statement — the old
+  //    read-then-write let concurrent requests all spend the same unit (review
+  //    2026-10-02, migration 20260930000000 §6).
+  const { data: used, error: budgetError } = await db.rpc("spend_cardladder_budget", {
+    p_user_id: userId, p_cap: DAILY_CAP,
+  });
+  if (budgetError) return json({ status: "source_error" });
+  if (used > DAILY_CAP) return json({ status: "rate_limited" });
 
   // 5) Acquire a valid ID token (refresh-first, sign-in fallback).
   let idToken: string, sessionState: SessionState;
@@ -175,18 +180,8 @@ Deno.serve(async (req) => {
   // Persist the (possibly rotated) session + clear the failure counter.
   await db
     .from("cardladder_credentials")
-    .update({ session_state: sessionState, last_ok_at: new Date().toISOString(), failure_count: 0, updated_at: new Date().toISOString() })
+    .update({ session_state: await sealSession(sessionState, encKey()), last_ok_at: new Date().toISOString(), failure_count: 0, updated_at: new Date().toISOString() })
     .eq("user_id", userId);
-
-  // One outbound lookup = one unit of budget, whether or not it needed a resolve
-  // as well. The cap is a ceiling on how many CARDS a user prices in a day, which
-  // is what they actually experience; counting Card Ladder callables instead would
-  // silently halve it.
-  const spend = () =>
-    db.from("scrape_budget").upsert(
-      { source: "cardladder", user_id: userId, window_start: windowStart, request_count: (budget?.request_count ?? 0) + 1, cap: DAILY_CAP },
-      { onConflict: "source,user_id,window_start" },
-    );
 
   // 6) Resolve the cert if we have never seen it.
   let identity: ClCardIdentity | null;
@@ -202,19 +197,17 @@ Deno.serve(async (req) => {
     try {
       identity = await resolveCert(idToken, cert, grader);
     } catch (e) {
-      await spend();
       return json({ status: statusFor(e) });
     }
     if (!identity) {
       // Genuinely unknown cert. Nothing to cache: an unresolvable cert is more
       // often a mis-scan than a card Card Ladder has never heard of, and caching
       // it would make a one-off misread permanent.
-      await spend();
       return json({ status: "not_found" });
     }
-    await db.from("cl_resolve_cache").upsert({
+    logWrite("cl_resolve_cache", (await db.from("cl_resolve_cache").upsert({
       grader, cert, ...rowOf(identity), fetched_at: new Date().toISOString(),
-    });
+    })).error);
   }
 
   // 7) Estimate — the part that is actually per-card-per-grade and actually stale.
@@ -222,21 +215,23 @@ Deno.serve(async (req) => {
   const nowIso = new Date().toISOString();
   try {
     const est = await estimate(idToken, identity);
-    await spend();
     if (est.clValueCents === null) {
-      await db.from("price_cache").upsert({
+      logWrite("price_cache", (await db.from("price_cache").upsert({
         source_key: sourceKey, source: "cardladder", metric: METRIC,
         price_cents: null, as_of: nowIso, fetch_status: "not_found", updated_at: nowIso,
-      });
+        // Explicitly cleared: an upsert only writes the columns it sends, so the
+        // previous answer's last sale and confidence used to survive here.
+        last_sale_cents: null, last_sale_at: null, source_confidence: null,
+      })).error);
       // "No comps" is not "no card" — the identity stands on its own.
       return json({ status: "not_found", identity: identityOf(rowOf(identity)) });
     }
-    await db.from("price_cache").upsert({
+    logWrite("price_cache", (await db.from("price_cache").upsert({
       source_key: sourceKey, source: "cardladder", metric: METRIC,
       price_cents: est.clValueCents, as_of: est.asOf, fetch_status: "ok",
       last_sale_cents: est.lastSalePriceCents, last_sale_at: est.lastSaleAt,
       source_confidence: est.confidence, updated_at: nowIso,
-    });
+    })).error);
     return json({
       status: "ok", priceCents: est.clValueCents, metric: METRIC, asOf: est.asOf,
       lastSaleCents: est.lastSalePriceCents, lastSaleAt: est.lastSaleAt,
@@ -245,7 +240,6 @@ Deno.serve(async (req) => {
   } catch (e) {
     // Transient failure: don't poison the cache. The app keeps the last known
     // number and marks the column stale, so it wants nothing from us here.
-    await spend();
     return json({ status: statusFor(e) });
   }
 });

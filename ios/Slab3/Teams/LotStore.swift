@@ -216,6 +216,9 @@ final class LotStore {
     }
     private var inFlight: (token: UUID, teamId: UUID?, task: Task<Void, Never>)?
 
+    /// Below the server's `max_rows`, so a full page always means "ask again".
+    static let claimPage = 500
+
     private func performLoad(teamId: UUID?) async {
         guard let teamId else {
             // Not on a team is a real, loaded answer: the stamp says so, which is
@@ -246,10 +249,20 @@ final class LotStore {
                     .select("lot_buy_range_id, cards, used_cents, valued_cards").in("lot_id", values: ids)
                     .execute().value
                 for row in used { if let id = row.rangeId { usage[id] = row } }
-                let live: [TeamClaim] = try await Backend.client.from("lot_claims")
-                    .select("id, lot_id, lot_buy_range_id, cert, grader, grade_label, price_cents, cl_confidence, cy_price_cents, cy_confidence, max_buy_cents, credited_person_id, label, player, card_set, card_year, card_number, image_url, buyer_id, state, scanned_at")
-                    .in("lot_id", values: ids).in("state", values: ["confirmed", "over_limit"])
-                    .order("scanned_at", ascending: false).execute().value
+                // Paged: PostgREST stops at `max_rows` (1000) without an error, and
+                // `LotClaims.reconcile` reads a missing claim as "a lead released
+                // it" — a short list would pull held cards out of their lots.
+                var live: [TeamClaim] = []
+                while true {
+                    let page: [TeamClaim] = try await Backend.client.from("lot_claims")
+                        .select("id, lot_id, lot_buy_range_id, cert, grader, grade_label, price_cents, cl_confidence, cy_price_cents, cy_confidence, max_buy_cents, credited_person_id, label, player, card_set, card_year, card_number, image_url, buyer_id, state, scanned_at")
+                        .in("lot_id", values: ids).in("state", values: ["confirmed", "over_limit"])
+                        .order("scanned_at", ascending: false).order("id")
+                        .range(from: live.count, to: live.count + Self.claimPage - 1)
+                        .execute().value
+                    live += page
+                    if page.count < Self.claimPage { break }
+                }
                 for claim in live { claims[claim.lotId, default: []].append(claim) }
                 let rangeIds = byLot.values.flatMap { $0.map(\.id) }
                 if !rangeIds.isEmpty {
@@ -425,8 +438,6 @@ final class LotStore {
         }
     }
 
-    /// Drafts only. A lot that has been open holds real buys; closing it is the
-    /// way to finish it, and deleting it would cascade those buys away.
     /// A lot with no buys, in any state. One with buys is ARCHIVED instead — the
     /// server enforces that too (`lots_delete_guard`, `has_buys`), since before 0.9
     /// only this phone-side check stood between a lead and a cascade of the team's

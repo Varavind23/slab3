@@ -29,6 +29,9 @@ struct CardLadderConnectView: View {
                     }
                     Text("Your own subscription's average-sale prices fill the CL column.")
                         .caliperMeta()
+                    if let error {
+                        Text(error).caliperMeta(Caliper.confLow)
+                    }
                 } else {
                     TextField("Email", text: $email)
                         .textContentType(.username)
@@ -52,8 +55,9 @@ struct CardLadderConnectView: View {
             .padding(.top, Caliper.space6)
         } confirm: {
             if connected {
-                CaliperButton(title: "Disconnect", variant: .danger, fullWidth: true) {
-                    connected = false
+                CaliperButton(title: busy ? "Disconnecting…" : "Disconnect", variant: .danger,
+                              fullWidth: true, disabled: busy) {
+                    Task { await disconnect() }
                 }
             } else {
                 CaliperButton(
@@ -67,6 +71,18 @@ struct CardLadderConnectView: View {
             }
         }
         .background(Caliper.bg)
+    }
+
+    /// Only once the server has forgotten the login: flipping the flag first would
+    /// look done while the credentials stayed stored.
+    private func disconnect() async {
+        busy = true; error = nil
+        defer { busy = false }
+        if await client.disconnect() {
+            connected = false
+        } else {
+            error = "Couldn't disconnect. Nothing changed. Try again."
+        }
     }
 
     private func connect() async {

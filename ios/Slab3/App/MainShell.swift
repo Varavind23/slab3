@@ -179,6 +179,11 @@ struct MainShell: View {
         }
         // Before anything waits on a refresh flag: none is running on a fresh launch.
         .task { PriceService.clearStaleLoading(in: context) }
+        // A cold launch with no signal never loads the team, so the team-id change
+        // above never starts the monitor — and scans filed into the lot would wait
+        // for the next foreground instead of syncing when signal returns. The
+        // remembered "on a team" answer starts it up front.
+        .task { if TeamsFeature.isAvailable, app.onTeamHint { connectivity.start() } }
         // Returns at once, with no request, unless TeamsFeature.isAvailable.
         .task { await refreshTeam() }
         .preferredColorScheme(.dark) // Caliper is dark-only; cyan-on-black doesn't invert.
@@ -206,7 +211,10 @@ struct MainShell: View {
         await loadLots()
         // Anything that couldn't get an answer last time (no signal, no CL price),
         // oldest first; if offline scans were among them, say how they landed.
-        if app.team.team != nil, let summary = await LotClaims.retryPending(in: context) {
+        // Also when the team could not be loaded but this phone was on one: the
+        // offline case is exactly when there is something waiting to send.
+        let mayBeOnTeam = app.team.team != nil || (!app.team.lastLoadOK && app.onTeamHint)
+        if mayBeOnTeam, let summary = await LotClaims.retryPending(in: context) {
             withAnimation(Caliper.easeOut) { syncSummary = summary }
             try? await Task.sleep(for: .seconds(6))
             withAnimation(Caliper.easeOut) { if syncSummary == summary { syncSummary = nil } }
@@ -292,7 +300,8 @@ struct MainShell: View {
             buyers: Dictionary(selected.compactMap { card in
                 CardTagging.buyerName(for: card, claimsByLot: app.lots.claimsByLot,
                                       members: app.team.members, people: app.team.people).map { (card.localId, $0) }
-            }, uniquingKeysWith: { a, _ in a })
+            }, uniquingKeysWith: { a, _ in a }),
+            tracksPaid: app.tracksPaid
         )
         app.endSelecting()
     }

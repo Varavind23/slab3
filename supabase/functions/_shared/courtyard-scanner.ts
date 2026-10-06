@@ -87,7 +87,13 @@ export type FetchLike = typeof fetch;
 interface Deps {
   fetch?: FetchLike;
 }
-const f = (d?: Deps): FetchLike => d?.fetch ?? fetch;
+/** Every outbound call gives up after this long (review 2026-10-02): a hung
+ *  upstream used to hold the Edge Function — up to 8 sequential calls on the
+ *  unresolvable path — until the platform killed it. An abort is "network". */
+export const FETCH_TIMEOUT_MS = 10_000;
+const timedFetch: FetchLike = (input, init) =>
+  fetch(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+const f = (d?: Deps): FetchLike => d?.fetch ?? timedFetch;
 
 // ── Typed failures, mapped by callers onto the pipeline's SourceError kinds. ───
 export type CyErrorKind =
@@ -308,7 +314,7 @@ export async function fetchGraderImages(
   grader: CyGrader,
   deps?: Deps,
 ): Promise<CyGraderImages> {
-  const url = `${SCANNER_BASE}/card-grader-image?cert=${encodeURIComponent(cert)}&grader=${grader.toUpperCase()}`;
+  const url = `${SCANNER_BASE}/card-grader-image?cert=${encodeURIComponent(cert)}&grader=${encodeURIComponent(grader.toUpperCase())}`;
   try {
     const res = await f(deps)(url, {
       // Same two headers as card-details. The acquisition one measurably changes
@@ -343,7 +349,7 @@ export async function fetchGraderImages(
  *    5xx  {"message":"invalid response from gemrate"} — their upstream. TRANSIENT.
  */
 async function attempt(cert: string, grader: CyGrader, deps?: Deps): Promise<CyScanResult> {
-  const url = `${SCANNER_BASE}/card-details?cert=${encodeURIComponent(cert)}&grader=${grader.toUpperCase()}`;
+  const url = `${SCANNER_BASE}/card-details?cert=${encodeURIComponent(cert)}&grader=${encodeURIComponent(grader.toUpperCase())}`;
   let res: Response;
   try {
     res = await f(deps)(url, {
@@ -390,6 +396,15 @@ async function attempt(cert: string, grader: CyGrader, deps?: Deps): Promise<CyS
   }
   if (echoedGrader !== undefined && echoedGrader !== grader.toUpperCase()) {
     throw new CyError("unresolvable", `grader echo ${gd.grader} != requested ${grader}`);
+  }
+
+  // GUARD: a 200 must actually carry the price model. A body without one (an
+  // edge page, `{}`, a renamed field) used to parse as "no price" and be cached
+  // as an authoritative answer for 24h, for every user — clearing prices on
+  // screen (review 2026-10-02). Not an answer: transient, nothing cached.
+  const pm = (raw as any)?.priceModel;
+  if (!pm || typeof pm !== "object") {
+    throw new CyError("source_error", "200 without a priceModel");
   }
 
   return parseCardDetails(raw, grader, cert);

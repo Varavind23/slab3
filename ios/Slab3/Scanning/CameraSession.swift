@@ -43,6 +43,10 @@ final class CameraSession: NSObject {
     var onStats: ((_ framesPerSecond: Double, _ detectionsPerSecond: Double) -> Void)?
 
     private(set) var availability: Availability = .ok
+    /// Session queue: what configuring the camera found, once `start()` has done
+    /// it. `availability` cannot be read straight after `start()` — the work is
+    /// still queued then, so a failure used to read as `.ok` (a black viewport).
+    var onAvailability: ((Availability) -> Void)?
 
     private let session = AVCaptureSession()
     private let sessionQueue = DispatchQueue(label: "slabs.camera.session")
@@ -109,8 +113,10 @@ final class CameraSession: NSObject {
             if session.inputs.isEmpty {
                 switch configure() {
                 case .success: availability = .ok
-                case .failure(let reason): availability = reason; return
+                case .failure(let reason): availability = reason
                 }
+                onAvailability?(availability)
+                guard availability == .ok else { return }
             }
             session.startRunning()
         }

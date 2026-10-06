@@ -135,7 +135,14 @@ final class Card {
 
     var scannedAt: Date
     var lookupStatusRaw: String
+    /// D10's "Manual price" override. Shown and editable in every build to 0.8 but
+    /// read by nothing; kept so whatever testers typed there is never mistaken
+    /// for a cost (see `paidCents`).
     var manualPriceCents: Int?
+    /// What the user paid for this slab (opt-in, `AppState.tracksPaid`). Its own
+    /// field, not `manualPriceCents`, so old "Manual price" entries never turn
+    /// into a cost basis when someone switches the feature on (review 2026-10-02).
+    var paidCents: Int?
     var notes: String?
 
     // Market prices (cents). These hold the LAST KNOWN good value: a failed

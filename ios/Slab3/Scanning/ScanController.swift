@@ -68,12 +68,20 @@ final class ScanController {
         // back to, so the remembered mode has to be pushed on every start, not
         // only when the user flips the switch.
         session.isAutoScanning = autoScan
+        session.onAvailability = { [weak self] availability in
+            Task { @MainActor in self?.scannerError = Self.message(for: availability) }
+        }
         session.start()
-        switch session.availability {
-        case .ok: scannerError = nil
-        case .noDevice: scannerError = "No camera is available on this device."
-        case .denied: scannerError = "Camera access is off for Slabs."
-        case .failed(let reason): scannerError = "The camera couldn\'t start (\(reason))."
+        // Already configured on an earlier start: no new answer is coming.
+        scannerError = Self.message(for: session.availability)
+    }
+
+    static func message(for availability: CameraSession.Availability) -> String? {
+        switch availability {
+        case .ok: nil
+        case .noDevice: "No camera is available on this device."
+        case .denied: "Camera access is off for Slabs."
+        case .failed(let reason): "The camera couldn\'t start (\(reason))."
         }
     }
 

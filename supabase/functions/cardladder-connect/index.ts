@@ -7,7 +7,7 @@
 // their consent: this is the ToS-defensible access model.
 
 import { signIn, ClError } from "../_shared/cardladder.ts";
-import { encodeCreds, type SessionState } from "../_shared/session.ts";
+import { encodeCreds, sealSession, type SessionState } from "../_shared/session.ts";
 import { admin, callerId, encKey, json } from "../_shared/http.ts";
 
 Deno.serve(async (req) => {
@@ -24,12 +24,26 @@ Deno.serve(async (req) => {
   // server already had. Costs no Card Ladder request: it only asks whether a
   // credentials row exists.
   if (req.method === "GET") {
-    const { data } = await admin()
+    const { data, error } = await admin()
       .from("cardladder_credentials")
       .select("user_id")
       .eq("user_id", userId)
       .maybeSingle();
+    // ok:false = "could not ask", which the app keeps apart from "disconnected"
+    // (CardLadderClient.isConnected). A failed read used to say connected:false,
+    // and the app then cleared every CL price (review 2026-10-02).
+    if (error) return json({ ok: false, error: "store_unreachable" });
     return json({ ok: true, connected: !!data });
+  }
+
+  // DELETE = disconnect. Removes the stored credentials and session, so nothing
+  // is fetched on this user's behalf again. Disconnect used to be a local flag
+  // only: the encrypted password stayed here, and the next launch's GET turned
+  // Card Ladder straight back on (review 2026-10-02).
+  if (req.method === "DELETE") {
+    const { error } = await admin().from("cardladder_credentials").delete().eq("user_id", userId);
+    if (error) return json({ ok: false, error: "store_failed" }, 500);
+    return json({ ok: true, connected: false });
   }
 
   if (req.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405);
@@ -63,7 +77,7 @@ Deno.serve(async (req) => {
     .upsert({
       user_id: userId,
       encrypted_blob,
-      session_state: sessionState,
+      session_state: await sealSession(sessionState, encKey()),
       last_ok_at: new Date().toISOString(),
       failure_count: 0,
       updated_at: new Date().toISOString(),

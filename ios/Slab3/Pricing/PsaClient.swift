@@ -79,7 +79,10 @@ enum PsaIdentityService {
 
     static func enrich(_ card: Card) async {
         guard card.grader == .psa else { return }
-        switch await client.lookup(certNumber: card.certNumber) {
+        let answer = await client.lookup(certNumber: card.certNumber)
+        // Up to a minute later: the card may have been deleted meanwhile.
+        guard PriceService.isAlive(card) else { return }
+        switch answer {
         case .found(let cert):
             card.setIdentity(
                 name: cert.subject.map(PsaDisplayName.format),
@@ -97,11 +100,13 @@ enum PsaIdentityService {
             if let url = cert.imageUrl,
                let (data, response) = try? await URLSession.shared.data(from: url),
                (response as? HTTPURLResponse)?.statusCode == 200,
-               !data.isEmpty {
+               !data.isEmpty, PriceService.isAlive(card) {
                 card.setImage(data, url: url, from: .psa)
             }
         case .notFound:
-            card.lookupStatus = .notFound
+            // Only while nothing else has named the card: a PSA miss must not
+            // turn a card CL or Courtyard already identified into "not found".
+            if card.lookupStatus == .pending { card.lookupStatus = .notFound }
         case .unavailable:
             // Say so. This used to `break`, so a blocked or down source was
             // indistinguishable from one still loading — which is exactly how a

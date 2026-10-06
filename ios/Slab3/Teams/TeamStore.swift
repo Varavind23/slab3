@@ -133,9 +133,13 @@ final class TeamStore {
 
     func join(code: String, displayName: String) async -> String? {
         await perform {
-            let _: JoinReply = try await Backend.client
+            let reply: JoinReply = try await Backend.client
                 .rpc("join_team", params: ["p_code": JoinCode.normalized(code), "p_display_name": displayName])
                 .execute().value
+            // A wrong code and too many guesses come back as data, not a raise:
+            // the server counts failed guesses, and a raise would undo the count
+            // (migration 20260930000000, owner decision D3).
+            if let error = reply.error { throw JoinRefused(code: error) }
         }
     }
 
@@ -340,10 +344,14 @@ final class TeamStore {
             return nil
         } catch let error as PostgrestError {
             return TeamError.copy(for: error.message)
+        } catch let refused as JoinRefused {
+            return TeamError.copy(for: refused.code)
         } catch {
             return TeamError.copy(for: "network")
         }
     }
+
+    private struct JoinRefused: Error { let code: String }
 
     // MARK: Wire shapes
 
@@ -358,7 +366,9 @@ final class TeamStore {
         }
     }
     private struct CreateReply: Decodable { let team_id: UUID }
-    private struct JoinReply: Decodable { let team_id: UUID }
+    /// `team_id` on success; `error` (`invalid_code`, `too_many_attempts`) when
+    /// the server turned the code away.
+    private struct JoinReply: Decodable { let team_id: UUID?; let error: String? }
 }
 
 /// The team code as a person handles it. Stored bare (`K7Q2MX`, the migration's
@@ -386,6 +396,9 @@ enum TeamError {
     static func copy(for code: String) -> String {
         switch code {
         case "invalid_code": return "No team has that code. Check it with your lead."
+        case "too_many_attempts": return "Too many wrong codes. Try again in an hour."
+        case "range_has_buys": return "That bucket already holds buys. It stays."
+        case "range_lot_fixed": return "A bucket can't move to another lot."
         case "already_in_team": return "You're already on a team. Leave it first."
         case "not_lead": return "Only a lead can do that."
         case "last_lead": return "A team needs a lead. Make someone else lead first."

@@ -52,6 +52,7 @@ struct CardDetailScreen: View {
                     SalesPanel(card: card, source: $app.activeSource,
                                connected: cardLadderConnected) { showConnect = true }
                     pricePanel
+                    if app.tracksPaid { paidPanel }
                     identityPanel
                     LotClaimPanel(card: card)
                     groupPanel
@@ -224,18 +225,23 @@ struct CardDetailScreen: View {
                     .foregroundStyle(Caliper.textPrimary)
             }
             .padding(Caliper.rowPad)
-            Hairline()
-            HStack {
-                Text("Manual price").caliperLabel()
-                Spacer()
-                TextField("—", value: dollars, format: .number.precision(.fractionLength(0)))
-                    .font(.price)
-                    .keyboardType(.decimalPad)
-                    .multilineTextAlignment(.trailing)
-                    .foregroundStyle(Caliper.textPrimary)
-            }
-            .padding(Caliper.rowPad)
         }
+        .caliperPanel()
+    }
+
+    /// Only while Settings → Track price paid is on. Export and the CSV use it
+    /// over market value; on Cards it is a quiet line that never leads or sorts.
+    private var paidPanel: some View {
+        HStack {
+            Text("Paid").caliperLabel()
+            Spacer()
+            TextField("—", value: dollars, format: .number.precision(.fractionLength(0...2)))
+                .font(.price)
+                .keyboardType(.decimalPad)
+                .multilineTextAlignment(.trailing)
+                .foregroundStyle(Caliper.textPrimary)
+        }
+        .padding(Caliper.rowPad)
         .caliperPanel()
     }
 
@@ -307,11 +313,16 @@ struct CardDetailScreen: View {
                 set: { card[keyPath: keyPath] = $0.isEmpty ? nil : $0 })
     }
 
-    /// Manual price in whole dollars, backed by the integer-cents field.
+    /// Price paid in dollars and cents, stored in `paidCents`. Cleared input is
+    /// nil, never 0.
     private var dollars: Binding<Double?> {
         Binding(
-            get: { card.manualPriceCents.map { Double($0) / 100 } },
-            set: { card.manualPriceCents = $0.map { Int(($0 * 100).rounded()) } }
+            get: { card.paidCents.map { Double($0) / 100 } },
+            // Out-of-range input (negative, non-finite, or past Int — a long paste
+            // would trap) is treated as cleared, never stored.
+            set: { card.paidCents = $0.flatMap { d in
+                d.isFinite && d >= 0 && d < 100_000_000 ? Int((d * 100).rounded()) : nil
+            } }
         )
     }
 }

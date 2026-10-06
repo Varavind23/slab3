@@ -26,7 +26,7 @@ import {
   type CyScanResult,
   type CyGraderImages,
 } from "../_shared/courtyard-scanner.ts";
-import { admin, callerId, json } from "../_shared/http.ts";
+import { admin, callerId, isSlab, json, logWrite } from "../_shared/http.ts";
 
 /** Same 24h TTL as the Card Ladder price cache. The identity half barely changes,
  *  but it rides the same response, so one expiry for the whole document is both
@@ -123,7 +123,7 @@ Deno.serve(async (req) => {
     return json({ status: "bad_request" }, 400);
   }
   const { cert, grader, force = false } = body;
-  if (!cert || !grader) return json({ status: "bad_request" }, 400);
+  if (!isSlab(cert, grader)) return json({ status: "bad_request" }, 400);
 
   const db = admin();
 
@@ -193,15 +193,22 @@ Deno.serve(async (req) => {
         imgs = await fetchGraderImages(t.cert, t.grader);
         if (imgs.frontUrl ?? imgs.frontThumbUrl) break;
       }
-      await db.from("cy_scan_cache").upsert({
+      logWrite("cy_scan_cache", (await db.from("cy_scan_cache").upsert({
         grader,
         cert,
         source_key: `${grader.toUpperCase()}_${cert}`,
         comps: [],
         image_url: imgs.frontUrl ?? imgs.frontThumbUrl ?? null,
+        // Written as null, not left out: an upsert only touches the columns it
+        // sends, so a previous answer's price and identity used to survive inside
+        // a not_found row (review 2026-10-02). Nothing serves them today; nothing
+        // should be able to.
+        price_cents: null, source_confidence: null, grade: null, title: null, subject: null,
+        card_set: null, card_year: null, card_number: null, category: null, population: null,
+        acquisition_accepted: null,
         fetch_status: "not_found",
         fetched_at: new Date().toISOString(),
-      });
+      })).error);
       return json({
         status: "not_found",
         cached: false,
@@ -248,6 +255,6 @@ Deno.serve(async (req) => {
     row.image_url = imgs.frontUrl ?? imgs.frontThumbUrl ?? null;
   }
 
-  await db.from("cy_scan_cache").upsert({ grader, cert, ...row });
+  logWrite("cy_scan_cache", (await db.from("cy_scan_cache").upsert({ grader, cert, ...row })).error);
   return json(okReply(row, false));
 });

@@ -33,3 +33,19 @@ export function encKey(): string {
   if (!k) throw new Error("CL_ENC_KEY secret not set");
   return k;
 }
+
+/** The only certs and graders any function forwards upstream (review 2026-10-02).
+ *  Nothing was checked: `grader` went unencoded into Courtyard's query string
+ *  (`psa&cert=…` injected parameters), any string became a global cache row, and
+ *  a script could loop `force` requests through our egress IP — which Courtyard
+ *  403s when hammered, blanking it for every user. Same rule as CertParser and
+ *  psa-cert: 7–10 digits. */
+export function isSlab(cert: unknown, grader: unknown): cert is string {
+  return typeof cert === "string" && /^\d{7,10}$/.test(cert) && (grader === "psa" || grader === "cgc");
+}
+
+/** A failed cache/credential write is not worth failing the request over — the
+ *  answer is already in hand — but it must not vanish either. */
+export function logWrite(what: string, error: { message: string } | null): void {
+  if (error) console.error(`${what} write failed: ${error.message}`);
+}

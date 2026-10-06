@@ -18,6 +18,9 @@ enum CSVColumn: String, CaseIterable, Identifiable, Hashable {
     /// 2026-10-04): a lot slab's claim buyer after credit, else the card's own tag,
     /// else an empty cell.
     case buyer, bucket
+    /// What the user paid for the card (`Card.paidCents`). Opt-in: offered
+    /// and emitted only while Settings → Track price paid is on.
+    case paid
 
     var isLotOnly: Bool { self == .bucket }
 
@@ -45,6 +48,7 @@ enum CSVColumn: String, CaseIterable, Identifiable, Hashable {
         case .maxBuy: return "Max buy"
         case .buyer: return "Buyer"
         case .bucket: return "Bucket"
+        case .paid: return "Paid"
         }
     }
 
@@ -70,6 +74,7 @@ enum CSVColumn: String, CaseIterable, Identifiable, Hashable {
         case .maxBuy: return "max_buy_price"
         case .buyer: return "buyer"
         case .bucket: return "bucket"
+        case .paid: return "paid_usd"
         }
     }
 
@@ -90,9 +95,10 @@ enum CSVColumn: String, CaseIterable, Identifiable, Hashable {
     static let defaults: [CSVColumn] = [.cert, .name, .year, .grade, .grader, .clPrice, .cyPrice]
 
     /// The columns a build may show and emit, applied at BOTH ends — the chip grid
-    /// and the file — so a lot-only column cannot ride along outside a lot.
-    static func available(lot: Bool = false) -> [CSVColumn] {
-        allCases.filter { !$0.isLotOnly || lot }
+    /// and the file — so a lot-only column cannot ride along outside a lot, and the
+    /// paid column cannot keep exporting after its Settings toggle is turned off.
+    static func available(lot: Bool = false, tracksPaid: Bool = false) -> [CSVColumn] {
+        allCases.filter { (!$0.isLotOnly || lot) && ($0 != .paid || tracksPaid) }
     }
 }
 
@@ -125,14 +131,17 @@ enum CSVExport {
     }
 
     /// `buyers`: the Buyer cell per card (CardTagging.buyerName), on any export.
+    /// `tracksPaid` is passed rather than read for the same reason as `maxBuyCents`.
+    /// Off, the paid column is dropped and payout ignores any stored value.
     static func rows(_ cards: [Card], columns: [CSVColumn], payoutPercent: Double?,
                      maxBuyCents: [UUID: Int] = [:], buyers: [UUID: String] = [:],
-                     lot: LotExport? = nil) -> [String] {
+                     lot: LotExport? = nil, tracksPaid: Bool = false) -> [String] {
         // Lot-only columns never reach a file that is not a lot export.
-        let columns = lot == nil ? columns.filter { !$0.isLotOnly } : columns
+        var columns = lot == nil ? columns.filter { !$0.isLotOnly } : columns
+        if !tracksPaid { columns.removeAll { $0 == .paid } }
         var out = [columns.map(\.header).joined(separator: ",")]
         for card in cards {
-            out.append(columns.map { cell(card, $0, payoutPercent, maxBuyCents, buyers, lot) }.joined(separator: ","))
+            out.append(columns.map { cell(card, $0, payoutPercent, maxBuyCents, buyers, lot, tracksPaid) }.joined(separator: ","))
         }
         for mate in lot?.teammates ?? [] {
             out.append(columns.map { cell(mate, $0, payoutPercent) }.joined(separator: ","))
@@ -142,9 +151,10 @@ enum CSVExport {
 
     static func write(_ cards: [Card], columns: [CSVColumn], scope: String?, payoutPercent: Double?,
                       maxBuyCents: [UUID: Int] = [:], buyers: [UUID: String] = [:],
-                      lot: LotExport? = nil) -> URL? {
+                      lot: LotExport? = nil, tracksPaid: Bool = false) -> URL? {
         let text = rows(cards, columns: columns, payoutPercent: payoutPercent,
-                        maxBuyCents: maxBuyCents, buyers: buyers, lot: lot).joined(separator: "\n")
+                        maxBuyCents: maxBuyCents, buyers: buyers, lot: lot,
+                        tracksPaid: tracksPaid).joined(separator: "\n")
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename(scope: scope))
         do {
             try text.write(to: url, atomically: true, encoding: .utf8)
@@ -161,12 +171,14 @@ enum CSVExport {
     /// CSV layer along with it. A card absent from the map has no max buy, which
     /// renders as an empty cell — never "0.00".
     private static func cell(_ c: Card, _ column: CSVColumn, _ payoutPercent: Double?,
-                             _ maxBuyCents: [UUID: Int], _ buyers: [UUID: String], _ lot: LotExport?) -> String {
+                             _ maxBuyCents: [UUID: Int], _ buyers: [UUID: String], _ lot: LotExport?,
+                             _ tracksPaid: Bool) -> String {
+        let paid = tracksPaid ? c.paidCents : nil
         switch column {
         case .cert: return c.certNumber
         case .name: return quoted(c.name)
         case .year: return c.year.map(String.init) ?? ""
-        case .cardNumber: return quoted(c.set) // no card-number field yet; set is the closest thing we hold
+        case .cardNumber: return quoted(c.cardNumber)
         case .grade: return quoted(c.grade)
         case .grader: return c.grader.rawValue.uppercased()
         case .clPrice: return dollars(c.cardLadderPriceCents)
@@ -174,10 +186,13 @@ enum CSVExport {
         case .cyPrice: return dollars(c.courtyardPriceCents)
         case .cyConf: return String(c.courtyardConfidence)
         case .outlet, .payoutProvider: return "" // no data source (README open Qs 3–4)
-        case .payoutPercent: return payoutPercent.map { $0.formatted(.number.precision(.fractionLength(1))) } ?? ""
+        case .payoutPercent: return payoutPercent.map { $0.formatted(posix.precision(.fractionLength(1))) } ?? ""
         case .payoutUsd:
+            // What was actually paid IS the payout; the rate only estimates it.
+            if let paid { return dollars(paid) }
             guard let pct = payoutPercent, let gross = c.prices.best(preferring: .cl) else { return "" }
             return dollars(Int((Double(gross) * pct / 100).rounded()))
+        case .paid: return dollars(paid)
         case .scannedAt: return iso(c.scannedAt)
         case .refreshedAt: return iso(c.lastPricedAt)
         // Empty, never "0.00", when no comps can price this card — the same rule
@@ -197,13 +212,14 @@ enum CSVExport {
         case .cert: return c.cert
         case .name: return quoted(c.player ?? c.label)
         case .year: return quoted(c.cardYear)
-        case .cardNumber: return quoted(c.cardSet) // matches the own-card column's stand-in
+        case .cardNumber: return quoted(c.cardNumber)
         case .grade: return quoted(c.gradeLabel)
         case .grader: return c.grader.uppercased()
         case .clPrice: return dollars(c.priceCents)
         case .clConf: return c.clConfidence.map(String.init) ?? ""
-        case .cyPrice, .cyConf, .outlet, .payoutProvider, .refreshedAt, .maxBuy: return ""
-        case .payoutPercent: return payoutPercent.map { $0.formatted(.number.precision(.fractionLength(1))) } ?? ""
+        // Paid is this phone's own entry — the server holds none for a teammate.
+        case .cyPrice, .cyConf, .outlet, .payoutProvider, .refreshedAt, .maxBuy, .paid: return ""
+        case .payoutPercent: return payoutPercent.map { $0.formatted(posix.precision(.fractionLength(1))) } ?? ""
         case .payoutUsd:
             guard let pct = payoutPercent, let gross = c.priceCents else { return "" }
             return dollars(Int((Double(gross) * pct / 100).rounded()))
@@ -213,6 +229,25 @@ enum CSVExport {
         }
     }
 
+    // MARK: Total
+
+    /// Export's footer figure for this phone's cards: price paid where the user
+    /// entered one (and the feature is on), otherwise the leading source's value.
+    /// `paidCount` lets the footer say how much of the figure is real cost.
+    static func total(_ cards: [Card], preferring source: PriceSource,
+                      tracksPaid: Bool) -> (cents: Int, paidCount: Int) {
+        var cents = 0, paidCount = 0
+        for card in cards {
+            if tracksPaid, let paid = card.paidCents {
+                cents += paid
+                paidCount += 1
+            } else if let value = card.prices.best(preferring: source) {
+                cents += value
+            }
+        }
+        return (cents, paidCount)
+    }
+
     private static func iso(_ d: Date?) -> String {
         guard let d else { return "" }
         return d.formatted(.iso8601.year().month().day().dateSeparator(.dash))
@@ -220,17 +255,25 @@ enum CSVExport {
 
     private static func dollars(_ cents: Int?) -> String {
         guard let cents else { return "" } // empty, never 0 — the card has no price
-        return (Double(cents) / 100).formatted(.number.precision(.fractionLength(2)).grouping(.never))
+        return (Double(cents) / 100).formatted(posix.precision(.fractionLength(2)).grouping(.never))
     }
+
+    /// Fixed "50.80" whatever the device region: a comma-decimal locale would write
+    /// `50,80` unquoted and shift every later column.
+    private static let posix = FloatingPointFormatStyle<Double>.number.locale(Locale(identifier: "en_US_POSIX"))
 
     private static func safe(_ v: String) -> String {
         v.lowercased().replacingOccurrences(of: "[^a-z0-9]+", with: "-", options: .regularExpression)
     }
 
-    /// Quote a field if it contains a comma/quote/newline (RFC 4180).
-    private static func quoted(_ v: String?) -> String {
-        guard let v, !v.isEmpty else { return "" }
-        if v.contains(where: { ",\"\n".contains($0) }) {
+    /// Quote a field if it contains a comma/quote/newline (RFC 4180). A text cell
+    /// that starts like a formula (`=`, `+`, `-`, `@`, tab, CR) gets a leading `'`
+    /// so Excel/Sheets show it rather than run it — buyer names are typed by
+    /// teammates, and the file is opened by someone else.
+    private static func quoted(_ raw: String?) -> String {
+        guard let raw, !raw.isEmpty else { return "" }
+        let v = raw.first.map { "=+-@\t\r".contains($0) } == true ? "'" + raw : raw
+        if v.contains(where: { ",\"\n\r".contains($0) }) {
             return "\"" + v.replacingOccurrences(of: "\"", with: "\"\"") + "\""
         }
         return v
