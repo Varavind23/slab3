@@ -11,8 +11,8 @@ insert into auth.users (id, email) values
 insert into cardladder_credentials (user_id, encrypted_blob) values
   ('20000000-0000-0000-0000-000000000002', 'x');
 insert into cl_resolve_cache (grader, cert, profile_id, grade, grade_label, card_year) values
-  ('psa', 'b1', 'bp-1', 'g9', '9', '2001'),
-  ('psa', 'b2', 'bp-2', 'g9', '9', '2001');
+  ('psa', '90000001', 'bp-1', 'g9', '9', '2001'),
+  ('psa', '90000002', 'bp-2', 'g9', '9', '2001');
 insert into price_cache (source_key, source, metric, price_cents, fetch_status, source_confidence) values
   ('bp-1:g9', 'cardladder', 'cl_value', 12000, 'ok', 5),
   ('bp-2:g9', 'cardladder', 'cl_value', 13050, 'ok', 5);
@@ -49,8 +49,8 @@ select is((select banner from lots where id = '22000000-0000-0000-0000-000000000
 select throws_ok($$insert into lot_bands (lot_id) values ('22000000-0000-0000-0000-000000000001')$$,
   '42501', null, 'a buyer cannot add a band');
 
-select claim_lot_scan('22000000-0000-0000-0000-000000000001', 'b1', 'psa');
-select claim_lot_scan('22000000-0000-0000-0000-000000000001', 'b2', 'psa');
+select claim_lot_scan('22000000-0000-0000-0000-000000000001', '90000001', 'psa');
+select claim_lot_scan('22000000-0000-0000-0000-000000000001', '90000002', 'psa');
 select is((select row(cards, used_cents)::text from lot_range_usage
             where lot_buy_range_id = '24000000-0000-0000-0000-000000000001'),
   '(2,25050)', 'usage sums the confirmed claims in a range, in cents');

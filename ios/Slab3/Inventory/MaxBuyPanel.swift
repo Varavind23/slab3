@@ -1,22 +1,23 @@
 import SwiftUI
 
-/// The Verified Max Buy Price box — the first panel on the card detail screen when
-/// the testing version is on, and absent entirely when it is not.
+/// The Verified Max Buy Price box — the first panel on the card detail screen.
+/// Behind a testing passcode until 0.9; available to everyone since (owner,
+/// 2026-10-01).
 ///
 /// A view of its own rather than a computed property on CardDetailScreen for the
 /// same reason SalesPanel is: ImageRenderer will not lay out the ScrollView the
 /// detail screen wraps everything in, so this is the only way its layout can be
 /// rendered and LOOKED AT. See ios/Tests/MaxBuyPanelRenderTests.swift.
 ///
-/// COLLAPSED IT SHOWS ONLY THE NUMBER, and that is the point. The tester holds this
+/// COLLAPSED IT SHOWS ONLY THE NUMBER, and that is the point. A sourcer holds this
 /// screen out to the person he is buying from, so anything that reveals the figure
 /// is tunable — sliders, his margin, the weights — undermines the number he is
 /// presenting. "More" is the one affordance, and everything that could be read as
 /// negotiating room lives behind it.
 ///
 /// This is a deliberate exception to SalesPanel's "empty is REAL CONTENT, never a
-/// hidden panel" rule. That rule is about hiding data a user knows exists; here the
-/// whole feature is undisclosed to everyone but the tester.
+/// hidden panel" rule. That rule is about hiding data from the USER; this hides the
+/// user's own negotiating room from the person across the table.
 struct MaxBuyPanel: View {
     let card: Card
 
@@ -42,10 +43,10 @@ struct MaxBuyPanel: View {
 
     private static let presetWindows = [3, 5, 10]
 
-    /// The payout, and therefore the ceiling — Card Ladder Value, whichever
-    /// source's comps are being read. He is paid CLV; what he is looking at is
-    /// evidence about CLV, not a second thing he could be paid.
-    private var clValueCents: Int? { card.prices[.cl] }
+    /// The payout, and therefore the ceiling — Card Ladder Value (Courtyard's on a
+    /// CY lot), whichever source's comps are being read.
+    private var capCents: Int? { card.prices[answer.capSource] }
+    private var capName: String { answer.capSource == .cl ? "CL Value" : "CY value" }
 
     /// Which comps, which cap, which population all live in `MaxBuyValue` now, so
     /// this panel and the five other places that show the figure cannot drift.
@@ -132,11 +133,11 @@ struct MaxBuyPanel: View {
             windowRow
 
             knobRow(label: "Skew to the low end", value: knobs.skew) {
-                MaxBuyKnobSlider(value: $knobs.skew)
+                MaxBuyKnobSlider(value: $knobs.skew, floor: MaxBuyDefaults.team?.skew ?? 0)
             }
 
             knobRow(label: "Margin", value: knobs.margin) {
-                MaxBuyKnobSlider(value: $knobs.margin)
+                MaxBuyKnobSlider(value: $knobs.margin, floor: MaxBuyDefaults.team?.margin ?? 0)
             }
 
             if case .price(let cents, let breakdown) = answer.result {
@@ -222,16 +223,16 @@ struct MaxBuyPanel: View {
         if let pop = b.population { parts.append("pop \(pop)") }
         parts.append("spread \((b.dispersion * 100).formatted(.number.precision(.fractionLength(0))))%")
         if let source = answer.compsSource { parts.append("\(source.rawValue) comps") }
-        if b.cappedByClValue { parts.append("held at CL Value") }
+        if b.cappedByClValue { parts.append("held at \(capName)") }
         return parts.joined(separator: " \u{00B7} ")
     }
 
     @ViewBuilder
     private func impliedMargin(vmbCents: Int) -> some View {
         HStack {
-            Text("Margin vs CL Value").caliperLabel(Caliper.textTertiary)
+            Text("Margin vs \(capName)").caliperLabel(Caliper.textTertiary)
             Spacer()
-            if let clValue = clValueCents, clValue > 0 {
+            if let clValue = capCents, clValue > 0 {
                 let pct = Double(clValue - vmbCents) / Double(clValue) * 100
                 Text(caliperMoney(cents: clValue) + "  \u{2192}  "
                      + pct.formatted(.number.precision(.fractionLength(0))) + "%")

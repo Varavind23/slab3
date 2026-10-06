@@ -68,7 +68,8 @@ select ok(set_config('t.code', (select join_code from teams where id = current_s
 
 set local request.jwt.claims to '{"sub":"10000000-0000-0000-0000-000000000002","role":"authenticated"}';
 select is((select count(*)::int from teams), 0, 'a non-member sees no teams');
-select throws_ok($$select join_team('ZZZZZZ', 'Justin')$$, 'P0001', 'invalid_code', 'a wrong code is refused');
+select is(join_team('ZZZZZZ', 'Justin')->>'error', 'invalid_code',
+  'a wrong code is refused — returned, not raised, so the guess is counted (20260930000000)');
 -- Typed the way a person reads it aloud: lower case, with the display hyphen.
 select lives_ok(
   format($$select join_team(%L, 'Justin')$$,

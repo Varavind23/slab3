@@ -17,7 +17,13 @@ struct FiltersSheet: View {
     let groups: [Folder]
     /// "Show" from Cards, "Export" from Export.
     let confirmVerb: String
+    /// For "delete group and its cards" — the same undo window as every card delete.
+    var pendingDeletes: PendingDeletionStore? = nil
     @Environment(\.dismiss) private var dismiss
+    @State private var showArchived = false
+
+    private var active: [Folder] { groups.filter { !$0.archived } }
+    private var archived: [Folder] { groups.filter(\.archived) }
 
     var body: some View {
         CaliperSheet(title: "Filters") {
@@ -41,14 +47,26 @@ struct FiltersSheet: View {
             ) { app.filter = .ungrouped }
             Hairline()
             // Groups with zero cards still render — an empty group is a real one.
-            ForEach(groups) { group in
-                SheetRow(
-                    label: group.name,
-                    sub: "\(group.cards.count) cards",
-                    active: app.filter == .group(group.localId),
-                    leading: { Circle().fill(group.hue).frame(width: 8, height: 8) }
-                ) { app.filter = .group(group.localId) }
+            // Long-press a row to archive or delete it (GroupActions).
+            ForEach(active) { group in
+                groupRow(group)
+            }
+            if !archived.isEmpty {
+                Button { withAnimation(Caliper.easeOut) { showArchived.toggle() } } label: {
+                    HStack {
+                        Text("Archived · \(archived.count)").caliperLabel(Caliper.textTertiary)
+                        Spacer()
+                        Image(systemName: showArchived ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 10)).foregroundStyle(Caliper.textTertiary)
+                    }
+                    .padding(.horizontal, Caliper.gutter)
+                    .frame(minHeight: Caliper.hitMin)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(CaliperPressStyle())
                 Hairline()
+                // Still a filter: an archived buyer's cards can be shown and exported.
+                if showArchived { ForEach(archived) { group in groupRow(group) } }
             }
 
             SectionLabel(text: "Match")
@@ -64,6 +82,19 @@ struct FiltersSheet: View {
                 variant: .primary,
                 fullWidth: true
             ) { dismiss() }
+        }
+    }
+
+    private func groupRow(_ group: Folder) -> some View {
+        VStack(spacing: 0) {
+            SheetRow(
+                label: group.name,
+                sub: "\(group.cards.count) cards",
+                active: app.filter == .group(group.localId),
+                leading: { Circle().fill(group.hue).frame(width: 8, height: 8) }
+            ) { app.filter = .group(group.localId) }
+            .groupManageMenu(group, app: app, pending: pendingDeletes)
+            Hairline()
         }
     }
 
@@ -92,6 +123,8 @@ struct GroupSheet: View {
     /// screen into selection mode just to file a single card, which is a mode the
     /// user did not ask for.
     var targets: [Card]?
+    /// For "delete group and its cards" from a row's long-press.
+    var pendingDeletes: PendingDeletionStore? = nil
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \Folder.createdAt, order: .reverse) private var allGroups: [Folder]
@@ -101,7 +134,9 @@ struct GroupSheet: View {
     /// each card (CardFiling), so the 3-per-lot check runs on this path too.
     private var groups: [Folder] {
         let open = app.lots.openLotIds
-        return allGroups.filter { LotFolders.isFileable($0, openLots: open, lotsLoaded: app.lots.hasLoaded) }
+        return allGroups.filter {
+            !$0.archived && LotFolders.isFileable($0, openLots: open, lotsLoaded: app.lots.hasLoaded)
+        }
     }
 
     private var selected: [Card] { targets ?? cards.filter { app.selection.contains($0.localId) } }
@@ -119,6 +154,7 @@ struct GroupSheet: View {
                     trailing: "›",
                     leading: { Circle().fill(group.hue).frame(width: 8, height: 8) }
                 ) { assign(to: group) }
+                .groupManageMenu(group, app: app, pending: pendingDeletes)
                 Hairline()
             }
             if groups.isEmpty {

@@ -18,9 +18,6 @@ struct CardDetailScreen: View {
     @Query(sort: \Folder.createdAt, order: .reverse) private var groups: [Folder]
 
     @AppStorage(PriceService.connectedKey) private var cardLadderConnected = false
-    /// Single-screen preference, the `caliper_auto_scan` idiom — only this screen
-    /// and the Settings gate read it, so it is deliberately not in AppState.
-    @AppStorage(TestingGate.unlockedKey) private var testingUnlocked = false
     @State private var showConnect = false
 
     /// The max-buy knobs for THIS card. Owned here rather than inside `MaxBuyPanel`
@@ -50,17 +47,15 @@ struct CardDetailScreen: View {
             ScrollView {
                 VStack(spacing: Caliper.rowGap) {
                     slabPanel
-                    // The first box, above the evidence it is built from. Absent
-                    // entirely unless the testing version is on.
-                    if testingUnlocked {
-                        MaxBuyPanel(card: card, knobs: $maxBuyKnobs)
-                    }
+                    // The first box, above the evidence it is built from.
+                    MaxBuyPanel(card: card, knobs: $maxBuyKnobs)
                     SalesPanel(card: card, source: $app.activeSource,
                                connected: cardLadderConnected) { showConnect = true }
                     pricePanel
                     identityPanel
                     LotClaimPanel(card: card)
                     groupPanel
+                    if app.team.team != nil { CardMemberPanel(card: card, app: app) }
                     notesPanel
 
                     CaliperButton(title: "Refresh prices now", variant: .accent, icon: "arrow.clockwise", fullWidth: true,
@@ -94,6 +89,11 @@ struct CardDetailScreen: View {
         // Defensive: this screen is pushed per card, but if it is ever reused the
         // knobs must not carry a previous negotiation's tuning into this card.
         .onChange(of: card.localId) { _, _ in maxBuyKnobs = MaxBuyDefaults.current }
+        // A lead's change lands mid-screen: the baseline moves to it, and no card's
+        // tuned knobs may sit below the team's (owner M2).
+        .onChange(of: MaxBuyTeamPolicy.shared.knobs) { _, _ in
+            maxBuyKnobs = MaxBuyDefaults.respectingTeam(maxBuyKnobs)
+        }
     }
 
     /// The card, big enough to actually check against the slab in your hand.

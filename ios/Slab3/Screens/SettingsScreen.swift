@@ -18,16 +18,19 @@ struct SettingsScreen: View {
     @State private var showConnect = false
     @State private var showPayout = false
     @State private var showOnboarding = false
-    @State private var showTesting = false
-    @AppStorage(TestingGate.unlockedKey) private var testingUnlocked = false
+    @State private var showMaxBuy = false
+    /// Re-read when the sheet closes: `MaxBuyDefaults` is a memo, not observable.
+    @State private var maxBuySummary = MaxBuyDefaults.summary
     @State private var showTeamOnboard = false
+    @State private var showLinkCode = false
+    @State private var showMyCards = false
 
     var body: some View {
         VStack(spacing: 0) {
             ScreenHeader(context: "\(cards.count) cards", title: "Settings")
             ScrollView {
                 VStack(spacing: 0) {
-                    if TeamsFeature.isAvailable { teamSection }
+                    if TeamsFeature.isAvailable { teamSection; consignSection }
                     SectionLabel(text: "Price sources")
                     row("Card Ladder", value: cardLadderConnected ? "Connected" : "Not connected",
                         dot: Caliper.srcCL) { showConnect = true }
@@ -56,6 +59,11 @@ struct SettingsScreen: View {
                         row("Buy ranges", value: "Not available")
                     }
 
+                    // Our own figure, available to everyone since 0.9 (owner,
+                    // 2026-10-01). Every card's sliders reset to these.
+                    SectionLabel(text: "Max buy")
+                    row("Defaults", value: maxBuySummary) { showMaxBuy = true }
+
                     SectionLabel(text: "CSV")
                     row("Default columns", value: "\(app.enabledColumns.count) selected")
                     Hairline()
@@ -72,16 +80,6 @@ struct SettingsScreen: View {
                         dot: Backend.isLocal ? Caliper.confMid : nil,
                         valueTint: Backend.isLocal ? Caliper.confMid : nil)
                     #endif
-                    Hairline()
-                    // Green so the state is unmistakable: an uncalibrated buy
-                    // recommendation is showing on every card, and that should
-                    // never be something you have to go and check.
-                    if testingUnlocked {
-                        row("Testing version", value: "On",
-                            dot: Caliper.payout, valueTint: Caliper.payout) { showTesting = true }
-                    } else {
-                        row("Testing", value: "Off") { showTesting = true }
-                    }
                     Hairline()
                     Button {
                         // The next person to sign in on this phone may be on no team.
@@ -112,13 +110,20 @@ struct SettingsScreen: View {
         .background(Caliper.bg)
         .sheet(isPresented: $showConnect) { CardLadderConnectView() }
         .sheet(isPresented: $showPayout) { PayoutSheet(app: app).presentationDetents([.height(260)]) }
-        .sheet(isPresented: $showTesting) { TestingGateSheet() }
+        .sheet(isPresented: $showMaxBuy, onDismiss: { maxBuySummary = MaxBuyDefaults.summary }) {
+            MaxBuySettingsSheet()
+        }
         .sheet(isPresented: $showTeamOnboard) {
             // Joined or created: straight to the new Teams tab (D28), where the
             // one-time intro card explains the flow.
             TeamOnboardSheet(team: app.team) { app.tabTouched = true; app.tab = .teams }
                 .presentationDetents([.large])
         }
+        .sheet(isPresented: $showLinkCode) { LinkCodeSheet(team: app.team) }
+        .sheet(isPresented: $showMyCards) { MyCardsSheet(team: app.team).presentationDetents([.large]) }
+        // Which teams this account consigns to — one small request per Settings
+        // visit, never at launch, and only where Teams may run at all.
+        .task { if TeamsFeature.isAvailable { await app.team.loadLinks() } }
         .fullScreenCover(isPresented: $showOnboarding) {
             OnboardingScreen { showOnboarding = false }
         }
@@ -156,6 +161,21 @@ struct SettingsScreen: View {
             SectionLabel(text: "Team")
             row("Join or create a team", value: "") { showTeamOnboard = true }
         }
+    }
+
+    /// Settings → Consigning (V5, 2026-10-04). Someone whose cards a lead tracks
+    /// links an account with the lead's code, then sees those cards here, read-only.
+    /// Not team membership: it works on no team, or on a team of one's own.
+    @ViewBuilder
+    private var consignSection: some View {
+        SectionLabel(text: "Consigning")
+        if !app.team.links.isEmpty {
+            row("My cards", value: app.team.links.map(\.teamName).joined(separator: ", "), verbatim: true) {
+                showMyCards = true
+            }
+            Hairline()
+        }
+        row("Link to a team", value: "Code") { showLinkCode = true }
     }
 
     @ViewBuilder

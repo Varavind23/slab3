@@ -17,8 +17,9 @@ struct ScanFilingBar: View {
     var lot: Lot? = nil
     /// Cards scanned today that are in the target group.
     let filedToday: Int
-    /// A lot claims on Card Ladder's value — without a connection nothing can be
+    /// A CL lot claims on Card Ladder's value — without a connection nothing can be
     /// claimed, and the bar must say so rather than let scans quietly go nowhere.
+    /// A CY lot never sets it: members without Card Ladder buy into one (M3).
     var needsCardLadder = false
     let tap: () -> Void
     /// Filing into a lot: the ⇄ at the bar's end opens the plain-group picker, the

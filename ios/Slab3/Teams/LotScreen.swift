@@ -34,13 +34,16 @@ struct LotScreen: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
     @State private var confirmStatus: LotStatus?
+    @State private var confirmArchive = false
+    @State private var confirmDelete = false
     @State private var error: String?
 
     private var lot: Lot? { app.lots.lots.first { $0.id == lotId } }
 
     var body: some View {
         VStack(spacing: 0) {
-            ScreenHeader(context: lot.map(LotText.statusLine) ?? "", title: lot?.name ?? "Lot") {
+            ScreenHeader(context: lot.map { $0.isArchived ? "Archived · " + LotText.statusLine($0) : LotText.statusLine($0) } ?? "",
+                         title: lot?.name ?? "Lot") {
                 if app.team.isLead, let lot { leadMenu(lot) }
                 Button("Done") { dismiss() }
                     .font(.mono(10, .medium))
@@ -83,6 +86,22 @@ struct LotScreen: View {
                  ? "Buyers stop filing into it. Everything already bought stays, and you can reopen it."
                  : "Buyers can file into it again.")
         }
+        .confirmationDialog("Archive this lot?", isPresented: $confirmArchive, titleVisibility: .visible) {
+            if let lot {
+                Button("Archive lot", role: .destructive) { Task { error = await archive(lot) } }
+            }
+        } message: {
+            Text(lot?.status == .active
+                 ? "This closes it — buyers can't add cards. Its buys and Team activity stay, and you can unarchive it."
+                 : "It moves to Archived for the whole team. Its buys and Team activity stay, and you can unarchive it.")
+        }
+        .confirmationDialog("Delete this lot?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            if let lot {
+                Button("Delete lot", role: .destructive) { Task { await delete(lot) } }
+            }
+        } message: {
+            Text("Nothing has been bought into it. It goes for the whole team, with its buckets; your saved ranges stay.")
+        }
         .alert("Lot", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(error ?? "") }
@@ -91,10 +110,20 @@ struct LotScreen: View {
     private func leadMenu(_ lot: Lot) -> some View {
         Menu {
             Button { app.teamsPath.append(.builder(lot.id)) } label: { Label("Edit lot", systemImage: "pencil") }
-            if lot.status == .active {
+            if lot.isArchived {
+                Button { Task { error = await unarchive(lot) } } label: { Label("Unarchive", systemImage: "tray.and.arrow.up") }
+            } else if lot.status == .active {
                 Button(role: .destructive) { confirmStatus = .closed } label: { Label("Close lot", systemImage: "lock") }
             } else if lot.status == .closed {
                 Button { confirmStatus = .active } label: { Label("Reopen lot", systemImage: "lock.open") }
+            }
+            if !lot.isArchived {
+                Button { confirmArchive = true } label: { Label("Archive lot", systemImage: "archivebox") }
+            }
+            // Only with nothing bought into it — a lot with buys is archived instead
+            // (the server refuses too, `has_buys`).
+            if app.lots.claims(for: lot).isEmpty {
+                Button(role: .destructive) { confirmDelete = true } label: { Label("Delete lot", systemImage: "trash") }
             }
         } label: {
             Image(systemName: "ellipsis")
@@ -104,6 +133,21 @@ struct LotScreen: View {
                 .contentShape(Rectangle())
         }
         .accessibilityLabel("Lot actions")
+    }
+
+    private func archive(_ lot: Lot) async -> String? {
+        guard let teamId = app.team.team?.id else { return TeamError.copy(for: "not_member") }
+        return await app.lots.archive(lot, teamId: teamId)
+    }
+
+    private func unarchive(_ lot: Lot) async -> String? {
+        guard let teamId = app.team.team?.id else { return TeamError.copy(for: "not_member") }
+        return await app.lots.unarchive(lot, teamId: teamId)
+    }
+
+    private func delete(_ lot: Lot) async {
+        guard let teamId = app.team.team?.id else { return }
+        if let failure = await app.lots.delete(lot, teamId: teamId) { error = failure } else { dismiss() }
     }
 
     private func setStatus(_ status: LotStatus, of lot: Lot) async -> String? {

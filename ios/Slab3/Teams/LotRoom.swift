@@ -3,7 +3,8 @@ import Foundation
 /// What a buyer can still buy — the first thing the Teams tab says (teams-first
 /// plan, D15: "what I can still buy" leads, the bar sits behind it).
 ///
-/// A bucket has TWO caps, cards and dollars (CL Value at claim), and it is full
+/// A bucket has TWO caps, cards and dollars (the lot's basis value at claim — CL or
+/// CY, see ValueBasis), and it is full
 /// the moment either runs out — the same rule `claim_lot_scan` enforces
 /// (`range_full_count` / `range_full_budget`). So room is the pair, and a full
 /// bucket shows no room on either side even if the other cap has slack: offering
@@ -61,6 +62,16 @@ enum LotRoom {
 
     static func lot(ranges: [BuyRange], usage: [UUID: RangeUsage]) -> Room {
         sum(ranges.map { bucket($0, usage: usage[$0.id]) })
+    }
+
+    /// Confirmed slabs with no value in the lot's basis — possible only after a lead
+    /// switched it (set_lot_basis). They hold slots and add no dollars. An older
+    /// server sends no `valued_cards`, which reads as every slab valued.
+    static func unvalued(ranges: [BuyRange], usage: [UUID: RangeUsage]) -> Int {
+        ranges.reduce(0) { total, range in
+            guard let u = usage[range.id] else { return total }
+            return total + max(0, u.cards - (u.valuedCards ?? u.cards))
+        }
     }
 }
 

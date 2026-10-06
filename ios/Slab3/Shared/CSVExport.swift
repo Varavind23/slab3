@@ -10,15 +10,16 @@ enum CSVColumn: String, CaseIterable, Identifiable, Hashable {
     case clPrice, clConf, cyPrice, cyConf
     case outlet, payoutPercent, payoutProvider, payoutUsd
     case scannedAt, refreshedAt
-    /// Our own figure, not a source's. Gated on the testing passcode everywhere it
-    /// appears — see `CSVColumn.available(testingUnlocked:)`.
+    /// Our own figure, not a source's. Off by default (see `defaults`).
     case maxBuy
-    /// Team lots only (teams plan §7.9): who bought the slab, and which of the
-    /// lot's buckets it went into. Offered — and emitted — only when Export is
-    /// scoped to a lot's group; everywhere else they do not exist.
+    /// Who bought the slab, and which of a team lot's buckets it went into. Bucket
+    /// is lot-only (teams plan §7.9): offered and emitted only when Export is scoped
+    /// to a lot's group. Buyer is on every export since virtual members (V3,
+    /// 2026-10-04): a lot slab's claim buyer after credit, else the card's own tag,
+    /// else an empty cell.
     case buyer, bucket
 
-    var isLotOnly: Bool { self == .buyer || self == .bucket }
+    var isLotOnly: Bool { self == .bucket }
 
     var id: String { rawValue }
 
@@ -83,16 +84,15 @@ enum CSVColumn: String, CaseIterable, Identifiable, Hashable {
     }
 
     /// What a fresh install exports until the user reorders it. Max buy is
-    /// deliberately absent: it is gated, and the CSV is the part of this app a buyer
-    /// actually sees — a column stating the most you were willing to pay is not
-    /// something to switch on for anyone by default.
+    /// deliberately absent: the CSV is the part of this app a buyer actually sees,
+    /// and a column stating the most you were willing to pay is not something to
+    /// switch on for anyone by default.
     static let defaults: [CSVColumn] = [.cert, .name, .year, .grade, .grader, .clPrice, .cyPrice]
 
-    /// The columns a build may show and emit. Max buy exists only behind the testing
-    /// gate, and this is applied at BOTH ends — the chip grid and the file — so a
-    /// column enabled while unlocked cannot keep exporting after the gate is closed.
-    static func available(testingUnlocked: Bool, lot: Bool = false) -> [CSVColumn] {
-        allCases.filter { ($0 != .maxBuy || testingUnlocked) && (!$0.isLotOnly || lot) }
+    /// The columns a build may show and emit, applied at BOTH ends — the chip grid
+    /// and the file — so a lot-only column cannot ride along outside a lot.
+    static func available(lot: Bool = false) -> [CSVColumn] {
+        allCases.filter { !$0.isLotOnly || lot }
     }
 }
 
@@ -124,13 +124,15 @@ enum CSVExport {
         return "inventory\(slug)_\(day).csv"
     }
 
+    /// `buyers`: the Buyer cell per card (CardTagging.buyerName), on any export.
     static func rows(_ cards: [Card], columns: [CSVColumn], payoutPercent: Double?,
-                     maxBuyCents: [UUID: Int] = [:], lot: LotExport? = nil) -> [String] {
+                     maxBuyCents: [UUID: Int] = [:], buyers: [UUID: String] = [:],
+                     lot: LotExport? = nil) -> [String] {
         // Lot-only columns never reach a file that is not a lot export.
         let columns = lot == nil ? columns.filter { !$0.isLotOnly } : columns
         var out = [columns.map(\.header).joined(separator: ",")]
         for card in cards {
-            out.append(columns.map { cell(card, $0, payoutPercent, maxBuyCents, lot) }.joined(separator: ","))
+            out.append(columns.map { cell(card, $0, payoutPercent, maxBuyCents, buyers, lot) }.joined(separator: ","))
         }
         for mate in lot?.teammates ?? [] {
             out.append(columns.map { cell(mate, $0, payoutPercent) }.joined(separator: ","))
@@ -139,9 +141,10 @@ enum CSVExport {
     }
 
     static func write(_ cards: [Card], columns: [CSVColumn], scope: String?, payoutPercent: Double?,
-                      maxBuyCents: [UUID: Int] = [:], lot: LotExport? = nil) -> URL? {
+                      maxBuyCents: [UUID: Int] = [:], buyers: [UUID: String] = [:],
+                      lot: LotExport? = nil) -> URL? {
         let text = rows(cards, columns: columns, payoutPercent: payoutPercent,
-                        maxBuyCents: maxBuyCents, lot: lot).joined(separator: "\n")
+                        maxBuyCents: maxBuyCents, buyers: buyers, lot: lot).joined(separator: "\n")
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename(scope: scope))
         do {
             try text.write(to: url, atomically: true, encoding: .utf8)
@@ -158,7 +161,7 @@ enum CSVExport {
     /// CSV layer along with it. A card absent from the map has no max buy, which
     /// renders as an empty cell — never "0.00".
     private static func cell(_ c: Card, _ column: CSVColumn, _ payoutPercent: Double?,
-                             _ maxBuyCents: [UUID: Int], _ lot: LotExport?) -> String {
+                             _ maxBuyCents: [UUID: Int], _ buyers: [UUID: String], _ lot: LotExport?) -> String {
         switch column {
         case .cert: return c.certNumber
         case .name: return quoted(c.name)
@@ -180,7 +183,7 @@ enum CSVExport {
         // Empty, never "0.00", when no comps can price this card — the same rule
         // the price columns follow, and the same rule the panel follows on screen.
         case .maxBuy: return dollars(maxBuyCents[c.localId])
-        case .buyer: return quoted(lot?.buyerByCard[c.localId])
+        case .buyer: return quoted(buyers[c.localId] ?? lot?.buyerByCard[c.localId])
         case .bucket: return quoted(lot?.bucketByCard[c.localId])
         }
     }

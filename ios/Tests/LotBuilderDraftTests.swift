@@ -27,7 +27,7 @@ struct LotBuilderDraftTests {
         var lot: Lot?, ranges: [BuyRange] = []
         for op in ops {
             switch op {
-            case let .createLot(id, name, deadline, banner):
+            case let .createLot(id, name, deadline, banner, _):
                 lot = Lot(id: id, name: name, deadline: deadline, status: .draft, createdAt: Date(), banner: banner)
             case let .updateLot(_, name, deadline, banner, status):
                 lot?.name = name; lot?.deadline = deadline; lot?.banner = banner; lot?.status = status
@@ -50,7 +50,7 @@ struct LotBuilderDraftTests {
         let draft = newDraft([low, high])
         let ops = draft.operations(existingLot: nil, existingRanges: [], status: .active)
         #expect(ops.count == 4)
-        guard case let .createLot(id, name, _, banner) = ops[0] else { Issue.record("create first"); return }
+        guard case let .createLot(id, name, _, banner, _) = ops[0] else { Issue.record("create first"); return }
         #expect(id == draft.lotId && name == "Weekend 10/4" && banner == "PSA only",
                 "trimmed, and the banner goes with the create (it used to be dropped)")
         guard case let .addRange(_, lotId, templateId, order, _) = ops[1] else { Issue.record("then buckets"); return }

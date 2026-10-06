@@ -19,7 +19,7 @@ struct LotBuilderDraft: Equatable {
     }
 
     enum Op: Equatable {
-        case createLot(id: UUID, name: String, deadline: Date?, banner: String?)
+        case createLot(id: UUID, name: String, deadline: Date?, banner: String?, basis: ValueBasis)
         case updateLot(id: UUID, name: String, deadline: Date?, banner: String?, status: LotStatus)
         case addRange(id: UUID, lotId: UUID, templateId: UUID?, sortOrder: Int, fields: BuyRangeFields)
         case updateRange(id: UUID, sortOrder: Int, fields: BuyRangeFields)
@@ -32,6 +32,9 @@ struct LotBuilderDraft: Equatable {
     var hasDeadline = true
     var deadline: Date
     var banner = ""
+    /// Chosen freely while the lot is new. An existing lot's basis is NOT part of the
+    /// draft: it changes only through `set_lot_basis` and its confirmation (M4).
+    var basis: ValueBasis = .cl
     var buckets: [Bucket] = []
 
     /// A new lot.
@@ -47,6 +50,7 @@ struct LotBuilderDraft: Equatable {
         hasDeadline = lot.deadline != nil
         deadline = lot.deadline ?? LotText.defaultDeadline(from: now)
         banner = lot.banner ?? ""
+        basis = lot.valueBasis
         buckets = ranges.sorted { ($0.sortOrder ?? 0) < ($1.sortOrder ?? 0) }
             .map { Bucket(id: $0.id, fields: $0.fields, templateId: $0.templateId) }
     }
@@ -83,7 +87,8 @@ struct LotBuilderDraft: Equatable {
         var ops: [Op] = []
         let deadlineValue = hasDeadline ? deadline : nil
         if existingLot == nil {
-            ops.append(.createLot(id: lotId, name: trimmedName, deadline: deadlineValue, banner: trimmedBanner))
+            ops.append(.createLot(id: lotId, name: trimmedName, deadline: deadlineValue, banner: trimmedBanner,
+                                  basis: basis))
         }
         let kept = Set(buckets.map(\.id))
         for range in existingRanges where !kept.contains(range.id) {

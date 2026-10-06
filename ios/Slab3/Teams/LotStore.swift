@@ -13,9 +13,35 @@ struct Lot: Identifiable, Equatable, Decodable {
     /// The lead's warning line across the top of the lot ("Only accepting PSA
     /// slabs"). Free text; nil shows no banner.
     var banner: String? = nil
+    /// What this lot's money is counted in (ValueBasis). Changed only through
+    /// `set_lot_basis` — the server refuses a plain update.
+    var valueBasis: ValueBasis = .cl
+    /// Set when a lead archived it (2026-10-01): team-wide, and always closed. It
+    /// leaves the Teams list for an "Archived · N" section but keeps its local group,
+    /// its buys and its Team activity — archive is how a lot with buys goes away.
+    var archivedAt: Date? = nil
+
+    var isArchived: Bool { archivedAt != nil }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, deadline, status, banner, createdAt = "created_at"
+        case id, name, deadline, status, banner, createdAt = "created_at", valueBasis = "value_basis"
+        case archivedAt = "archived_at"
+    }
+}
+
+extension Lot {
+    /// In an extension so the memberwise init survives. `value_basis` arrives from
+    /// 0.9's migration on; absent reads as CL, which is what every lot was before it.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        deadline = try c.decodeIfPresent(Date.self, forKey: .deadline)
+        status = try c.decode(LotStatus.self, forKey: .status)
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+        banner = try c.decodeIfPresent(String.self, forKey: .banner)
+        valueBasis = try c.decodeIfPresent(ValueBasis.self, forKey: .valueBasis) ?? .cl
+        archivedAt = try c.decodeIfPresent(Date.self, forKey: .archivedAt)
     }
 }
 
@@ -53,6 +79,17 @@ struct TeamClaim: Identifiable, Equatable, Decodable {
     let buyerId: UUID
     let state: String
     let scannedAt: String
+    /// Courtyard's value at claim (0.9). `priceCents` stays CL Value at claim on
+    /// every claim, whatever the lot's basis — see `value(in:)`.
+    var cyPriceCents: Int? = nil
+    var cyConfidence: Int? = nil
+    /// What the buyer's phone showed as max buy when it claimed. Display only: the
+    /// server never decides anything on it. nil on claims from before 0.9.
+    var maxBuyCents: Int? = nil
+    /// The person this slab is credited to (V1, 2026-10-04): they are its buyer
+    /// everywhere; `buyerId` is who added it. nil = the scanner is the buyer.
+    /// Resolve through `BuyerResolver`, never by reading `buyerId` for a name.
+    var creditedPersonId: UUID? = nil
 
     enum CodingKeys: String, CodingKey {
         case id, cert, grader, label, player, state
@@ -60,6 +97,21 @@ struct TeamClaim: Identifiable, Equatable, Decodable {
         case priceCents = "price_cents", clConfidence = "cl_confidence", cardSet = "card_set"
         case cardYear = "card_year", cardNumber = "card_number", imageUrl = "image_url"
         case buyerId = "buyer_id", scannedAt = "scanned_at"
+        case cyPriceCents = "cy_price_cents", cyConfidence = "cy_confidence", maxBuyCents = "max_buy_cents"
+        case creditedPersonId = "credited_person_id"
+    }
+
+    /// The claim's value in a lot basis. nil is a real answer — that source had no
+    /// value for the slab — and renders as an em dash, never $0.
+    func value(in basis: ValueBasis) -> Int? { basis == .cl ? priceCents : cyPriceCents }
+
+    /// The figure a Team activity view reads (MAX · CL · CY, owner M6).
+    func cents(in lens: PriceLens) -> Int? {
+        switch lens {
+        case .maxBuy: maxBuyCents
+        case .cl: priceCents
+        case .cy: cyPriceCents
+        }
     }
 
     var isOverLimit: Bool { state == "over_limit" }
@@ -81,12 +133,18 @@ struct RangeReport: Equatable, Decodable {
     var reportedDate: Date? { ISO8601.date(reportedAt) }
 }
 
-/// What the team has bought into one bucket: confirmed claims only.
+/// What the team has bought into one bucket: confirmed claims only, counted in the
+/// lot's CURRENT basis (the server's view follows it).
 struct RangeUsage: Equatable, Decodable {
     let rangeId: UUID?
     let cards: Int
     let usedCents: Int64
-    enum CodingKeys: String, CodingKey { case rangeId = "lot_buy_range_id", cards, usedCents = "used_cents" }
+    /// How many of `cards` have a value in the lot's basis. After a lead switches a
+    /// lot, a slab the new source cannot value keeps its slot but adds no dollars.
+    var valuedCards: Int? = nil
+    enum CodingKeys: String, CodingKey {
+        case rangeId = "lot_buy_range_id", cards, usedCents = "used_cents", valuedCards = "valued_cards"
+    }
 }
 
 enum LotStatus: String, Codable, Equatable, CaseIterable {
@@ -165,12 +223,13 @@ final class LotStore {
             loadedAt = Date(); loadedTeamId = nil
             lots = []; rangesByLot = [:]; library = []; usage = [:]
             claimsByLot = [:]; reports = [:]
+            MaxBuyTeamPolicy.shared.basisByLot = [:]
             return
         }
         let started = Date()
         do {
             let lots: [Lot] = try await Backend.client.from("lots")
-                .select("id, name, deadline, status, banner, created_at")
+                .select("id, name, deadline, status, banner, created_at, value_basis, archived_at")
                 .eq("team_id", value: teamId).order("created_at", ascending: false)
                 .execute().value
             var byLot: [UUID: [BuyRange]] = [:]
@@ -184,11 +243,11 @@ final class LotStore {
                     .order("sort_order").execute().value
                 for row in ranges { byLot[row.lotId, default: []].append(row.range) }
                 let used: [RangeUsage] = try await Backend.client.from("lot_range_usage")
-                    .select("lot_buy_range_id, cards, used_cents").in("lot_id", values: ids)
+                    .select("lot_buy_range_id, cards, used_cents, valued_cards").in("lot_id", values: ids)
                     .execute().value
                 for row in used { if let id = row.rangeId { usage[id] = row } }
                 let live: [TeamClaim] = try await Backend.client.from("lot_claims")
-                    .select("id, lot_id, lot_buy_range_id, cert, grader, grade_label, price_cents, cl_confidence, label, player, card_set, card_year, card_number, image_url, buyer_id, state, scanned_at")
+                    .select("id, lot_id, lot_buy_range_id, cert, grader, grade_label, price_cents, cl_confidence, cy_price_cents, cy_confidence, max_buy_cents, credited_person_id, label, player, card_set, card_year, card_number, image_url, buyer_id, state, scanned_at")
                     .in("lot_id", values: ids).in("state", values: ["confirmed", "over_limit"])
                     .order("scanned_at", ascending: false).execute().value
                 for claim in live { claims[claim.lotId, default: []].append(claim) }
@@ -209,6 +268,9 @@ final class LotStore {
             // Assign only on change: MainShell syncs the lot groups when `lots`
             // changes, and a no-op reload should not touch the store.
             if self.lots != lots { self.lots = lots }
+            // Max buy prices a card in a CY lot on Courtyard alone (MaxBuyValue).
+            let bases = Dictionary(lots.map { ($0.id, $0.valueBasis) }, uniquingKeysWith: { a, _ in a })
+            if MaxBuyTeamPolicy.shared.basisByLot != bases { MaxBuyTeamPolicy.shared.basisByLot = bases }
             if self.rangesByLot != byLot { self.rangesByLot = byLot }
             if self.library != library { self.library = library }
             if self.usage != usage { self.usage = usage }
@@ -300,6 +362,28 @@ final class LotStore {
         }
     }
 
+    /// Credit slabs in a lot to a person, or back to whoever scanned them (nil) —
+    /// the lead's Tag action in a receipt (V2). Closed and archived lots too: it is
+    /// record-keeping, not buying.
+    func setPerson(_ personId: UUID?, claims: [TeamClaim], lotId: UUID, teamId: UUID) async -> String? {
+        struct Params: Encodable {
+            let p_lot_id: UUID
+            let p_claim_ids: [UUID]
+            let p_person_id: UUID?
+            func encode(to encoder: Encoder) throws {
+                var c = encoder.container(keyedBy: CodingKeys.self)
+                try c.encode(p_lot_id, forKey: .p_lot_id)
+                try c.encode(p_claim_ids, forKey: .p_claim_ids)
+                try c.encode(p_person_id, forKey: .p_person_id)   // nil → JSON null, which clears
+            }
+            enum CodingKeys: String, CodingKey { case p_lot_id, p_claim_ids, p_person_id }
+        }
+        return await perform(teamId: teamId) {
+            try await Backend.client.rpc("set_claim_person", params: Params(
+                p_lot_id: lotId, p_claim_ids: claims.map(\.id), p_person_id: personId)).execute()
+        }
+    }
+
     // MARK: Library (leads)
 
     func saveTemplate(_ fields: BuyRangeFields, id: UUID?, teamId: UUID) async -> String? {
@@ -343,10 +427,40 @@ final class LotStore {
 
     /// Drafts only. A lot that has been open holds real buys; closing it is the
     /// way to finish it, and deleting it would cascade those buys away.
-    func deleteDraft(_ lot: Lot, teamId: UUID) async -> String? {
-        guard lot.status == .draft else { return TeamError.copy(for: "not_draft") }
+    /// A lot with no buys, in any state. One with buys is ARCHIVED instead — the
+    /// server enforces that too (`lots_delete_guard`, `has_buys`), since before 0.9
+    /// only this phone-side check stood between a lead and a cascade of the team's
+    /// claims.
+    func delete(_ lot: Lot, teamId: UUID) async -> String? {
+        guard claims(for: lot).isEmpty else { return TeamError.copy(for: "has_buys") }
         return await perform(teamId: teamId) {
             try await Backend.client.from("lots").delete().eq("id", value: lot.id).execute()
+        }
+    }
+
+    /// Lead only, team-wide. Archiving an open lot closes it in the same write, so a
+    /// buyer can never file into a lot nobody can see.
+    func archive(_ lot: Lot, teamId: UUID) async -> String? {
+        struct Archive: Encodable { let status: LotStatus; let archived_at: Date }
+        return await perform(teamId: teamId) {
+            try await Backend.client.from("lots")
+                .update(Archive(status: lot.status == .draft ? .draft : .closed, archived_at: Date()))
+                .eq("id", value: lot.id).execute()
+        }
+    }
+
+    /// Back into the list as it was — closed stays closed; the lead reopens it if
+    /// they mean to.
+    func unarchive(_ lot: Lot, teamId: UUID) async -> String? {
+        struct Unarchive: Encodable {
+            func encode(to encoder: Encoder) throws {
+                var c = encoder.container(keyedBy: CodingKeys.self)
+                try c.encodeNil(forKey: .archivedAt)
+            }
+            enum CodingKeys: String, CodingKey { case archivedAt = "archived_at" }
+        }
+        return await perform(teamId: teamId) {
+            try await Backend.client.from("lots").update(Unarchive()).eq("id", value: lot.id).execute()
         }
     }
 
@@ -384,6 +498,41 @@ final class LotStore {
         }
     }
 
+    // MARK: A lot's value basis (0.9, owner M4/M5)
+
+    /// What `set_lot_basis` says a switch does — or did. Nothing is moved either way:
+    /// claims keep their buckets, and a slab the new source cannot value keeps its
+    /// slot and adds no dollars.
+    struct BasisImpact: Decodable, Equatable {
+        let claims: Int
+        let noValue: Int
+        let outsideRange: Int
+        let overBudget: Int
+        let changed: Bool
+        enum CodingKeys: String, CodingKey {
+            case claims, changed, noValue = "no_value", outsideRange = "outside_range", overBudget = "over_budget"
+        }
+    }
+
+    /// The preview (`commit: false`, which writes nothing) and the switch itself go
+    /// through the SAME server function, so the sheet shows exactly what it does.
+    func switchBasis(_ lotId: UUID, to basis: ValueBasis, commit: Bool,
+                     teamId: UUID) async -> (impact: BasisImpact?, error: String?) {
+        struct Params: Encodable { let p_lot_id: UUID; let p_basis: String; let p_commit: Bool }
+        guard TeamsFeature.isAvailable else { return (nil, TeamError.copy(for: "unavailable")) }
+        do {
+            let data = try await Backend.client.rpc("set_lot_basis", params: Params(
+                p_lot_id: lotId, p_basis: basis.rawValue, p_commit: commit)).execute().data
+            let impact = try JSONDecoder().decode(BasisImpact.self, from: data)
+            if commit { await load(teamId: teamId) }
+            return (impact, nil)
+        } catch let error as PostgrestError {
+            return (nil, TeamError.copy(for: error.message))
+        } catch {
+            return (nil, TeamError.copy(for: "network"))
+        }
+    }
+
     // MARK: The lot builder (one screen, one save)
 
     /// Run the builder's changes in order and reload ONCE at the end — `perform`
@@ -394,9 +543,10 @@ final class LotStore {
         await perform(teamId: teamId) {
             for op in ops {
                 switch op {
-                case let .createLot(id, name, deadline, banner):
+                case let .createLot(id, name, deadline, banner, basis):
                     try await Backend.client.from("lots")
-                        .insert(LotInsert(id: id, teamId: teamId, name: name, deadline: deadline, banner: banner))
+                        .insert(LotInsert(id: id, teamId: teamId, name: name, deadline: deadline, banner: banner,
+                                          basis: basis))
                         .execute()
                 case let .updateLot(id, name, deadline, banner, status):
                     try await Backend.client.from("lots")
@@ -494,7 +644,8 @@ final class LotStore {
     /// at creation used to be dropped here and only saved on the next status change.
     struct LotInsert: Encodable {
         let id: UUID, teamId: UUID, name: String, deadline: Date?, banner: String?
-        enum CodingKeys: String, CodingKey { case id, teamId = "team_id", name, deadline, banner }
+        var basis: ValueBasis = .cl
+        enum CodingKeys: String, CodingKey { case id, teamId = "team_id", name, deadline, banner, basis = "value_basis" }
         func encode(to encoder: Encoder) throws {
             var c = encoder.container(keyedBy: CodingKeys.self)
             try c.encode(id, forKey: .id)
@@ -502,6 +653,7 @@ final class LotStore {
             try c.encode(name, forKey: .name)
             try c.encode(deadline, forKey: .deadline)
             try c.encode(banner, forKey: .banner)
+            try c.encode(basis, forKey: .basis)
         }
     }
 
@@ -541,6 +693,19 @@ final class LotStore {
 enum LotFolders {
     static func visible(_ lots: [Lot], isLead: Bool) -> [Lot] {
         isLead ? lots : lots.filter { $0.status != .draft }
+    }
+
+    /// The Teams tab's lists. NOT `visible`: `sync` builds lot groups from that, and
+    /// leaving archived lots out of it would detach their groups — every card in an
+    /// archived lot would silently become a plain group's.
+    static func listed(_ lots: [Lot], isLead: Bool) -> [Lot] {
+        visible(lots, isLead: isLead).filter { !$0.isArchived }
+    }
+
+    /// The "Archived · N" section, most recently archived first.
+    static func archived(_ lots: [Lot], isLead: Bool) -> [Lot] {
+        visible(lots, isLead: isLead).filter(\.isArchived)
+            .sorted { ($0.archivedAt ?? .distantPast) > ($1.archivedAt ?? .distantPast) }
     }
 
     /// Can cards be filed into (or seen in) this group right now? A plain group,

@@ -142,7 +142,7 @@ struct LensRenderTests {
     /// Locked above unlocked, with the longest context label the Cards tab produces.
     /// What to look at: the third segment does not push the label into the toggle,
     /// and the locked header is unchanged from what shipped.
-    @Test func rendersTheHeaderLockedAndUnlocked() throws {
+    @Test func rendersTheHeaderWithTwoAndThreeSegments() throws {
         let url = try render(
             VStack(spacing: 0) {
                 ScreenHeader(context: "255 cards", title: "Inventory",
@@ -150,7 +150,7 @@ struct LensRenderTests {
                 ScreenHeader(context: "3 of 255 selected", title: "Select cards",
                              contextTint: Caliper.cyan,
                              lens: .constant(.maxBuy),
-                             lenses: PriceLens.available(unlocked: true))
+                             lenses: PriceLens.allCases)
             }
             .background(Caliper.bg),
             named: "lens-header", height: 260

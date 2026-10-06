@@ -24,6 +24,7 @@ struct TeamsScreen: View {
     @State private var bucket: BucketTarget?
     @State private var confirmRotate = false
     @State private var showName = false
+    @State private var showMaxBuy = false
     @State private var error: String?
 
     struct BucketTarget: Identifiable {
@@ -59,6 +60,9 @@ struct TeamsScreen: View {
         .sheet(isPresented: $showName) {
             TeamDisplayNameSheet(team: app.team).presentationDetents([.height(260)])
         }
+        .sheet(isPresented: $showMaxBuy) {
+            TeamMaxBuySheet(team: app.team).presentationDetents([.large])
+        }
         .confirmationDialog("Rotate the team code?", isPresented: $confirmRotate, titleVisibility: .visible) {
             Button("Rotate code") { Task { error = await app.team.rotateCode() } }
         } message: {
@@ -87,6 +91,7 @@ struct TeamsScreen: View {
         case .bucket(let range, let lot): bucket = BucketTarget(range: range, lot: lot)
         case .rotateCode: confirmRotate = true
         case .editName: showName = true
+        case .editMaxBuy: showMaxBuy = true
         case .dismissIntro: withAnimation(Caliper.easeOut) { seenIntro = true }
         }
     }
@@ -101,6 +106,7 @@ enum TeamsAction {
     case bucket(BuyRange, Lot)
     case rotateCode
     case editName
+    case editMaxBuy
     case dismissIntro
 }
 
@@ -114,8 +120,10 @@ struct TeamsContent: View {
     let send: (TeamsAction) -> Void
 
     @State private var showClosed = false
+    @State private var showArchived = false
 
-    private var visible: [Lot] { lots.visibleLots(isLead: team.isLead) }
+    /// Archived lots are left out of every list here and gathered at the bottom.
+    private var visible: [Lot] { LotFolders.listed(lots.lots, isLead: team.isLead) }
     private var open: [Lot] {
         visible.filter { $0.status == .active }.sorted(by: Lot.soonestFirst)
     }
@@ -200,6 +208,33 @@ struct TeamsContent: View {
                 }
             }
 
+            // Archived by a lead (2026-10-01): out of the way, never gone. Everyone can
+            // open one read-only; only a lead can unarchive (in the lot's menu).
+            let archived = LotFolders.archived(lots.lots, isLead: team.isLead)
+            if !archived.isEmpty {
+                Button { withAnimation(Caliper.easeOut) { showArchived.toggle() } } label: {
+                    HStack {
+                        Text("Archived · \(archived.count)").caliperLabel(Caliper.textTertiary)
+                        Spacer()
+                        Image(systemName: showArchived ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Caliper.textTertiary)
+                    }
+                    .padding(.horizontal, Caliper.gutter)
+                    .padding(.top, closed.isEmpty ? Caliper.space7 : 0)
+                    .frame(minHeight: Caliper.hitMin)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(CaliperPressStyle())
+                if showArchived {
+                    ForEach(archived) { lot in
+                        SheetRow(label: lot.name, sub: LotText.summary(lot, rangeCount: lots.ranges(for: lot).count),
+                                 trailing: "›") { send(.push(.lot(lot.id))) }
+                        Hairline()
+                    }
+                }
+            }
+
             // Only once the team has loaded: rows of zeros and dashes that open empty
             // screens say nothing true about the team.
             if team.team != nil { teamSection }
@@ -273,6 +308,11 @@ struct TeamsContent: View {
         }
         row("Buy ranges", value: "\(lots.library.count) saved") { send(.push(.library)) }
         Hairline()
+        // The team's max-buy skew and margin (owner M2). Members see what applies to
+        // them; only the lead can change it.
+        row("Max buy", value: TeamMaxBuySheet.summary(team.team),
+            tap: team.isLead ? { send(.editMaxBuy) } : nil)
+        Hairline()
         row("Team code", value: team.team.map { JoinCode.display($0.joinCode) } ?? "\u{2014}",
             tap: team.isLead ? { send(.rotateCode) } : nil)
         Hairline()
@@ -343,7 +383,7 @@ struct CurrentLotCard: View {
                     .monospacedDigit()
                     .foregroundStyle(room.isFull ? Caliper.confMid : Caliper.textPrimary)
                 if !ranges.isEmpty {
-                    Text("\(room.percentUsed)% used · CL value at claim").caliperMeta(Caliper.textTertiary)
+                    Text("\(room.percentUsed)% used · \(lot.valueBasis.valueAtClaim)").caliperMeta(Caliper.textTertiary)
                 }
             }
             .padding(Caliper.rowPad)

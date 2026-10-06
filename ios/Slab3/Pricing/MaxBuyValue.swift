@@ -28,11 +28,28 @@ enum MaxBuyValue {
     /// An EMPTY Card Ladder list means "CL answered and has none" and falls THROUGH
     /// to Courtyard. Treating it as the answer would turn a card with real Courtyard
     /// comps into an em dash.
+    ///
+    /// ON A CY LOT (owner M3, 2026-10-01) Card Ladder plays no part: Courtyard's
+    /// comps only, capped at Courtyard's value. A card is "on" a lot when it is filed
+    /// in that lot's group. A CL lot, and every card in no lot, keep the rule above.
     static func compsSource(for card: Card) -> PriceSource? {
+        if basis(for: card) == .cy {
+            if let cy = card.courtyardSales, !cy.isEmpty { return .cy }
+            return nil
+        }
         if let cl = card.cardLadderSales, !cl.isEmpty { return .cl }
         if let cy = card.courtyardSales, !cy.isEmpty { return .cy }
         return nil
     }
+
+    /// The basis of the lot this card is filed in, if any (MaxBuyTeamPolicy).
+    static func basis(for card: Card) -> ValueBasis? {
+        card.folder?.teamLotId.flatMap { MaxBuyTeamPolicy.shared.basisByLot[$0] }
+    }
+
+    /// Whose value is the ceiling: Courtyard's on a CY lot, Card Ladder's
+    /// everywhere else — the value the sourcer is paid in.
+    static func capSource(for card: Card) -> PriceSource { basis(for: card) == .cy ? .cy : .cl }
 
     /// The figure plus the basis it was actually built from, so the panel can
     /// disclose which comps answered without the row having to.
@@ -40,6 +57,8 @@ enum MaxBuyValue {
         var result: MaxBuyPrice.Result
         /// nil when neither source has comps — the `.noComps` case.
         var compsSource: PriceSource?
+        /// Whose value capped it: `.cy` on a CY lot, `.cl` everywhere else.
+        var capSource: PriceSource = .cl
 
         var cents: Int? {
             if case .price(let cents, _) = result { return cents }
@@ -54,20 +73,22 @@ enum MaxBuyValue {
     /// Live and uncached — the panel's per-card tuned figure, and the detail hero
     /// that follows its sliders.
     ///
-    /// The cap is Card Ladder Value and the population is Courtyard's WHICHEVER
-    /// source supplied the comps: he is paid CLV so that is the ceiling, and
-    /// Courtyard is the only source that carries a census at all.
+    /// The cap is Card Ladder Value (Courtyard's on a CY lot) and the population is
+    /// Courtyard's WHICHEVER source supplied the comps: he is paid in that value so
+    /// it is the ceiling, and Courtyard is the only source that carries a census.
     static func answer(for card: Card, knobs: MaxBuyPrice.Knobs) -> Answer {
         let source = compsSource(for: card)
+        let cap = capSource(for: card)
         let comps = source.flatMap { card.sales(for: $0) } ?? []
         return Answer(
             result: MaxBuyPrice.compute(.init(
                 comps: comps,
-                clValueCents: card.prices[.cl],
+                clValueCents: card.prices[cap],
                 population: card.courtyardPopulation,
                 knobs: knobs.sanitized
             )),
-            compsSource: source
+            compsSource: source,
+            capSource: cap
         )
     }
 
@@ -124,10 +145,13 @@ enum MaxBuyCache {
         var cap: Int
         var population: Int
         var knobs: MaxBuyPrice.Knobs
+        /// A CY lot changes both the comps and the cap (0.9).
+        var cyLot: Bool
 
-        init(card: Card, knobs: MaxBuyPrice.Knobs) {
+        @MainActor init(card: Card, knobs: MaxBuyPrice.Knobs) {
+            cyLot = MaxBuyValue.basis(for: card) == .cy
             comps = card.compsRevision ?? 0
-            cap = card.cardLadderPriceCents ?? -1
+            cap = (cyLot ? card.courtyardPriceCents : card.cardLadderPriceCents) ?? -1
             population = card.courtyardPopulation ?? -1
             self.knobs = knobs
         }

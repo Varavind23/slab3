@@ -247,15 +247,13 @@ enum PriceLens: String, CaseIterable, Identifiable {
         }
     }
 
-    /// The two real sources, in toggle order — what a locked build shows, and the
-    /// width a locked user's header must keep.
-    static let sources: [PriceLens] = [.cl, .cy]
+    /// "Max buy at claim" / "CL value at claim" — Team activity's labels, where
+    /// every figure is one recorded when the slab was claimed.
+    var atClaim: String { self == .maxBuy ? "Max buy at claim" : "\(label) value at claim" }
 
-    /// Max buy exists only behind the testing gate, so the toggle's segment count
-    /// is a function of the gate and nothing else.
-    static func available(unlocked: Bool) -> [PriceLens] {
-        unlocked ? allCases : sources
-    }
+    /// The two real sources, in toggle order — for toggles where max buy has no
+    /// meaning (which comps you are reading, a source's own figures).
+    static let sources: [PriceLens] = [.cl, .cy]
 }
 
 /// The two prices for one card, in cents. A `nil` is a real answer — the source

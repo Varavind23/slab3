@@ -150,14 +150,14 @@ struct CardsScreen: View {
         }
         .background(Caliper.bg)
         .sheet(isPresented: $showFilters) {
-            FiltersSheet(app: app, cards: allCards, groups: groups, confirmVerb: "Show")
+            FiltersSheet(app: app, cards: allCards, groups: groups, confirmVerb: "Show", pendingDeletes: pendingDeletes)
                 .presentationDetents([.large])
         }
         // Filing one card from the swipe when no group has ever been used. It
         // deliberately does not enter selection mode: the user swiped a single row,
         // they did not ask to start a multi-select.
         .sheet(item: $filingCard) { card in
-            GroupSheet(app: app, cards: allCards, targets: [card])
+            GroupSheet(app: app, cards: allCards, targets: [card], pendingDeletes: pendingDeletes)
                 .presentationDetents([.large])
         }
         // Tapping Cards while a card is open goes back to the list.

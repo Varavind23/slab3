@@ -7,7 +7,7 @@ import Observation
 ///   • `activeSource` — which of CL / CY leads on every row and drives the
 ///     sort. It changes emphasis, never visibility.
 ///   • `lens` — a third position ABOVE that pair (2026-09-22): our own max-buy
-///     figure, gated on the testing passcode. See `PriceLens` for why it is not
+///     figure, available to everyone since 0.9. See `PriceLens` for why it is not
 ///     simply a third `PriceSource`.
 ///   • `filter` — one filter, shared by Cards and Export. Filtering on Cards and
 ///     switching to Export must carry the scope with it; re-applying it there
@@ -48,19 +48,6 @@ final class AppState {
 
     // MARK: The max-buy lens
 
-    /// Mirrored from `@AppStorage(TestingGate.unlockedKey)` by `MainShell` rather
-    /// than read from UserDefaults inside `lens` — a read there would not be
-    /// observable, so the toggle would keep its third segment until something
-    /// unrelated happened to invalidate the view.
-    ///
-    /// Locking the gate while max buy leads drops the lens back to the source
-    /// underneath, here, so every consumer recovers in the same frame.
-    var testingUnlocked: Bool {
-        didSet {
-            if !testingUnlocked, storedLens == .maxBuy { storedLens = PriceLens(activeSource) }
-        }
-    }
-
     private var storedLens: PriceLens {
         didSet { defaults.set(storedLens.rawValue, forKey: Keys.lens) }
     }
@@ -69,9 +56,9 @@ final class AppState {
     /// two never disagree; selecting max buy moves neither, which is what makes it
     /// a lens over the source rather than a replacement for it.
     ///
-    /// The GETTER coerces as well as the gate's `didSet`, so no path — a future
-    /// setting, a debug build, a sheet that writes the flag directly — can render a
-    /// lens the toggle has no segment for.
+    /// Max buy is available to every user since 0.9 (owner, 2026-10-01); it was
+    /// behind a testing passcode before, which is why old installs may still hold
+    /// a `caliper_testing_unlocked` key that nothing reads.
     ///
     /// Only max buy is remembered in `storedLens`; a source lens is always READ from
     /// `activeSource`. Two things write that source without touching the lens —
@@ -79,24 +66,21 @@ final class AppState {
     /// `.cl` would then lead every row with CL while the sort, the totals and the
     /// detail hero followed CY. Deriving it makes that disagreement unrepresentable.
     var lens: PriceLens {
-        get { storedLens == .maxBuy && testingUnlocked ? .maxBuy : PriceLens(activeSource) }
+        get { storedLens == .maxBuy ? .maxBuy : PriceLens(activeSource) }
         set {
             storedLens = newValue
             if let source = newValue.source { activeSource = source }
         }
     }
 
-    var availableLenses: [PriceLens] { PriceLens.available(unlocked: testingUnlocked) }
+    var availableLenses: [PriceLens] { PriceLens.allCases }
     var isMaxBuy: Bool { lens == .maxBuy }
 
-    /// The columns this build may actually EMIT: the user's order, minus anything
-    /// the testing gate hides. Applied where the file and its preview are built, so
-    /// a max-buy column enabled while unlocked stops exporting the moment the gate
-    /// closes — rather than silently riding along in a CSV handed to a buyer.
-    /// `enabledColumns` stays the raw persisted order, so closing the gate does not
-    /// destroy the user's column arrangement.
+    /// The columns this build may actually EMIT: the user's order, minus the
+    /// lot-only columns outside a lot. `enabledColumns` stays the raw persisted
+    /// order.
     var exportColumns: [CSVColumn] {
-        let allowed = CSVColumn.available(testingUnlocked: testingUnlocked)
+        let allowed = CSVColumn.available()
         return enabledColumns.filter(allowed.contains)
     }
 
@@ -168,19 +152,7 @@ final class AppState {
         let stored = defaults.double(forKey: Keys.payout)
         payoutPercent = stored > 0 ? stored : nil
 
-        // Read from the same store the gate's @AppStorage writes, so a launch shows
-        // the right toggle on the first frame rather than flashing the wrong one
-        // until MainShell's mirror catches up.
-        testingUnlocked = defaults.bool(forKey: TestingGate.unlockedKey)
-        let savedLens = PriceLens(rawValue: defaults.string(forKey: Keys.lens) ?? "") ?? PriceLens(source)
-        // A stored max buy with the gate locked is coerced AND rewritten, so the key
-        // cannot strand a locked user on an invisible lens across relaunches.
-        if savedLens == .maxBuy, !defaults.bool(forKey: TestingGate.unlockedKey) {
-            storedLens = PriceLens(source)
-            defaults.set(storedLens.rawValue, forKey: Keys.lens)
-        } else {
-            storedLens = savedLens
-        }
+        storedLens = PriceLens(rawValue: defaults.string(forKey: Keys.lens) ?? "") ?? PriceLens(source)
         // A team member lands on Teams (D1); everyone else on Scan, as always.
         if TeamsFeature.isAvailable && onTeamHint { tab = .teams }
     }

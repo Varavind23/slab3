@@ -49,6 +49,9 @@ struct LotVerdict: Codable, Equatable {
     /// per account, so a phone signed into a second account still carries the first
     /// account's lot cards; reconcile must judge only this account's own claims.
     var buyerId: UUID? = nil
+    /// The lot basis the server decided on, "cl" / "cy" (0.9). nil from older
+    /// servers and on stored verdicts from before it — read as CL.
+    var basis: String? = nil
 
     var state: LotClaimState {
         switch outcome {
@@ -74,7 +77,7 @@ struct LotVerdict: Codable, Equatable {
                 Candidate(rangeId: $0.range_id, name: $0.name, cardsLeft: $0.cards_left, centsLeft: $0.cents_left)
             },
             priceCents: reply.price_cents, grade: reply.grade, by: reply.by,
-            buyerId: reply.claim?.buyer_id)
+            buyerId: reply.claim?.buyer_id, basis: reply.basis)
     }
 
     private struct Reply: Decodable {
@@ -94,6 +97,7 @@ struct LotVerdict: Codable, Equatable {
         let price_cents: Int64?
         let grade: String?
         let by: String?
+        let basis: String?
     }
 }
 
@@ -133,6 +137,7 @@ enum LotVerdictText {
         case "range_full_count": return "bucket is full"
         case "range_full_budget": return "bucket budget is spent"
         case "no_cl_value": return "no Card Ladder value"
+        case "no_cy_value": return "no Courtyard value"
         case "lot_closed": return "lot is closed"
         case "not_member": return "not on this team"
         case "released": return "released by a lead"
@@ -141,7 +146,7 @@ enum LotVerdictText {
             case "value": return v?.priceCents.map { "no bucket at \(Money.dollars($0))" } ?? "no bucket at this value"
             case "grade": return v?.grade.map { "grade \($0) fits no bucket" } ?? "grade fits no bucket"
             case "grade_unknown": return "grade unknown"
-            case "confidence": return "CL confidence too low"
+            case "confidence": return "\((v?.basis ?? "cl").uppercased()) confidence too low"
             case "year": return "year fits no bucket"
             default: return "fits no bucket"
             }
@@ -173,8 +178,8 @@ enum LotClaims {
     static let changed = Notification.Name("LotClaims.changed")
 
     /// Claim `card` into `lotId`. Waits for the card's own price refresh (the scan
-    /// path starts one), because the server buckets on the CL Value that refresh
-    /// caches — asking first would only come back "pending".
+    /// path starts one), because the server buckets on the value that refresh caches
+    /// (CL or CY, the lot's basis) — asking first would only come back "pending".
     static func claim(_ card: Card, lotId: UUID, rangeId: UUID? = nil, in context: ModelContext) async {
         guard TeamsFeature.isAvailable else { return }
         // Only for a card still in THIS lot's group: it may have been moved or
@@ -196,13 +201,17 @@ enum LotClaims {
         await waitForPrices(card)
         // It may have left the lot — or been deleted — while its price loaded.
         guard isAlive(card), card.folder?.teamLotId == lotId else { return }
-        var verdict = await request(slab, lotId: lotId, rangeId: rangeId, offline: offline)
+        // The figure this phone shows, recorded beside the claim for the lead's MAX
+        // view (M6). Read after the prices land, since its comps arrive with them.
+        let maxBuy = MaxBuyValue.cents(for: card)
+        var verdict = await request(slab, lotId: lotId, rangeId: rangeId, offline: offline, maxBuy: maxBuy)
         // Cold server cache (a card filed long after it was priced, or scanned with
         // no signal): one cache-first refresh warms it, then ask once more.
         if verdict.outcome == "pending", verdict.reason == "pending_price", isAlive(card), !card.pricesLoading {
             await spaceColdRefresh()
             if isAlive(card) { await PriceService.refresh(card, in: context) }
-            verdict = await request(slab, lotId: lotId, rangeId: rangeId, offline: offline)
+            verdict = await request(slab, lotId: lotId, rangeId: rangeId, offline: offline,
+                                    maxBuy: isAlive(card) ? MaxBuyValue.cents(for: card) : maxBuy)
         }
         verdict.offline = offline || verdict.reason == "network"
         // The card went while the server answered — deleted, moved to another group
@@ -333,14 +342,15 @@ enum LotClaims {
 
     private struct ClaimParams: Encodable {
         let p_lot_id: UUID, p_cert: String, p_grader: String, p_scanned_at: String
-        let p_range_id: UUID?, p_offline: Bool
+        let p_range_id: UUID?, p_offline: Bool, p_max_buy_cents: Int?
     }
 
-    private static func request(_ slab: Slab, lotId: UUID, rangeId: UUID?, offline: Bool) async -> LotVerdict {
+    private static func request(_ slab: Slab, lotId: UUID, rangeId: UUID?, offline: Bool,
+                                maxBuy: Int?) async -> LotVerdict {
         do {
             let params = ClaimParams(p_lot_id: lotId, p_cert: slab.cert, p_grader: slab.grader.rawValue,
                                      p_scanned_at: ISO8601.string(slab.scannedAt),
-                                     p_range_id: rangeId, p_offline: offline)
+                                     p_range_id: rangeId, p_offline: offline, p_max_buy_cents: maxBuy)
             let data = try await Backend.client.rpc("claim_lot_scan", params: params).execute().data
             return try LotVerdict.decode(data)
         } catch let error as PostgrestError {

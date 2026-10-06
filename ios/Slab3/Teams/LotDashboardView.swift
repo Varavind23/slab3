@@ -124,6 +124,8 @@ struct LotDashboardView: View {
         .overlay(Rectangle().strokeBorder(Caliper.confMid.opacity(0.6), lineWidth: Caliper.borderWidth))
     }
 
+    private var unvalued: Int { LotRoom.unvalued(ranges: lots.ranges(for: lot), usage: lots.usage) }
+
     private var statusNote: some View {
         Text(lot.status == .draft ? "Draft · buyers can't see this lot yet" : "Closed · this lot takes no more cards")
             .caliperLabel(Caliper.textTertiary)
@@ -138,10 +140,20 @@ struct LotDashboardView: View {
             if !bands.isEmpty {
                 HStack(spacing: Caliper.space3) {
                     Image(systemName: "rectangle.portrait").font(.system(size: 10))
-                    Text(LotDashboard.gradeLine(lots.ranges(for: lot))).caliperLabel(Caliper.textSecondary)
+                    // Every lot dollar names its basis, so a CY figure is never
+                    // read as CL (ValueBasis).
+                    Text(LotDashboard.gradeLine(lots.ranges(for: lot)) + " · " + lot.valueBasis.valueAtClaim)
+                        .caliperLabel(Caliper.textSecondary)
                 }
                 .foregroundStyle(Caliper.textSecondary)
-                .padding(.bottom, Caliper.space6)
+                .padding(.bottom, unvalued > 0 ? Caliper.space3 : Caliper.space6)
+                if unvalued > 0 {
+                    // After a lead switches the basis: slabs the new source cannot
+                    // value keep their slots and add no dollars. Say so, never $0.
+                    Text("\(unvalued) \(unvalued == 1 ? "slab has" : "slabs have") no \(lot.valueBasis.short) value · counted as cards, not dollars")
+                        .caliperMeta(Caliper.confMid)
+                        .padding(.bottom, Caliper.space6)
+                }
 
                 ForEach(Array(bands.enumerated()), id: \.element.id) { index, band in
                     if index > 0 { Hairline().padding(.vertical, Caliper.space6) }
@@ -371,12 +383,14 @@ struct TeammateClaimRow: View {
                 HStack(alignment: .firstTextBaseline) {
                     Text(claim.title).font(.calBody).foregroundStyle(Caliper.textPrimary).lineLimit(1)
                     Spacer(minLength: Caliper.space4)
+                    // Both sources on every row (Caliper), each as the server
+                    // recorded it at claim. Claims from before 0.9 never recorded
+                    // Courtyard, and that stays an honest em dash.
                     Text(claim.priceCents.map { Money.dollars(Int64($0)) } ?? "\u{2014}")
                         .font(.price).foregroundStyle(Caliper.srcCL)
                     Text("CL").font(.mono(8, .medium)).foregroundStyle(Caliper.srcCL.opacity(0.75))
-                    // Both sources on every row (Caliper): this phone never priced a
-                    // teammate's slab on Courtyard, so CY is an honest em dash.
-                    Text("\u{2014}").font(.price).foregroundStyle(Caliper.srcCY)
+                    Text(claim.cyPriceCents.map { Money.dollars(Int64($0)) } ?? "\u{2014}")
+                        .font(.price).foregroundStyle(Caliper.srcCY)
                     Text("CY").font(.mono(8, .medium)).foregroundStyle(Caliper.srcCY.opacity(0.75))
                 }
                 Text([claim.cardYear, claim.cardSet, claim.cardNumber.map { "#\($0)" }].compactMap { $0 }.joined(separator: " · "))

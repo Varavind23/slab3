@@ -136,9 +136,10 @@ struct LotSyncExportTests {
     @Test func lotColumnsNeverLeakIntoAnOrdinaryExport() {
         let card = Card(scan: CertScan(grader: .psa, certNumber: "66581638", raw: "66581638"))
         let rows = CSVExport.rows([card], columns: [.cert, .buyer, .bucket], payoutPercent: nil)
-        #expect(rows[0] == "cert", "buyer/bucket exist only in a lot export")
-        #expect(!CSVColumn.available(testingUnlocked: true).contains(.buyer))
-        #expect(CSVColumn.available(testingUnlocked: false, lot: true).contains(.bucket))
+        #expect(rows[0] == "cert,buyer", "bucket exists only in a lot export; buyer is on every one (V3)")
+        #expect(!CSVColumn.available().contains(.bucket))
+        #expect(CSVColumn.available().contains(.buyer))
+        #expect(CSVColumn.available(lot: true).contains(.bucket))
     }
 
     @Test func aLeadsLotExportIsTheWholeLot() {

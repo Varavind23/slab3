@@ -43,7 +43,7 @@ struct ExportScreen: View {
         }
         .background(Caliper.bg)
         .sheet(isPresented: $showFilters) {
-            FiltersSheet(app: app, cards: allCards, groups: groups, confirmVerb: "Export")
+            FiltersSheet(app: app, cards: allCards, groups: groups, confirmVerb: "Export", pendingDeletes: pendingDeletes)
                 .presentationDetents([.large])
         }
         .sheet(item: $shareURL) { url in ShareSheet(items: [url]) }
@@ -112,7 +112,7 @@ struct ExportScreen: View {
             // TARGET is the full 44 Caliper asks for — taller than the ink, so the
             // grid doesn't turn into fifteen buttons the size of Share CSV.
             FlowLayout(spacing: Caliper.space4) {
-                ForEach(CSVColumn.available(testingUnlocked: app.testingUnlocked, lot: exportLot != nil)) { column in
+                ForEach(CSVColumn.available(lot: exportLot != nil)) { column in
                     // Numbered by what the file EMITS, not the raw saved order: a
                     // max-buy column the locked gate hides would otherwise leave a
                     // gap, and the badge would name a column position the CSV lacks.
@@ -170,6 +170,7 @@ struct ExportScreen: View {
                     scope: activeGroup?.name,
                     payoutPercent: app.payoutPercent,
                     maxBuyCents: MaxBuyValue.centsByCard(scoped),
+                    buyers: buyers,
                     lot: lotExport
                 )
             }
@@ -233,15 +234,29 @@ struct ExportScreen: View {
             // not hold": a lead who scanned a teammate's slab and was turned away
             // (duplicate) still has that cert in inventory, and the slab must not
             // drop out of the file sent to the lot's buyer.
-            let names = Dictionary(app.team.members.map { ($0.userId, $0.displayName) }, uniquingKeysWith: { a, _ in a })
+            // The buyer after credit (V1): a slab a teammate scanned for a virtual
+            // member is that member's.
             let me = app.team.myUserId
             export.teammates = app.lots.claims(for: lot).filter { $0.buyerId != me }.map { claim in
-                .init(claim: claim, buyer: names[claim.buyerId] ?? "Former member",
+                .init(claim: claim,
+                      buyer: BuyerResolver.buyer(of: claim, members: app.team.members, people: app.team.people).name,
                       bucket: claim.rangeId.flatMap { bucketNames[$0] })
             }
         }
         return export
     }
+    /// The Buyer cell for each of this phone's cards, on any export (V3).
+    private var buyers: [UUID: String] {
+        var out: [UUID: String] = [:]
+        for card in scoped {
+            if let name = CardTagging.buyerName(for: card, claimsByLot: app.lots.claimsByLot,
+                                                members: app.team.members, people: app.team.people) {
+                out[card.localId] = name
+            }
+        }
+        return out
+    }
+
     private var activeGroup: Folder? {
         if case .group(let id) = app.filter { return groups.first { $0.localId == id } }
         return nil

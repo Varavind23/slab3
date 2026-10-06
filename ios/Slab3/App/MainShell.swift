@@ -20,14 +20,14 @@ struct MainShell: View {
     @State private var pendingDeletes = PendingDeletionStore()
 
     @State private var showGroupSheet = false
+    /// The selection bar's Member picker (V4) and anything it could not do.
+    @State private var choosingMember = false
+    @State private var memberNote: String?
     /// Teams: the connection, so offline lot scans sync the moment it returns, and
     /// the summary of how they landed.
     @State private var connectivity = Connectivity()
     @State private var syncSummary: LotClaims.SyncSummary?
     @State private var shareURL: URL?
-
-    /// Mirrored into `AppState.testingUnlocked` below — see there for why.
-    @AppStorage(TestingGate.unlockedKey) private var testingUnlocked = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -71,7 +71,8 @@ struct MainShell: View {
                         group: { showGroupSheet = true },
                         remove: removeFromGroup,
                         export: exportSelection,
-                        delete: deleteSelection
+                        delete: deleteSelection,
+                        member: app.team.team == nil ? nil : { choosingMember = true }
                     )
                     .transition(.move(edge: .bottom))
                 }
@@ -158,17 +159,24 @@ struct MainShell: View {
             OnboardingScreen { app.hasSeenOnboarding = true }
         }
         .sheet(isPresented: $showGroupSheet) {
-            GroupSheet(app: app, cards: cards).presentationDetents([.large])
+            GroupSheet(app: app, cards: cards, pendingDeletes: pendingDeletes).presentationDetents([.large])
         }
         .sheet(item: $shareURL) { ShareSheet(items: [$0]) }
-        // The testing gate decides whether the toggle has a max-buy segment at all,
-        // and it is flipped from a Settings sheet. Mirrored into AppState rather
-        // than read there from UserDefaults, because a read inside `lens` would not
-        // be observable — the third segment would linger until something unrelated
-        // invalidated the header. Locking while max buy leads drops every consumer
-        // back to the source underneath, in AppState's own didSet.
-        .onChange(of: testingUnlocked) { _, unlocked in app.testingUnlocked = unlocked }
-        .task { app.testingUnlocked = testingUnlocked }
+        .confirmationDialog("Who sourced these \(app.selection.count)?", isPresented: $choosingMember,
+                            titleVisibility: .visible) {
+            ForEach(app.team.buyerChoices) { buyer in
+                Button(buyer.isVirtual ? "\(buyer.name) · virtual" : buyer.name) { tagSelection(buyer) }
+            }
+            Button("Clear tag") { tagSelection(nil) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Cards in a lot are tagged for the whole team; the rest on this phone only.")
+        }
+        .alert("Member", isPresented: Binding(get: { memberNote != nil }, set: { if !$0 { memberNote = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(memberNote ?? "")
+        }
         // Before anything waits on a refresh flag: none is running on a fresh launch.
         .task { PriceService.clearStaleLoading(in: context) }
         // Returns at once, with no request, unless TeamsFeature.isAvailable.
@@ -266,13 +274,25 @@ struct MainShell: View {
         app.endSelecting()
     }
 
+    private func tagSelection(_ buyer: Buyer?) {
+        let chosen = selected
+        app.endSelecting()
+        Task {
+            memberNote = await CardTagging.tag(chosen, to: buyer, team: app.team, lots: app.lots, in: context)
+        }
+    }
+
     private func exportSelection() {
         shareURL = CSVExport.write(
             selected,
             columns: app.exportColumns,
             scope: nil,
             payoutPercent: app.payoutPercent,
-            maxBuyCents: MaxBuyValue.centsByCard(selected)
+            maxBuyCents: MaxBuyValue.centsByCard(selected),
+            buyers: Dictionary(selected.compactMap { card in
+                CardTagging.buyerName(for: card, claimsByLot: app.lots.claimsByLot,
+                                      members: app.team.members, people: app.team.people).map { (card.localId, $0) }
+            }, uniquingKeysWith: { a, _ in a })
         )
         app.endSelecting()
     }

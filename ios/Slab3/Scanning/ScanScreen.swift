@@ -44,7 +44,9 @@ struct ScanScreen: View {
         VStack(spacing: 0) {
             header
             ScanFilingBar(target: scanTarget, lot: scanLot, filedToday: filedToday,
-                          needsCardLadder: scanLot != nil && !cardLadderConnected,
+                          // Only a CL lot needs the buyer's own Card Ladder account; a
+                          // CY lot takes members without one (M3, claim_lot_scan v3).
+                          needsCardLadder: scanLot?.valueBasis == .cl && !cardLadderConnected,
                           tap: {
                               // A lot's bar opens the lot on Teams — lots are chosen there.
                               if scanLot != nil {
@@ -83,8 +85,12 @@ struct ScanScreen: View {
                             } : nil).presentationDetents([.large])
         }
         .sheet(isPresented: $showManualEntry) {
-            ManualEntrySheet { scan in add(scan, photo: nil) }
-                .presentationDetents([.height(320)])
+            ManualEntrySheet(
+                add: { scan in add(scan, photo: nil) },
+                addBatch: addBatch,
+                isHeld: { CardLookup.existing($0, in: context) != nil }
+            )
+            .presentationDetents([.medium, .large])
         }
         // Tapping Scan while a card is open goes back to the camera.
         .onChange(of: app.tabReselected) { _, _ in route = nil }
@@ -110,7 +116,7 @@ struct ScanScreen: View {
                     .overlay(Rectangle().strokeBorder(Caliper.lineStrong, lineWidth: Caliper.borderWidth))
             }
             .buttonStyle(CaliperPressStyle())
-            .accessibilityLabel("Enter a cert number by hand")
+            .accessibilityLabel("Enter or paste cert numbers")
         }
     }
 
@@ -319,6 +325,74 @@ struct ScanScreen: View {
     }
 
     private func add(_ scan: CertScan, photo: Data?) {
+        switch ingest(scan, photo: photo) {
+        case .duplicate(let existing):
+            duplicateHaptic.notificationOccurred(.warning)
+            show(.duplicate(name: existing.displayTitle, cert: existing.certNumber))
+            withAnimation(Caliper.easeOut) { highlightedCardID = existing.localId }
+            Task {
+                try? await Task.sleep(for: .seconds(1.2))
+                withAnimation(Caliper.easeOut) { highlightedCardID = nil }
+            }
+        case .added(let card):
+            // A single tap, not the three-tap .success pattern — at burst cadence
+            // that turns into mush.
+            captureHaptic.impactOccurred()
+            show(.captured(card: card))
+            // Identity and price work run off the scan loop — the camera immediately
+            // accepts the next slab while this row fills itself in.
+            //
+            // Card Ladder and Courtyard go FIRST. PSA is walled (spike/README.md §4a)
+            // and fails slowly — up to 15s on its API plus 50s on the scraper — so
+            // asking it first meant every row sat nameless for the length of a
+            // timeout before the sources that can actually answer were even tried.
+            // PSA still runs, and still outranks the others if it ever comes back.
+            Task {
+                await PriceService.refresh(card, in: context)
+                await PsaIdentityService.enrich(card)
+            }
+        }
+    }
+
+    /// A pasted cert list (`ManualEntrySheet`). Every cert goes through the same
+    /// `ingest` as a scan — duplicate check, filing, lot claim — but the batch gets
+    /// ONE haptic and ONE summary toast, and its prices go through `PricePacer`
+    /// rather than all at once (the burst that got bulk refresh removed).
+    private func addBatch(_ scans: [CertScan]) {
+        var added: [Card] = []
+        var rows: [UUID] = []
+        var held = 0
+        // In PASTE order: filing queues each card's lot claim here, and the pacer
+        // prices in this same order, so claim N waits on the price that is next up.
+        // Reversed, the first claim waited on the LAST price — past its 30s wait on a
+        // long list, which left it pending until the app next came forward.
+        for scan in scans {
+            switch ingest(scan, photo: nil) {
+            case .added(let card): added.append(card); rows.append(card.localId)
+            case .duplicate(let card): held += 1; rows.append(card.localId)
+            }
+        }
+        guard !scans.isEmpty else { return }
+        // Each ingest put its row first, which leaves the batch upside down. Read
+        // top-down in Recent scans, the way it was pasted.
+        let moved = Set(rows)
+        withAnimation(Caliper.easeOut) {
+            recentCardIDs.removeAll { moved.contains($0) }
+            recentCardIDs.insert(contentsOf: rows, at: 0)
+        }
+        if added.isEmpty { duplicateHaptic.notificationOccurred(.warning) } else { captureHaptic.impactOccurred() }
+        show(.batch(added: added.count, held: held))
+        PricePacer.shared.enqueue(added.map(\.localId), in: context)
+    }
+
+    private enum Ingest {
+        case added(Card)
+        case duplicate(Card)
+    }
+
+    /// Insert and file one cert — the part a scan and a pasted list share. Says
+    /// nothing to the user and starts no price work; the callers decide both.
+    private func ingest(_ scan: CertScan, photo: Data?) -> Ingest {
         // A duplicate cert gets an amber readout and does NOT add a row.
         //
         // Asked of the STORE, not of `cards`. That query is a rendered value —
@@ -329,15 +403,8 @@ struct ScanScreen: View {
         // the slab appeared twice in Recent scans under a cyan "captured" readout
         // instead of the amber duplicate one (2026-09-15).
         if let existing = CardLookup.existing(scan, in: context) {
-            duplicateHaptic.notificationOccurred(.warning)
             bringToFront(existing)
-            show(.duplicate(name: existing.displayTitle, cert: existing.certNumber))
-            withAnimation(Caliper.easeOut) { highlightedCardID = existing.localId }
-            Task {
-                try? await Task.sleep(for: .seconds(1.2))
-                withAnimation(Caliper.easeOut) { highlightedCardID = nil }
-            }
-            return
+            return .duplicate(existing)
         }
         let card = Card(scan: scan)
         // The camera capture is the FLOOR, not the goal: it means a row always
@@ -345,9 +412,9 @@ struct ScanScreen: View {
         if let photo { card.setImage(photo, from: .camera) }
         context.insert(card)
         // The filing bar's group, if one is chosen. Through CardFiling like every
-        // other path, so a team lot claims here too. The price refresh below is
-        // marked as started FIRST: the claim waits on it (the server buckets on the
-        // CL Value it caches), and without the mark the claim could run before the
+        // other path, so a team lot claims here too. The price refresh is marked
+        // as started FIRST: the claim waits on it (the server buckets on the CL
+        // Value it caches), and without the mark the claim could run before the
         // refresh begins and fetch Card Ladder a second time.
         if let scanTarget {
             if scanTarget.isTeamLot { card.pricesLoading = true }
@@ -355,22 +422,7 @@ struct ScanScreen: View {
         }
         withAnimation(Caliper.easeOut) { recentCardIDs.insert(card.localId, at: 0) }
         app.tabTouched = true   // scanning is using the app: never pull them away to Teams
-        // A single tap, not the three-tap .success pattern — at burst cadence
-        // that turns into mush.
-        captureHaptic.impactOccurred()
-        show(.captured(card: card))
-        // Identity and price work run off the scan loop — the camera immediately
-        // accepts the next slab while this row fills itself in.
-        //
-        // Card Ladder and Courtyard go FIRST. PSA is walled (spike/README.md §4a)
-        // and fails slowly — up to 15s on its API plus 50s on the scraper — so
-        // asking it first meant every row sat nameless for the length of a
-        // timeout before the sources that can actually answer were even tried.
-        // PSA still runs, and still outranks the others if it ever comes back.
-        Task {
-            await PriceService.refresh(card, in: context)
-            await PsaIdentityService.enrich(card)
-        }
+        return .added(card)
     }
 
     /// Cancel-and-replace, never queue: in burst mode the toasts would otherwise
@@ -517,6 +569,8 @@ enum ScanToast {
     case captured(card: Card)
     case duplicate(name: String, cert: String)
     case noCode
+    /// A pasted cert list: how many became cards, how many were already held.
+    case batch(added: Int, held: Int)
 }
 
 /// Blurred scrim, hairline border, a 2pt coloured left edge — cyan for a capture,
@@ -572,6 +626,7 @@ struct ScanToastView: View {
     private var edgeColor: Color {
         switch toast {
         case .captured: return Caliper.cyan
+        case .batch(let added, _): return added > 0 ? Caliper.cyan : Caliper.confMid
         case .duplicate, .noCode: return Caliper.confMid
         }
     }
@@ -580,6 +635,8 @@ struct ScanToastView: View {
         case .captured(let card): return card.displayTitle
         case .duplicate(let name, _): return name
         case .noCode: return "No code in frame"
+        case .batch(let added, _):
+            return added == 0 ? "Nothing new added" : "Added \(added) \(added == 1 ? "card" : "cards")"
         }
     }
     /// Reads the card as it resolves, so "Identifying" becomes the real set and
@@ -590,50 +647,10 @@ struct ScanToastView: View {
             return card.lookupStatus == .pending ? "Identifying · #\(card.certNumber)" : card.metaLine
         case .duplicate(_, let cert): return "Already in inventory · #\(cert)"
         case .noCode: return "Hold the label inside the guides"
+        case .batch(let added, let held):
+            var parts = held > 0 ? ["\(held) already in inventory"] : []
+            if added > 0 { parts.append("Pricing one at a time") }
+            return parts.joined(separator: " · ")
         }
     }
-}
-
-// MARK: - Manual entry
-
-/// The pencil in the header. A slab whose label is too scuffed to read still has
-/// to get into inventory.
-struct ManualEntrySheet: View {
-    let add: (CertScan) -> Void
-    @Environment(\.dismiss) private var dismiss
-    @State private var cert = ""
-    @State private var grader: Grader = .psa
-
-    var body: some View {
-        CaliperSheet(title: "Enter a cert") {
-            Button("Cancel") { dismiss() }
-                .font(.mono(10, .medium))
-                .foregroundStyle(Caliper.textSecondary)
-        } content: {
-            VStack(alignment: .leading, spacing: Caliper.space6) {
-                Picker("Grader", selection: $grader) {
-                    Text("PSA").tag(Grader.psa)
-                    Text("CGC").tag(Grader.cgc)
-                }
-                .pickerStyle(.segmented)
-
-                TextField("Cert number", text: $cert)
-                    .font(.price)
-                    .keyboardType(.numberPad)
-                    .foregroundStyle(Caliper.textPrimary)
-                    .padding(.horizontal, Caliper.rowPad)
-                    .frame(height: Caliper.hitMin)
-                    .overlay(Rectangle().strokeBorder(Caliper.lineStrong, lineWidth: Caliper.borderWidth))
-            }
-            .padding(.horizontal, Caliper.gutter)
-            .padding(.top, Caliper.space6)
-        } confirm: {
-            CaliperButton(title: "Add card", variant: .primary, fullWidth: true, disabled: trimmed.isEmpty) {
-                add(CertScan(grader: grader, certNumber: trimmed, raw: trimmed))
-                dismiss()
-            }
-        }
-    }
-
-    private var trimmed: String { cert.trimmingCharacters(in: .whitespaces) }
 }

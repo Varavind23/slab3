@@ -2,12 +2,12 @@ import Testing
 import Foundation
 @testable import Slab3
 
-/// The rules that keep the max-buy lens from ever being visible to someone who has
-/// not unlocked it, and from ever stranding someone who locks it again.
+/// The rules that keep the max-buy lens a LENS over the source rather than a third
+/// source, and (since 0.9, when the testing passcode went) available to everyone.
 ///
 /// These run against a scratch `UserDefaults` suite rather than `.standard` — the
-/// gate and the lens are both persisted preferences, and a test that scribbled on
-/// the real ones would change the behaviour of the app on the machine running it.
+/// lens is a persisted preference, and a test that scribbled on the real one would
+/// change the behaviour of the app on the machine running it.
 @MainActor
 struct PriceLensTests {
 
@@ -19,17 +19,10 @@ struct PriceLensTests {
         return defaults
     }
 
-    private func unlockedState(_ defaults: UserDefaults) -> AppState {
-        defaults.set(true, forKey: TestingGate.unlockedKey)
-        let app = AppState(defaults: defaults)
-        app.testingUnlocked = true
-        return app
-    }
-
     // ── The lens sits above the source ────────────────────────────────────────
 
     @Test func maxBuyRemembersTheSourceUnderneath() {
-        let app = unlockedState(freshDefaults())
+        let app = AppState(defaults: freshDefaults())
         app.lens = .cy
         app.lens = .maxBuy
         // Max buy writes no source, which is the whole reason it is a lens: the
@@ -40,7 +33,7 @@ struct PriceLensTests {
     }
 
     @Test func choosingARealSourceMovesBoth() {
-        let app = unlockedState(freshDefaults())
+        let app = AppState(defaults: freshDefaults())
         app.lens = .maxBuy
         app.lens = .cl
         #expect(app.activeSource == .cl)
@@ -51,7 +44,7 @@ struct PriceLensTests {
         // SalesPanel writes activeSource directly to switch which comps it shows.
         // That must not knock the user off max buy — the two controls answer
         // different questions.
-        let app = unlockedState(freshDefaults())
+        let app = AppState(defaults: freshDefaults())
         app.lens = .maxBuy
         app.activeSource = .cy
         #expect(app.isMaxBuy)
@@ -72,77 +65,51 @@ struct PriceLensTests {
     @Test func theSalesToggleMovesASourceLens() {
         // Under CL/CY the detail hero follows the comps toggle (the 2026-08-31
         // rule) — two sources' figures on one screen is the misreading it prevents.
-        let app = unlockedState(freshDefaults())
+        let app = AppState(defaults: freshDefaults())
         app.lens = .cl
         app.activeSource = .cy
         #expect(app.lens == .cy)
         #expect(!app.isMaxBuy)
     }
 
-    // ── The gate ──────────────────────────────────────────────────────────────
+    // ── Everyone gets it (0.9) ────────────────────────────────────────────────
 
-    @Test func theMaxBuySegmentIsLeftmostAndOnlyWhenUnlocked() {
-        #expect(PriceLens.available(unlocked: false) == [.cl, .cy])
-        #expect(PriceLens.available(unlocked: true).first == .maxBuy)
-        #expect(PriceLens.available(unlocked: true).count == 3)
+    @Test func theMaxBuySegmentIsLeftmostForEveryone() {
+        let app = AppState(defaults: freshDefaults())
+        #expect(app.availableLenses == [.maxBuy, .cl, .cy])
     }
 
-    @Test func aFreshUnlockDoesNotSwitchLenses() {
-        let defaults = freshDefaults()
-        let app = AppState(defaults: defaults)
-        app.lens = .cy
-        app.testingUnlocked = true
-        // Unlocking adds a segment. It does not press it.
-        #expect(app.lens == .cy)
-        #expect(app.availableLenses.count == 3)
-    }
-
-    @Test func lensFallsBackWhenTheGateLocks() {
-        let defaults = freshDefaults()
-        let app = unlockedState(defaults)
-        app.lens = .cy
-        app.lens = .maxBuy
-        #expect(app.isMaxBuy)
-
-        app.testingUnlocked = false
-
-        // Back to the source underneath, and the stored key no longer says max buy —
-        // otherwise the next launch would restore a lens with no segment to show it.
-        #expect(app.lens == .cy)
+    @Test func aFreshInstallStillLeadsWithASource() {
+        // Available is not chosen: nobody lands on max buy without pressing it.
+        let app = AppState(defaults: freshDefaults())
         #expect(!app.isMaxBuy)
-        #expect(defaults.string(forKey: "caliper_price_lens") != PriceLens.maxBuy.rawValue)
     }
 
-    @Test func aLockedMaxBuyLensDoesNotSurviveALaunch() {
-        // Seed the state a crash mid-lock, or a defaults edit, could leave behind.
+    @Test func aMaxBuyLensSurvivesALaunch() {
         let defaults = freshDefaults()
         defaults.set(PriceLens.maxBuy.rawValue, forKey: "caliper_price_lens")
-        defaults.set(PriceSource.cy.rawValue, forKey: "caliper_active_source")
-        defaults.set(false, forKey: TestingGate.unlockedKey)
-
-        let app = AppState(defaults: defaults)
-        #expect(app.lens == .cy)
-        #expect(defaults.string(forKey: "caliper_price_lens") == PriceLens.cy.rawValue,
-                "the key is rewritten, not just read past")
-    }
-
-    @Test func anUnlockedMaxBuyLensSurvivesALaunch() {
-        let defaults = freshDefaults()
-        defaults.set(PriceLens.maxBuy.rawValue, forKey: "caliper_price_lens")
-        defaults.set(true, forKey: TestingGate.unlockedKey)
         #expect(AppState(defaults: defaults).isMaxBuy)
+    }
+
+    @Test func theRetiredGateKeyIsIgnored() {
+        // A 0.8 install that once unlocked and then LOCKED again carries
+        // `caliper_testing_unlocked = false`. That must no longer hide anything.
+        let defaults = freshDefaults()
+        defaults.set(false, forKey: "caliper_testing_unlocked")
+        defaults.set(PriceLens.maxBuy.rawValue, forKey: "caliper_price_lens")
+        let app = AppState(defaults: defaults)
+        #expect(app.isMaxBuy)
+        #expect(app.availableLenses.count == 3)
     }
 
     // ── Geometry ──────────────────────────────────────────────────────────────
 
-    @Test func aLockedToggleIsExactlyAsWideAsItWas() {
-        // 60pt, two 30pt segments. No locked user's header may move because of a
-        // feature they cannot see.
+    @Test func aSourceOnlyToggleIsTwoSegments() {
         #expect(LensToggle.width(of: PriceLens.sources) == 60)
     }
 
-    @Test func theUnlockedToggleAddsOneSegmentAndNoMore() {
-        #expect(LensToggle.width(of: PriceLens.available(unlocked: true)) == 90)
+    @Test func theFullToggleIsThreeSegmentsAndNoMore() {
+        #expect(LensToggle.width(of: PriceLens.allCases) == 90)
     }
 
     // ── The written-out label ─────────────────────────────────────────────────
@@ -160,21 +127,15 @@ struct PriceLensTests {
         #expect(PriceLens.cl.hue == PriceSource.cl.hue)
     }
 
-    // ── The CSV column rides the same gate ────────────────────────────────────
+    // ── The CSV column ────────────────────────────────────────────────────────
 
-    @Test func theMaxBuyColumnIsHiddenAndUnexportableWhileLocked() {
-        #expect(!CSVColumn.available(testingUnlocked: false).contains(.maxBuy))
-        #expect(CSVColumn.available(testingUnlocked: true).contains(.maxBuy))
-        #expect(!CSVColumn.defaults.contains(.maxBuy), "never on by default")
+    @Test func theMaxBuyColumnIsOfferedButNeverOnByDefault() {
+        #expect(CSVColumn.available().contains(.maxBuy))
+        // The CSV goes to buyers; stating the most you would pay is opt-in.
+        #expect(!CSVColumn.defaults.contains(.maxBuy))
 
-        // Enabled while unlocked, then locked: the column stops being exported, but
-        // the user's column ORDER is left intact.
-        let app = unlockedState(freshDefaults())
+        let app = AppState(defaults: freshDefaults())
         app.enabledColumns = [.cert, .maxBuy, .clPrice]
         #expect(app.exportColumns == [.cert, .maxBuy, .clPrice])
-
-        app.testingUnlocked = false
-        #expect(app.exportColumns == [.cert, .clPrice])
-        #expect(app.enabledColumns == [.cert, .maxBuy, .clPrice])
     }
 }

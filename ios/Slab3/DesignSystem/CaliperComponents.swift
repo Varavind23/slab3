@@ -228,9 +228,9 @@ struct SourceToggle: View {
 /// MAX | CL | CY — the header control, and the only place the max-buy lens can be
 /// turned on (2026-09-22).
 ///
-/// `lenses` comes from `AppState.availableLenses`, so a locked build renders the
-/// same two segments at the same 60pt it always did and no locked user's header
-/// moves. Max buy is first because it is the leftmost segment.
+/// `lenses` is all three on the app's headers and Team activity's bar, and the two
+/// sources where max buy has no meaning. Max buy is first because it is the
+/// leftmost segment.
 struct LensToggle: View {
     @Binding var value: PriceLens
     var lenses: [PriceLens] = PriceLens.sources
@@ -478,8 +478,8 @@ struct ScreenHeader<Actions: View>: View {
     let title: String
     var contextTint: Color = Caliper.textSecondary
     /// Which figure leads, app-wide. `lenses` decides how many segments the control
-    /// draws — two when the testing gate is locked, three when it is not — so the
-    /// header's width is a function of the gate and nothing else.
+    /// draws: three (MAX · CL · CY) on the app's own headers, two where only a
+    /// source has meaning.
     var lens: Binding<PriceLens>? = nil
     var lenses: [PriceLens] = PriceLens.sources
     @ViewBuilder var actions: Actions
@@ -579,6 +579,8 @@ struct SelectionBar: View {
     let remove: () -> Void
     let export: () -> Void
     let delete: () -> Void
+    /// Tag the selection to a member (V4). nil — not on a team — hides the action.
+    var member: (() -> Void)? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -603,6 +605,10 @@ struct SelectionBar: View {
                 divider
                 action("Export", "square.and.arrow.up", run: export)
                 divider
+                if let member {
+                    action("Member", "person.crop.square", run: member)
+                    divider
+                }
                 action("Delete", "trash", tint: Caliper.danger, run: delete)
             }
         }

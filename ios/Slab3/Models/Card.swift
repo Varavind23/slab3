@@ -226,6 +226,13 @@ final class Card {
     /// The server's full answer (`LotVerdict`, JSON): the bucket, copy count, the
     /// three existing buys on a limit block, the candidates to pick from.
     var lotVerdictData: Data?
+    /// Who sourced this slab — a team member or a virtual member (V4, 2026-10-04).
+    /// PHONE-ONLY, for cards outside a lot: a lot slab's credit lives on its server
+    /// claim (`TeamClaim.creditedPersonId`), which wins wherever both exist. The name
+    /// is kept beside the id so Export and the row still read after the person is
+    /// renamed elsewhere, removed, or the user leaves the team. Optional (SwiftData rule).
+    var creditedPersonId: UUID?
+    var creditedName: String?
 
     var grader: Grader { Grader(rawValue: graderRaw) ?? .psa }
     var lookupStatus: LookupStatus {

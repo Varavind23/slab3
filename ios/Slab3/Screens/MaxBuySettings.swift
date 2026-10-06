@@ -1,34 +1,33 @@
 import SwiftUI
 
-/// The passcode gate for the Verified Max Buy Price pilot (2026-09-16, owner
-/// decision: ship it to one user while the weights are uncalibrated).
-///
-/// THIS IS OBFUSCATION, NOT SECURITY, and it is meant to be. The passcode ships in
-/// the binary as plain text and anyone who looks at the app can read it. Its job is
-/// to stop a curious TestFlight user stumbling into an uncalibrated buy
-/// recommendation and acting on it — not to withstand anyone who is trying. A real
-/// entitlement would mean an Edge Function deploy, which reaches every user at once
-/// and is a production release; that is not warranted to hide one panel.
-enum TestingGate {
+/// The team-side inputs to max buy (0.9), pushed in by TeamStore and LotStore on
+/// every load: the lead's skew and margin, and which lots count in Courtyard value.
+/// Observable so that rows reading it inside `body` redraw when a lead changes it.
+@MainActor
+@Observable
+final class MaxBuyTeamPolicy {
+    static let shared = MaxBuyTeamPolicy()
 
-    /// CHANGE THIS to whatever you give the tester. There is nowhere else it lives.
-    static let passcode = "letscook"
+    struct Knobs: Equatable { var skew: Double; var margin: Double }
 
-    /// Single-screen preference, the `caliper_auto_scan` idiom: only the detail
-    /// screen and this sheet read it, so it is deliberately not in AppState.
-    static let unlockedKey = "caliper_testing_unlocked"
-
-    static func accepts(_ entry: String) -> Bool {
-        entry.trimmingCharacters(in: .whitespacesAndNewlines) == passcode
-    }
+    var knobs: Knobs?
+    /// lot id → its basis, for every lot this phone can see.
+    var basisByLot: [UUID: ValueBasis] = [:]
 }
 
 /// The baseline the per-card knobs reset to.
 ///
 /// The sliders on the panel are deliberately per-card — a figure tuned during one
-/// negotiation must not silently follow the tester into the next. That alone would
+/// negotiation must not silently follow the user into the next. That alone would
 /// mean nothing he tunes ever survives the card he tuned it on, so the baseline
 /// itself is editable, once, here.
+///
+/// ON A TEAM (owner M2, 2026-10-01): when the lead has set the team's skew and
+/// margin, they REPLACE this phone's on every card (`current`), and a card's sliders
+/// may only go higher (`respectingTeam`), which can only lower the figure. "Average
+/// of N" stays the phone's own. The team's pair arrives through
+/// `MaxBuyTeamPolicy`, which is observable, so a lead's change redraws every row.
+@MainActor
 enum MaxBuyDefaults {
     private enum Keys {
         static let windowN = "caliper_vmb_window_n"
@@ -42,11 +41,34 @@ enum MaxBuyDefaults {
     /// thing that has to clear it.
     private static var memo: MaxBuyPrice.Knobs?
 
-    static var current: MaxBuyPrice.Knobs {
+    /// This phone's own stored baseline — what Settings → Max buy edits.
+    static var phone: MaxBuyPrice.Knobs {
         if let memo { return memo }
         let knobs = load()
         memo = knobs
         return knobs
+    }
+
+    /// The baseline every card starts from: the phone's, with the team's skew and
+    /// margin in place of its own when the lead has set them.
+    static var current: MaxBuyPrice.Knobs { applyingTeam(phone) }
+
+    /// The lead's pair, or nil. Read through the observable policy on purpose.
+    static var team: (skew: Double, margin: Double)? {
+        get { MaxBuyTeamPolicy.shared.knobs.map { ($0.skew, $0.margin) } }
+        set { MaxBuyTeamPolicy.shared.knobs = newValue.map { .init(skew: $0.skew, margin: $0.margin) } }
+    }
+
+    static func applyingTeam(_ knobs: MaxBuyPrice.Knobs) -> MaxBuyPrice.Knobs {
+        guard let team else { return knobs }
+        return .init(windowN: knobs.windowN, skew: team.skew, margin: team.margin)
+    }
+
+    /// A card's tuned knobs, held at or above the team's: a member may make a lower
+    /// offer than the lead's figure, never a higher one.
+    static func respectingTeam(_ knobs: MaxBuyPrice.Knobs) -> MaxBuyPrice.Knobs {
+        guard let team else { return knobs }
+        return .init(windowN: knobs.windowN, skew: max(knobs.skew, team.skew), margin: max(knobs.margin, team.margin))
     }
 
     private static func load() -> MaxBuyPrice.Knobs {
@@ -70,6 +92,14 @@ enum MaxBuyDefaults {
         memo = knobs
     }
 
+    /// One line for the Settings row: "Avg 5 · skew 30% · margin 10%" — what
+    /// actually applies, the team's pair included.
+    static var summary: String {
+        let k = current
+        func pct(_ v: Double) -> String { "\(Int((v * 100).rounded()))%" }
+        return "Avg \(k.windowN) · skew \(pct(k.skew)) · margin \(pct(k.margin))"
+    }
+
     /// Tests only — they write the keys directly.
     static func invalidateCache() { memo = nil }
 
@@ -84,74 +114,44 @@ enum MaxBuyDefaults {
         let defaults = UserDefaults.standard
         let keys = [Keys.windowN, Keys.skew, Keys.margin]
         let stored = keys.map { defaults.object(forKey: $0) }
+        let storedTeam = MaxBuyTeamPolicy.shared.knobs
         save(knobs)
+        // A team policy left by another test would override the pinned knobs.
+        MaxBuyTeamPolicy.shared.knobs = nil
         defer {
             // `set(nil, …)` removes the key, which restores "never set".
             for (key, value) in zip(keys, stored) { defaults.set(value, forKey: key) }
+            MaxBuyTeamPolicy.shared.knobs = storedTeam
             memo = nil
         }
         return try body()
     }
 }
 
-/// Settings → About → Testing. Locked, it asks for the passcode; unlocked, it
-/// shows the baseline the panel's knobs reset to, and the way back out.
-struct TestingGateSheet: View {
-    @AppStorage(TestingGate.unlockedKey) private var unlocked = false
+/// Settings → Max buy. The baseline every card's sliders reset to.
+///
+/// Was the second half of the testing-passcode sheet until 0.9, when max buy
+/// became available to everyone (owner, 2026-10-01).
+struct MaxBuySettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
 
-    @State private var entry = ""
-    @State private var error: String?
-    @State private var knobs = MaxBuyDefaults.current
+    @State private var knobs = MaxBuyDefaults.phone
 
     var body: some View {
-        CaliperSheet(title: unlocked ? "Testing version" : "Testing passcode") {
-            Button(unlocked ? "Close" : "Cancel") { dismiss() }
+        CaliperSheet(title: "Max buy") {
+            Button("Close") { dismiss() }
                 .font(.mono(10, .medium))
                 .foregroundStyle(Caliper.textSecondary)
         } content: {
-            if unlocked { defaultsForm } else { passcodeForm }
+            defaultsForm
         } confirm: {
-            if unlocked {
-                CaliperButton(title: "Turn off testing version", variant: .danger, fullWidth: true) {
-                    unlocked = false
-                    entry = ""
-                    dismiss()
-                }
-            } else {
-                CaliperButton(title: "Unlock", variant: .primary, fullWidth: true,
-                              disabled: entry.isEmpty) {
-                    submit()
-                }
-            }
+            EmptyView()
         }
-    }
-
-    private var passcodeForm: some View {
-        VStack(alignment: .leading, spacing: Caliper.space5) {
-            SecureField("Passcode", text: $entry)
-                .font(.calBody)
-                .textContentType(.password)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-                .foregroundStyle(Caliper.textPrimary)
-                .modifier(FieldBox())
-                .onSubmit(submit)
-
-            if let error {
-                Text(error).caliperMeta(Caliper.confLow)
-            }
-
-            Text("Turns on features that are still being tested. Prices they suggest are not final and have not been checked against real sales.")
-                .caliperMeta()
-        }
-        .padding(.horizontal, Caliper.gutter)
-        .padding(.top, Caliper.space6)
     }
 
     private var defaultsForm: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SectionLabel(text: "Max buy defaults")
+            SectionLabel(text: "Defaults")
 
             VStack(alignment: .leading, spacing: Caliper.space5) {
                 Text("Every card starts from these. Adjusting the sliders on a card changes that card only.")
@@ -168,15 +168,24 @@ struct TestingGateSheet: View {
                         .modifier(FieldBox())
                 }
 
-                labelled("Skew to the low end", value: percent(knobs.skew)) {
-                    MaxBuyKnobSlider(value: $knobs.skew)
-                }
+                if let team = MaxBuyDefaults.team {
+                    // On a team whose lead set these: they apply on every card, so
+                    // the phone's own would only be a number that does nothing.
+                    labelled("Skew to the low end", value: percent(team.skew)) { EmptyView() }
+                    labelled("Margin", value: percent(team.margin)) { EmptyView() }
+                    Text("Skew and margin are set by your team lead.").caliperMeta()
+                } else {
+                    labelled("Skew to the low end", value: percent(knobs.skew)) {
+                        MaxBuyKnobSlider(value: $knobs.skew)
+                    }
 
-                labelled("Margin", value: percent(knobs.margin)) {
-                    MaxBuyKnobSlider(value: $knobs.margin)
+                    labelled("Margin", value: percent(knobs.margin)) {
+                        MaxBuyKnobSlider(value: $knobs.margin)
+                    }
                 }
             }
             .padding(.horizontal, Caliper.gutter)
+            .padding(.top, Caliper.space4)
             .padding(.bottom, Caliper.space6)
         }
         // Saved as they move, so there is no second "did that take?" question on
@@ -200,27 +209,19 @@ struct TestingGateSheet: View {
     private func percent(_ v: Double) -> String {
         (v * 100).formatted(.number.precision(.fractionLength(0))) + "%"
     }
-
-    private func submit() {
-        guard TestingGate.accepts(entry) else {
-            error = "That passcode isn\u{2019}t right."
-            return
-        }
-        error = nil
-        unlocked = true
-        entry = ""
-    }
 }
 
 /// A 0–100% knob. Quiet on purpose: these live on screens that have already spent
 /// their one cyan primary action, so the slider must not read as a second one.
 struct MaxBuyKnobSlider: View {
     @Binding var value: Double
+    /// The lowest it may go — the team's setting, for a member (owner M2).
+    var floor: Double = 0
 
     var body: some View {
         CaliperSlider(
-            value: Binding(get: { CGFloat(value) }, set: { value = Double($0) }),
-            range: 0...1,
+            value: Binding(get: { CGFloat(value) }, set: { value = max(Double($0), floor) }),
+            range: CGFloat(min(floor, 0.95))...1,
             tint: Caliper.textSecondary,
             glow: false,
             unit: "%",

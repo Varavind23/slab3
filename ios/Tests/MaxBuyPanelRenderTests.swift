@@ -131,14 +131,4 @@ struct MaxBuyPanelRenderTests {
     @Test func windowChipsCarryATapTarget() {
         #expect(Chip.Size.tap.hitHeight >= Caliper.hitMin)
     }
-
-    /// The gate is the whole reason this ships to one user. A wrong passcode, an
-    /// empty one, or stray whitespace must not open it.
-    @Test func theGateAcceptsOnlyTheRealPasscode() {
-        #expect(TestingGate.accepts(TestingGate.passcode))
-        #expect(TestingGate.accepts("  \(TestingGate.passcode) "), "typed on a phone keyboard")
-        #expect(!TestingGate.accepts(""))
-        #expect(!TestingGate.accepts("testing"))
-        #expect(!TestingGate.accepts(TestingGate.passcode + "x"))
-    }
 }

@@ -23,6 +23,7 @@ struct LotBuilderScreen: View {
     @State private var working = false
     @State private var confirmDiscard = false
     @State private var confirmDelete = false
+    @State private var showBasis = false
 
     enum EditTarget: Identifiable {
         case new
@@ -63,6 +64,9 @@ struct LotBuilderScreen: View {
         }
         .onAppear(perform: load)
         .sheet(item: $editing) { target in editor(for: target).presentationDetents([.large]) }
+        .sheet(isPresented: $showBasis) {
+            if let existing { LotBasisSheet(app: app, lot: existing).presentationDetents([.large]) }
+        }
         .confirmationDialog("Leave without saving?", isPresented: $confirmDiscard, titleVisibility: .visible) {
             Button("Discard changes", role: .destructive) { dismiss() }
             if status == .draft { Button("Save draft") { Task { await save(status: .draft, thenLeave: true) } } }
@@ -97,6 +101,41 @@ struct LotBuilderScreen: View {
             .frame(minHeight: Caliper.hitMin)
             SectionLabel(text: "Banner · shown to buyers")
             textField("e.g. PSA only — no CGC, no BGS", text: $draft.banner)
+            basisSection
+        }
+    }
+
+    // MARK: Value basis (0.9, owner M3/M4)
+
+    /// What the lot's money is counted in. A NEW lot picks freely — nothing is in
+    /// it yet. An existing lot changes only through LotBasisSheet, which shows the
+    /// server's preview first: never one tap.
+    private var basisSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SectionLabel(text: "Counted in")
+            HStack {
+                Text(existing?.valueBasis.valueAtClaim ?? draft.basis.valueAtClaim)
+                    .font(.calBody).foregroundStyle(Caliper.textPrimary)
+                Spacer()
+                if existing == nil {
+                    LensToggle(value: Binding(get: { PriceLens(draft.basis.source) },
+                                              set: { draft.basis = $0 == .cy ? .cy : .cl }),
+                               lenses: PriceLens.sources)
+                } else {
+                    Button("Change…") { showBasis = true }
+                        .font(.mono(10, .medium))
+                        .foregroundStyle(Caliper.textSecondary)
+                        .frame(minHeight: Caliper.hitMin)
+                        .contentShape(Rectangle())
+                }
+            }
+            .padding(.horizontal, Caliper.gutter)
+            .frame(minHeight: Caliper.hitMin)
+            Text((existing?.valueBasis ?? draft.basis) == .cy
+                 ? "Buckets, budgets and the 3-of-a-card limit use Courtyard. Members don't need Card Ladder."
+                 : "Buckets, budgets and the 3-of-a-card limit use Card Ladder. Members need a Card Ladder account.")
+                .caliperMeta()
+                .padding(.horizontal, Caliper.gutter)
         }
     }
 
@@ -249,7 +288,7 @@ struct LotBuilderScreen: View {
         guard let existing, let teamId = app.team.team?.id else { return }
         working = true
         defer { working = false }
-        if let failure = await app.lots.deleteDraft(existing, teamId: teamId) { problem = failure } else { dismiss() }
+        if let failure = await app.lots.delete(existing, teamId: teamId) { problem = failure } else { dismiss() }
     }
 
     /// A draft bucket drawn with the library's row.
@@ -267,7 +306,7 @@ struct LotBuilderScreen: View {
         switch target {
         case .new:
             BuyRangeEditorSheet(title: "New range", initial: BuyRangeDraft(), offersSaveToLibrary: true,
-                                bandSuggestions: labels) { fields, saveToLibrary in
+                                bandSuggestions: labels, basis: existing?.valueBasis ?? draft.basis) { fields, saveToLibrary in
                 var templateId: UUID?
                 if saveToLibrary, let teamId = app.team.team?.id {
                     if let failure = await app.lots.saveTemplate(fields, id: nil, teamId: teamId) { return failure }
@@ -279,7 +318,7 @@ struct LotBuilderScreen: View {
         case .bucket(let bucket):
             // Edits change THIS lot's copy only, never the library.
             BuyRangeEditorSheet(title: bucket.fields.name, initial: BuyRangeDraft(preview(bucket)),
-                                bandSuggestions: labels) { fields, _ in
+                                bandSuggestions: labels, basis: existing?.valueBasis ?? draft.basis) { fields, _ in
                 if let i = draft.buckets.firstIndex(where: { $0.id == bucket.id }) { draft.buckets[i].fields = fields }
                 return nil
             }

@@ -6,10 +6,12 @@ import Foundation
 /// `lot_buy_ranges` in supabase/migrations/20260925000000_teams_lots.sql, and the
 /// matching rules here must read the same way the SQL enforces them:
 ///
-///   • value is CL Value, in integer cents; min inclusive, max EXCLUSIVE — so
+///   • value is the lot's basis value (CL by default, CY on a CY lot), in integer
+///     cents; min inclusive, max EXCLUSIVE — so
 ///     "$0–$100" and "$100–$240" never both claim a $100 card;
 ///   • grade is grader-agnostic, 1–10, halves allowed; always bounded;
-///   • CL confidence (1–5) and year are optional on either side (nil = no limit);
+///   • confidence (1–5, the lot basis's source: CL's own, or Courtyard's on a CY lot —
+///     the columns keep their cl_ names) and year are optional (nil = no limit);
 ///   • max cards AND a dollar budget are both required — full when either is hit.
 struct BuyRange: Identifiable, Equatable, Codable {
     var id: UUID

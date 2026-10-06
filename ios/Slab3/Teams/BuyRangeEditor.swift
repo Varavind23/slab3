@@ -19,6 +19,9 @@ struct BuyRangeEditorSheet: View {
     /// Band labels already used in this lot, offered as one-tap chips so two
     /// buckets meant for one band cannot drift apart by a typo.
     var bandSuggestions: [String] = []
+    /// The lot's basis, which decides WHOSE confidence the bounds are checked
+    /// against (ValueBasis). nil for a library range, which belongs to no lot.
+    var basis: ValueBasis? = nil
     let onSave: (BuyRangeFields, _ saveToLibrary: Bool) async -> String?
     var onDelete: (() async -> String?)?
 
@@ -42,13 +45,15 @@ struct BuyRangeEditorSheet: View {
                 section("Name", issue: .name) {
                     field("Buyers under $100", text: $draft.name)
                 }
-                section("Value · CL", issue: .value) {
+                // The lot's basis decides which source's value the bounds compare
+                // against; a library range belongs to no lot, so it names none.
+                section(basis.map { "Value · \($0.short)" } ?? "Value", issue: .value) {
                     pair(min: $draft.valueMin, minPrompt: "$0", max: $draft.valueMax, maxPrompt: "No max", decimal: true)
                 }
                 section("Grade", issue: .grade) {
                     pair(min: $draft.gradeMin, minPrompt: "1", max: $draft.gradeMax, maxPrompt: "10", decimal: true)
                 }
-                section("CL confidence · 1–5", issue: .confidence) {
+                section("\(basis.map { $0.short + " confidence" } ?? "Confidence") · 1–5", issue: .confidence) {
                     pair(min: $draft.confMin, minPrompt: "Any", max: $draft.confMax, maxPrompt: "Any")
                 }
                 section("Year", issue: .year) {
