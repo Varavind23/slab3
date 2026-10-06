@@ -9,7 +9,7 @@
 -- refuses two different accounts; a person with credit cannot be removed.
 
 begin;
-select plan(38);
+select plan(41);
 
 -- ── Seed (as postgres) ──────────────────────────────────────────────────────
 -- 1 Lead  2 Buyer  3 Consignor (has the app, not on the team)  4 Other consignor
@@ -57,11 +57,17 @@ select is((select display_name from team_people where id = (select v from ids wh
   'the lead adds a virtual member (name trimmed)');
 select is((select user_id from team_people where id = (select v from ids where k = 'mike')), null,
   'a new member is virtual');
-select lives_ok($$select update_person((select v from ids where k = 'mike'), 'Mike R', null)$$, 'the lead renames');
+select lives_ok($$select update_person((select v from ids where k = 'mike'), 'Mike R', 'pays 70%')$$, 'the lead renames');
+select is((select note from team_people_notes('b0000000-0000-0000-0000-000000000001')), 'pays 70%',
+  'the lead reads the note');
 
 set local request.jwt.claims to '{"sub":"40000000-0000-0000-0000-000000000002","role":"authenticated"}';
 select is((select count(*)::int from team_people), 2, 'a buyer reads their team''s roster, not other teams''');
 select throws_ok($$select link_code from team_people$$, '42501', null, 'but never an invite code');
+select throws_ok($$select note from team_people$$, '42501', null,
+  'nor the lead''s note ("Only your team''s leads see this", 2026-10-06)');
+select is((select count(*)::int from team_people_notes('b0000000-0000-0000-0000-000000000001')), 0,
+  'and the notes function answers a buyer with nothing');
 select throws_ok($$select update_person((select v from ids where k = 'mike'), 'X', null)$$,
   'P0001', 'not_lead', 'nor renames');
 

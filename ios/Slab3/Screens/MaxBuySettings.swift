@@ -3,16 +3,47 @@ import SwiftUI
 /// The team-side inputs to max buy (0.9), pushed in by TeamStore and LotStore on
 /// every load: the lead's skew and margin, and which lots count in Courtyard value.
 /// Observable so that rows reading it inside `body` redraw when a lead changes it.
+///
+/// REMEMBERED ACROSS LAUNCHES (workflow test 2026-10-06). Buyers work shows with no
+/// signal, and a cold launch there never loads the team: in memory only, a member's
+/// max buy fell back to their PHONE's skew and margin — possibly looser than the
+/// lead's, the one thing M2 forbids — and a CY lot's cards priced on Card Ladder.
+/// So the last loaded answer is kept (`remember`, after each successful load), put
+/// back at launch (`restore`), and cleared on sign-out (`forget`). Explicit calls
+/// rather than a didSet, so tests that set the policy never write defaults.
 @MainActor
 @Observable
 final class MaxBuyTeamPolicy {
     static let shared = MaxBuyTeamPolicy()
 
-    struct Knobs: Equatable { var skew: Double; var margin: Double }
+    struct Knobs: Equatable, Codable { var skew: Double; var margin: Double }
 
     var knobs: Knobs?
     /// lot id → its basis, for every lot this phone can see.
     var basisByLot: [UUID: ValueBasis] = [:]
+
+    static let storageKey = "caliper_team_max_buy_policy"
+    private struct Stored: Codable { var knobs: Knobs?; var basisByLot: [UUID: ValueBasis] }
+
+    func remember(in defaults: UserDefaults = .standard) {
+        let data = try? JSONEncoder().encode(Stored(knobs: knobs, basisByLot: basisByLot))
+        defaults.set(data, forKey: Self.storageKey)
+    }
+
+    /// Only fills what no load has filled yet: a load that already answered wins.
+    func restore(from defaults: UserDefaults = .standard) {
+        guard let data = defaults.data(forKey: Self.storageKey),
+              let stored = try? JSONDecoder().decode(Stored.self, from: data) else { return }
+        if knobs == nil { knobs = stored.knobs }
+        if basisByLot.isEmpty { basisByLot = stored.basisByLot }
+    }
+
+    /// Sign-out: the next account on this phone may be on another team, or none.
+    func forget(in defaults: UserDefaults = .standard) {
+        knobs = nil
+        basisByLot = [:]
+        defaults.removeObject(forKey: Self.storageKey)
+    }
 }
 
 /// The baseline the per-card knobs reset to.

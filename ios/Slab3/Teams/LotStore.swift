@@ -227,6 +227,7 @@ final class LotStore {
             lots = []; rangesByLot = [:]; library = []; usage = [:]
             claimsByLot = [:]; reports = [:]
             MaxBuyTeamPolicy.shared.basisByLot = [:]
+            MaxBuyTeamPolicy.shared.remember()
             return
         }
         let started = Date()
@@ -283,7 +284,10 @@ final class LotStore {
             if self.lots != lots { self.lots = lots }
             // Max buy prices a card in a CY lot on Courtyard alone (MaxBuyValue).
             let bases = Dictionary(lots.map { ($0.id, $0.valueBasis) }, uniquingKeysWith: { a, _ in a })
-            if MaxBuyTeamPolicy.shared.basisByLot != bases { MaxBuyTeamPolicy.shared.basisByLot = bases }
+            if MaxBuyTeamPolicy.shared.basisByLot != bases {
+                MaxBuyTeamPolicy.shared.basisByLot = bases
+                MaxBuyTeamPolicy.shared.remember()   // for a launch with no signal
+            }
             if self.rangesByLot != byLot { self.rangesByLot = byLot }
             if self.library != library { self.library = library }
             if self.usage != usage { self.usage = usage }

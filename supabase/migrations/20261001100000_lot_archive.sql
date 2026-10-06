@@ -32,3 +32,23 @@ end $$;
 
 create trigger lots_delete_guard before delete on lots
   for each row execute function lots_delete_guard();
+
+-- An archived lot is never OPEN. A 0.8 lead's phone knows nothing of archived_at and
+-- offers Reopen on any closed lot — that write must unarchive it, or the lot is open
+-- to 0.8 buyers while hidden from every 0.9 phone (workflow test 2026-10-06). And an
+-- archive written without closing the lot closes it here, as the app always does.
+create or replace function lots_archive_guard()
+returns trigger language plpgsql as $$
+begin
+  if new.archived_at is not null and new.status = 'active' then
+    if old.status <> 'active' then
+      new.archived_at := null;     -- reopened: back in the list
+    else
+      new.status := 'closed';      -- archived while open: closed with it
+    end if;
+  end if;
+  return new;
+end $$;
+
+create trigger lots_archive_guard before update on lots
+  for each row execute function lots_archive_guard();

@@ -193,7 +193,7 @@ struct TeamMembersSheet: View {
             HStack(spacing: Caliper.space5) {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(person.displayName).font(.calBody).foregroundStyle(Caliper.textPrimary)
-                    if let note = person.note { Text(note).caliperMeta(Caliper.textTertiary).lineLimit(1) }
+                    if team.isLead, let note = person.note { Text(note).caliperMeta(Caliper.textTertiary).lineLimit(1) }
                 }
                 Spacer(minLength: Caliper.space4)
                 Text(person.isVirtual ? (person.linkCodeAt == nil ? "Virtual" : "Invited") : "Linked")

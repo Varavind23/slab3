@@ -95,16 +95,28 @@ final class TeamStore {
                     .from("team_members").select("user_id, role, display_name")
                     .eq("team_id", value: row.id)
                     .order("joined_at").execute().value
-                people = try await Backend.client
-                    .from("team_people").select("id, team_id, display_name, note, user_id, link_code_at")
+                var roster: [TeamPerson] = try await Backend.client
+                    .from("team_people").select("id, team_id, display_name, user_id, link_code_at")
                     .eq("team_id", value: row.id)
                     .order("display_name").execute().value
+                // The note is the lead's alone — the column is not granted to members
+                // (20261004000000), so a lead asks for it separately.
+                if members.contains(where: { $0.userId == uid && $0.role == .lead }) {
+                    struct NoteRow: Decodable { let id: UUID; let note: String? }
+                    let notes: [NoteRow] = try await Backend.client
+                        .rpc("team_people_notes", params: ["p_team_id": row.id.uuidString]).execute().value
+                    let byId = Dictionary(notes.map { ($0.id, $0.note) }, uniquingKeysWith: { a, _ in a })
+                    for i in roster.indices { roster[i].note = byId[roster[i].id] ?? nil }
+                }
+                people = roster
             } else {
                 team = nil
                 members = []
                 people = []
             }
             MaxBuyDefaults.team = team?.maxBuy
+            // Kept for a launch with no signal (MaxBuyTeamPolicy.restore).
+            MaxBuyTeamPolicy.shared.remember()
             lastLoadOK = true
         } catch {
             lastLoadOK = false

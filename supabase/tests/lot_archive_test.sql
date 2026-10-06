@@ -8,7 +8,7 @@
 -- removing a whole TEAM still cascades through its lots.
 
 begin;
-select plan(10);
+select plan(13);
 
 -- ── Seed (as postgres) ──────────────────────────────────────────────────────
 insert into auth.users (id, email) values
@@ -59,6 +59,18 @@ select is((select count(*)::int from lots where id = 'a1000000-0000-0000-0000-00
 
 select lives_ok($$update lots set archived_at = null where id = 'a1000000-0000-0000-0000-000000000001'$$,
   'the lead unarchives');
+
+-- ── Archived is never open (2026-10-06) ─────────────────────────────────────
+update lots set archived_at = now() where id = 'a1000000-0000-0000-0000-000000000001';
+-- A 0.8 lead's Reopen writes status alone.
+update lots set status = 'active' where id = 'a1000000-0000-0000-0000-000000000001';
+select is((select archived_at from lots where id = 'a1000000-0000-0000-0000-000000000001'), null,
+  'reopening an archived lot unarchives it (else open to 0.8 buyers, hidden on 0.9)');
+update lots set archived_at = now() where id = 'a1000000-0000-0000-0000-000000000001';
+select is((select status::text from lots where id = 'a1000000-0000-0000-0000-000000000001'), 'closed',
+  'archiving an open lot without closing it closes it');
+select is((select archived_at is not null from lots where id = 'a1000000-0000-0000-0000-000000000001'), true,
+  'and it stays archived');
 
 -- ── A team's removal still cascades ─────────────────────────────────────────
 reset role;

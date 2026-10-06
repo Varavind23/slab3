@@ -132,6 +132,9 @@ struct MainShell: View {
         .onChange(of: app.lots.loadedAt) { _, loadedAt in
             LotClaims.reconcile(app.lots.claimsByLot, lots: app.lots.lots, loadedAt: loadedAt,
                                 myUserId: app.team.myUserId, in: context)
+            // A lead's phone-only tag on a card now claimed into a lot becomes the
+            // claim's credit (CardTagging.carryLocalTags).
+            Task { await CardTagging.carryLocalTags(team: app.team, lots: app.lots, in: context) }
         }
         // A claim or release moved the lot's totals; the dashboard re-reads them.
         .onReceive(NotificationCenter.default.publisher(for: LotClaims.changed)) { _ in
@@ -179,6 +182,9 @@ struct MainShell: View {
         }
         // Before anything waits on a refresh flag: none is running on a fresh launch.
         .task { PriceService.clearStaleLoading(in: context) }
+        // The lead's max-buy knobs and lot bases as last loaded, before any row is
+        // priced — a launch with no signal never loads them (MaxBuyTeamPolicy).
+        .task { if TeamsFeature.isAvailable, app.onTeamHint { MaxBuyTeamPolicy.shared.restore() } }
         // A cold launch with no signal never loads the team, so the team-id change
         // above never starts the monitor — and scans filed into the lot would wait
         // for the next foreground instead of syncing when signal returns. The

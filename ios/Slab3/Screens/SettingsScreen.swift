@@ -92,6 +92,8 @@ struct SettingsScreen: View {
                         app.onTeamHint = false
                         // Nothing queued may run under the next account's session.
                         LotClaimQueue.shared.reset()
+                        // Nor may this team's max-buy knobs price the next account's cards.
+                        MaxBuyTeamPolicy.shared.forget()
                         Task { await auth.signOut() }
                     } label: {
                         HStack {

@@ -204,8 +204,10 @@ struct ExportScreen: View {
     }
     private var totalCents: Int {
         ownTotal.cents
-            // Teammates' slabs carry Card Ladder's value only.
-            + (lotExport?.teammates.compactMap(\.claim.priceCents).reduce(0, +) ?? 0)
+            // Teammates' slabs, from the values frozen at claim, by the same rule.
+            + (lotExport?.teammates.compactMap {
+                CSVExport.teammateValue($0.claim, preferring: app.activeSource)
+            }.reduce(0, +) ?? 0)
     }
 
     // MARK: A team lot (teams plan §7.9)

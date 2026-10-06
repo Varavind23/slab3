@@ -203,9 +203,11 @@ enum CSVExport {
         }
     }
 
-    /// A teammate's slab. Only what the server froze at claim time: Card Ladder's
-    /// figures and identity. Courtyard's and our own columns are EMPTY, never 0 —
-    /// this phone never priced that card, and a blank is the honest cell.
+    /// A teammate's slab. Only what the server froze at claim time: both sources'
+    /// values (Courtyard's since 0.9 — a claim from before has none) and identity.
+    /// Anything the claim does not carry is EMPTY, never 0 — this phone never priced
+    /// that card, and a blank is the honest cell. Before 2026-10-06 the CY columns
+    /// were always blank, which left a CY lot's whole-lot file without its values.
     private static func cell(_ m: LotExport.Teammate, _ column: CSVColumn, _ payoutPercent: Double?) -> String {
         let c = m.claim
         switch column {
@@ -217,8 +219,10 @@ enum CSVExport {
         case .grader: return c.grader.uppercased()
         case .clPrice: return dollars(c.priceCents)
         case .clConf: return c.clConfidence.map(String.init) ?? ""
+        case .cyPrice: return dollars(c.cyPriceCents)
+        case .cyConf: return c.cyConfidence.map(String.init) ?? ""
         // Paid is this phone's own entry — the server holds none for a teammate.
-        case .cyPrice, .cyConf, .outlet, .payoutProvider, .refreshedAt, .maxBuy, .paid: return ""
+        case .outlet, .payoutProvider, .refreshedAt, .maxBuy, .paid: return ""
         case .payoutPercent: return payoutPercent.map { $0.formatted(posix.precision(.fractionLength(1))) } ?? ""
         case .payoutUsd:
             guard let pct = payoutPercent, let gross = c.priceCents else { return "" }
@@ -246,6 +250,12 @@ enum CSVExport {
             }
         }
         return (cents, paidCount)
+    }
+
+    /// A teammate's slab in Export's footer: the same rule as this phone's own cards
+    /// (`PriceSet.best`) — the leading source, else whichever value the claim has.
+    static func teammateValue(_ claim: TeamClaim, preferring source: PriceSource) -> Int? {
+        PriceSet(cl: claim.priceCents, cy: claim.cyPriceCents).best(preferring: source)
     }
 
     private static func iso(_ d: Date?) -> String {

@@ -40,10 +40,13 @@ create index team_people_team_idx on team_people (team_id);
 create index team_people_user_idx on team_people (user_id) where user_id is not null;
 
 alter table team_people enable row level security;
--- Every write goes through the RPCs below; members read the roster.
+-- Every write goes through the RPCs below; members read the roster — WITHOUT the
+-- note. The lead writes it about a consignor ("pays 70%") and the app promises "Only
+-- your team's leads see this", so buyers never get the column; a lead reads it
+-- through team_people_notes (workflow test 2026-10-06: every member could read it).
 create policy team_people_read on team_people for select using (is_team_member(team_id));
 revoke all on team_people from anon, authenticated;
-grant select (id, team_id, display_name, note, user_id, link_code_at, created_at)
+grant select (id, team_id, display_name, user_id, link_code_at, created_at)
   on team_people to authenticated;
 
 -- NULL = the scanning account (buyer_id) is the buyer. Set = this person is (V1);
@@ -82,6 +85,14 @@ end $$;
 
 create or replace function link_code_ttl() returns interval language sql immutable as $$
   select interval '7 days'
+$$;
+
+-- The roster's notes, for a lead only (see the column grant above). Empty for anyone
+-- else rather than an error: the app asks once per load and simply shows none.
+create or replace function team_people_notes(p_team_id uuid)
+returns table (id uuid, note text) language sql stable security definer set search_path = public as $$
+  select p.id, p.note from team_people p
+   where p.team_id = p_team_id and p.note is not null and is_team_lead(p_team_id);
 $$;
 
 -- ── Roster (lead only) ─────────────────────────────────────────────────────
@@ -298,7 +309,7 @@ $$;
 
 -- ── Grants ─────────────────────────────────────────────────────────────────
 revoke execute on function
-  person_team(uuid), new_link_code(), link_code_ttl(),
+  person_team(uuid), new_link_code(), link_code_ttl(), team_people_notes(uuid),
   add_person(uuid, text, text), update_person(uuid, text, text), remove_person(uuid),
   member_person(uuid, uuid), invite_person(uuid, boolean), link_person(text),
   unlink_person(uuid), merge_people(uuid, uuid), set_claim_person(uuid, uuid[], uuid),
@@ -306,7 +317,7 @@ revoke execute on function
 from public, anon;
 
 grant execute on function
-  add_person(uuid, text, text), update_person(uuid, text, text), remove_person(uuid),
+  team_people_notes(uuid), add_person(uuid, text, text), update_person(uuid, text, text), remove_person(uuid),
   member_person(uuid, uuid), invite_person(uuid, boolean), link_person(text),
   unlink_person(uuid), merge_people(uuid, uuid), set_claim_person(uuid, uuid[], uuid),
   my_credited_cards(), my_links()
