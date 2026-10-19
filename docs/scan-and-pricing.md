@@ -102,7 +102,7 @@ refresh-all button and `PriceRefresher` — which paced a whole folder at 1100 m
 Card Ladder's ≤1 req/sec rule, or 120 ms on a Courtyard-only run, and dropped Card
 Ladder for the rest of a run the moment the connection reported gone — are gone,
 because one tap fired a stack-sized burst at exactly the endpoint that 403s an IP for
-hammering it, against a 200/day per-user Card Ladder budget. Prices now arrive on the
+hammering it, against the per-user Card Ladder budget (200/day then; 400 since 2026-10-19, `_shared/cl-limit.ts`). Prices now arrive on the
 scan itself and are re-fetched one card at a time from the detail screen. This
 knowingly departs from Caliper §3, which specifies that control and its in-flight
 `REFRESHING 9 CARDS · CL, CY` line; the `PRICES REFRESHED …` line stays. Any bulk

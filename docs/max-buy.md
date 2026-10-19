@@ -53,7 +53,7 @@ seller to disagree. Inputs:
   CY, server-side for CL — so `[]` is a real answer, not a bug. Consequence to know:
   CY comps arrive on the scan but CL comps only when a card's detail screen is opened
   with an account connected, **so a card re-prices the first time it is opened**. That
-  is accepted, not a defect; fetching comps in bulk is what the 200/day budget forbids.
+  is accepted, not a defect; fetching comps in bulk is what the 400/day budget forbids.
 - **The cap** is always `card.prices[.cl]`, whichever source supplied the comps; no
   CL Value means no cap, not no number.
 - **Population** is `card.courtyardPopulation`, and **Courtyard is the only source

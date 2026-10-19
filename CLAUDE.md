@@ -125,7 +125,7 @@ Full per-source detail (endpoints, headers, error semantics, traps): **`docs/sou
 - **Card Ladder — live, server-side, bring-your-own-account.** Firebase callables with
   a Bearer ID token: `httpbuildcollectioncard` (cert → profileId + grade) →
   `httpcardestimate` (`estimatedValue` = CL Value; `condition` must be the grade CODE
-  `g9`); comps via `httpprofilesales`, fetched **lazily on detail open only** (200/day
+  `g9`); comps via `httpprofilesales`, fetched **lazily on detail open only** (400/day
   per-user budget). `cl_resolve_cache` (no TTL — a cert never changes) +
   `price_cache`/`card_sales_cache` (24h, by `clSourceKey`). **`resolveCert` is the only
   authoritative grade in the pipeline** — it must reach the app. Logic lives in
