@@ -19,6 +19,14 @@ export const CL_FIREBASE_API_KEY = "AIzaSyBqbxgaaGlpeb1F6HRvEW319OcuCsbkAHM";
 const SIGNIN_URL = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${CL_FIREBASE_API_KEY}`;
 const REFRESH_URL = `https://securetoken.googleapis.com/v1/token?key=${CL_FIREBASE_API_KEY}`;
 const FN_BASE = "https://us-central1-cardladder-71d53.cloudfunctions.net";
+/** Sent on the two Google auth calls (sign-in, token refresh) — and only those.
+ *  On 2026-10-23 ~02:00 UTC Card Ladder restricted this API key to its own web
+ *  app's referrers: with no Referer, Google answers 403 API_KEY_HTTP_REFERRER_BLOCKED
+ *  before checking the credentials, and every user's CL prices failed. A fake-account
+ *  sign-in with this Referer gets the normal INVALID_LOGIN_CREDENTIALS, so the gate is
+ *  the referrer alone. Owner decision 2026-10-23. The Cloud Functions calls take a
+ *  Bearer token, not the key, and are unchanged. */
+export const CL_WEB_REFERER = "https://app.cardladder.com/";
 
 export type ClGrader = "psa" | "cgc";
 
@@ -142,7 +150,7 @@ export async function signIn(email: string, password: string, deps?: Deps): Prom
   try {
     res = await f(deps)(SIGNIN_URL, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", referer: CL_WEB_REFERER },
       body: JSON.stringify({ email, password, returnSecureToken: true }),
     });
   } catch (e) {
@@ -167,7 +175,7 @@ export async function refresh(refreshToken: string, deps?: Deps): Promise<ClSess
   try {
     res = await f(deps)(REFRESH_URL, {
       method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
+      headers: { "content-type": "application/x-www-form-urlencoded", referer: CL_WEB_REFERER },
       body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: refreshToken }),
     });
   } catch (e) {

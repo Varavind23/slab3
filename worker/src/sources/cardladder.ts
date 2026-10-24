@@ -39,6 +39,7 @@ export {
   usdToCents,
   AVERAGE_SALE_WINDOW,
   MAX_SALES,
+  CL_WEB_REFERER,
 } from "../../../supabase/functions/_shared/cardladder";
 
 const ERROR_MAP: Record<ClErrorKind, SourceError["error"]> = {
