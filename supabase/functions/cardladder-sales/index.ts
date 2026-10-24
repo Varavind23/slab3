@@ -2,7 +2,7 @@
 //
 // Why this is its own function and not part of cardladder-price: sales are fetched
 // LAZILY, when a card's detail screen opens. Card Ladder answers RESOURCE_EXHAUSTED
-// on its own quota and our per-user cap is 200/day, so folding a second callable
+// on its own quota and our per-user cap is 400/day, so folding a second callable
 // into every scan would halve the number of slabs a user can run through a stack —
 // and read to them as prices going blank, which is exactly the failure mode the
 // cache-first rule already exists to prevent.
@@ -26,9 +26,12 @@
 import { fetchProfileSales, resolveCert, clSourceKey, ClError } from "../_shared/cardladder.ts";
 import { acquireIdToken, sealSession, type SessionState } from "../_shared/session.ts";
 import { admin, callerId, encKey, isSlab, json, logWrite } from "../_shared/http.ts";
+import { CL_DAILY_CAP, clLogLine, nextUtcReset } from "../_shared/cl-limit.ts";
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // matches the price cache.
-const DAILY_CAP = 200; // shares the per-user Card Ladder budget with prices.
+/** Shares the per-user Card Ladder budget with prices — one constant for both
+ *  (cl-limit.ts; 200 until 2026-10-19). */
+const DAILY_CAP = CL_DAILY_CAP;
 
 interface Body {
   cert: string;
@@ -39,10 +42,32 @@ interface Body {
   cardKey?: string;
 }
 
+/** What the log line reports about a request, filled in as it runs. */
+interface Trace {
+  userId?: string | null;
+  used?: number | null;
+}
+
 Deno.serve(async (req) => {
+  const started = Date.now();
+  const trace: Trace = {};
+  const res = await handle(req, trace);
+  // Same one line per request as cardladder-price. Only the status is read back —
+  // a sales list can be 20 entries, so it is parsed but never logged.
+  const body = await res.clone().json().catch(() => null);
+  console.log(clLogLine({
+    fn: "cardladder-sales", userId: trace.userId, status: body?.status,
+    cached: body?.cached, reason: body?.stale ? "stale" : undefined,
+    used: trace.used, ms: Date.now() - started,
+  }));
+  return res;
+});
+
+async function handle(req: Request, trace: Trace): Promise<Response> {
   if (req.method !== "POST") return json({ status: "method_not_allowed" }, 405);
 
   const userId = await callerId(req);
+  trace.userId = userId;
   if (!userId) return json({ status: "unauthorized" }, 401);
 
   let body: Body;
@@ -101,6 +126,7 @@ Deno.serve(async (req) => {
   const { data: used, error: budgetError } = await db.rpc("spend_cardladder_budget", {
     p_user_id: userId, p_cap: DAILY_CAP,
   });
+  trace.used = used ?? null;
   if (budgetError) {
     if (cached?.sales) return json({ status: "ok", sales: cached.sales, cached: true, stale: true });
     return json({ status: "source_error" });
@@ -109,7 +135,7 @@ Deno.serve(async (req) => {
     // Serve a stale list rather than nothing: an old real comp beats an empty
     // panel, same rule prices follow when a refresh fails.
     if (cached?.sales) return json({ status: "ok", sales: cached.sales, cached: true, stale: true });
-    return json({ status: "rate_limited" });
+    return json({ status: "rate_limited", resetsAt: nextUtcReset(), cap: DAILY_CAP });
   }
 
   // 5) Acquire a valid ID token (refresh-first, sign-in fallback).
@@ -170,7 +196,7 @@ Deno.serve(async (req) => {
   })).error);
 
   return json({ status: "ok", sales });
-});
+}
 
 /** Typed CL failure → the degraded status the app already handles (as in
  *  cardladder-price). */

@@ -25,9 +25,12 @@
 import { resolveCert, estimate, clSourceKey, ClError, type ClCardIdentity } from "../_shared/cardladder.ts";
 import { acquireIdToken, sealSession, type SessionState } from "../_shared/session.ts";
 import { admin, callerId, encKey, isSlab, json, logWrite } from "../_shared/http.ts";
+import { CL_DAILY_CAP, clLogLine, datedReply, nextUtcReset, type ClPriceRow } from "../_shared/cl-limit.ts";
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // Card Ladder Value moves slowly.
-const DAILY_CAP = 200; // per-user request ceiling (keeps volume human-shaped, D10).
+/** Per-user request ceiling (keeps volume human-shaped, D10). 200 until
+ *  2026-10-19, when it was refusing busy users mid-session — see cl-limit.ts. */
+const DAILY_CAP = CL_DAILY_CAP;
 /** What the cached number means. Changed from "average_sale" 2026-08-29 — see the
  *  lookupCardValue header in _shared/cardladder.ts. */
 const METRIC = "cl_value" as const;
@@ -42,7 +45,20 @@ interface Body {
    *  longer a cache key for any source. Kept optional so a TestFlight build in the
    *  field keeps working after this function deploys. */
   cardKey?: string;
+  /** Sent by builds that can draw a DATED value (0.9 build 12+). Without it an
+   *  over-cap or failed lookup answers as before, so a build in the field never
+   *  receives a status it cannot decode. See cl-limit.ts datedReply. */
+  acceptsDated?: boolean;
 }
+
+/** What the log line reports about a request, filled in as it runs. */
+interface Trace {
+  userId?: string | null;
+  used?: number | null;
+}
+
+const PRICE_COLUMNS =
+  "price_cents, as_of, fetch_status, updated_at, metric, last_sale_cents, last_sale_at, source_confidence";
 
 /** The identity block the app shows, including the GRADE — the only authoritative
  *  grade the pipeline gets, since the barcode carries a cert number and nothing
@@ -75,9 +91,24 @@ const rowOf = (id: ClCardIdentity) => ({
 });
 
 Deno.serve(async (req) => {
+  const started = Date.now();
+  const trace: Trace = {};
+  const res = await handle(req, trace);
+  // One line per request, so the next "Card Ladder is blank" is a logs query, not
+  // forensics on response sizes (2026-10-19). Bodies here are a few hundred bytes.
+  const body = await res.clone().json().catch(() => null);
+  console.log(clLogLine({
+    fn: "cardladder-price", userId: trace.userId, status: body?.status, cached: body?.cached,
+    reason: body?.reason, used: trace.used, ms: Date.now() - started,
+  }));
+  return res;
+});
+
+async function handle(req: Request, trace: Trace): Promise<Response> {
   if (req.method !== "POST") return json({ status: "method_not_allowed" }, 405);
 
   const userId = await callerId(req);
+  trace.userId = userId;
   if (!userId) return json({ status: "unauthorized" }, 401);
 
   let body: Body;
@@ -86,7 +117,7 @@ Deno.serve(async (req) => {
   } catch {
     return json({ status: "bad_request" }, 400);
   }
-  const { cert, grader, force = false } = body;
+  const { cert, grader, force = false, acceptsDated = false } = body;
   if (!isSlab(cert, grader)) return json({ status: "bad_request" }, 400);
 
   const db = admin();
@@ -119,11 +150,27 @@ Deno.serve(async (req) => {
   // cert we probably know, and "not found" from a failed read would be a lie.
   if (knownError) return json({ status: "source_error" });
 
+  /** Card Ladder's last real answer for this card at ANY age, as a dated reply —
+   *  or null (no reply wanted, nothing known, nothing honest to give). Read only on
+   *  the way out of a failure, so the happy path pays nothing for it. Still behind
+   *  step 1's gate: only a connected user ever gets here. */
+  const dated = async (reason: "rate_limited" | "source_error", resetsAt?: string) => {
+    if (!acceptsDated || !known) return null;
+    const { data: row } = await db
+      .from("price_cache")
+      .select(PRICE_COLUMNS)
+      .eq("source_key", clSourceKey(known.profile_id, known.grade))
+      .eq("source", "cardladder")
+      .maybeSingle();
+    const reply = datedReply(row as ClPriceRow | null, identityOf(known), reason, resetsAt);
+    return reply ? json(reply) : null;
+  };
+
   // 3) Cache-first on the price, but only once we know the key it lives under.
   if (known && !force) {
     const { data: cached } = await db
       .from("price_cache")
-      .select("price_cents, as_of, fetch_status, updated_at, metric, last_sale_cents, last_sale_at, source_confidence")
+      .select(PRICE_COLUMNS)
       .eq("source_key", clSourceKey(known.profile_id, known.grade))
       .eq("source", "cardladder")
       .maybeSingle();
@@ -159,8 +206,16 @@ Deno.serve(async (req) => {
   const { data: used, error: budgetError } = await db.rpc("spend_cardladder_budget", {
     p_user_id: userId, p_cap: DAILY_CAP,
   });
-  if (budgetError) return json({ status: "source_error" });
-  if (used > DAILY_CAP) return json({ status: "rate_limited" });
+  trace.used = used ?? null;
+  if (budgetError) return (await dated("source_error")) ?? json({ status: "source_error" });
+  if (used > DAILY_CAP) {
+    // Refused. Say when it comes back (older builds ignore the extra fields), and
+    // to a build that can draw it, hand back the last value WITH its date rather
+    // than leaving the column blank for the rest of the day.
+    const resetsAt = nextUtcReset();
+    return (await dated("rate_limited", resetsAt)) ??
+      json({ status: "rate_limited", resetsAt, cap: DAILY_CAP });
+  }
 
   // 5) Acquire a valid ID token (refresh-first, sign-in fallback).
   let idToken: string, sessionState: SessionState;
@@ -174,7 +229,7 @@ Deno.serve(async (req) => {
     const kind = e instanceof ClError ? e.kind : "network";
     // invalid_credentials / auth_expired → reconnect; a transient network error is
     // not the user's connection failing.
-    if (kind === "network") return json({ status: "source_error" });
+    if (kind === "network") return (await dated("source_error")) ?? json({ status: "source_error" });
     return json({ status: kind === "rate_limited" ? "rate_limited" : "auth_expired" });
   }
   // Persist the (possibly rotated) session + clear the failure counter.
@@ -239,10 +294,13 @@ Deno.serve(async (req) => {
     });
   } catch (e) {
     // Transient failure: don't poison the cache. The app keeps the last known
-    // number and marks the column stale, so it wants nothing from us here.
-    return json({ status: statusFor(e) });
+    // number and marks the column stale — but a card scanned just now HAS no last
+    // number on the phone, so a build that can draw it gets the cache's, dated.
+    const status = statusFor(e);
+    if (status === "source_error") return (await dated("source_error")) ?? json({ status });
+    return json({ status });
   }
-});
+}
 
 /** Typed CL failure → the degraded status the app already handles. */
 function statusFor(e: unknown): string {

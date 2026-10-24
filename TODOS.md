@@ -51,7 +51,7 @@ bugs shipped green three times because nothing asserted on layout.
   prices until its detail screen's "Refresh prices now" is tapped; nothing re-fetches
   it automatically. Predates Teams.
 - **Team Card Ladder budget.** Every lot claim may refresh CL on a cold cache, against
-  the 200/day per-user budget. Raising it for team members is an Edge Function deploy.
+  the per-user budget (400/day since 2026-10-19, `_shared/cl-limit.ts` `CL_DAILY_CAP`).
 - **`lot_bands` is unread** since `20260928000000_bucket_band.sql` (bands are a label on
   the bucket). Drop the table once nothing needs its history.
 - **Closed-lot claims load with every refresh** (`LotStore.load` fetches all lots'

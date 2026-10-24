@@ -123,7 +123,7 @@ Moved out of CLAUDE.md (2026-10-01) verbatim; CLAUDE.md keeps the summary rules.
   (`cardladder-price`, cache-first, per-user daily budget) and shown only to
   connected users. Comps go through a SEPARATE `cardladder-sales`, fetched
   **lazily when a card's detail screen opens** — never on a scan or bulk refresh,
-  or a 200-slab stack spends its 200/day budget on comps nobody opened.
+  or a 200-slab stack spends its daily budget (400 since 2026-10-19) on comps nobody opened.
   **Two caches, split along what actually goes stale** (2026-08-31): `cl_resolve_cache`
   maps cert → profileId + grade + identity and has NO TTL, because a cert is one
   physical slab and that mapping cannot change — so a rescan costs nothing;
