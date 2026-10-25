@@ -183,6 +183,35 @@ every grade of a card collapsed onto one row — and the caches are GLOBAL, so t
 first grade anyone scanned answered for all of them. `card_key` keeps its real
 jobs: the per-folder sale limit and cross-source matching.
 
+### 1c. Card Ladder locked its API key to its own web app's referrers — 2026-10-23
+
+**What happened.** From ~02:00 UTC 2026-10-23 every server-side sign-in and token refresh
+failed for every user (last good token 02:01:08 UTC; outage ~28h, fixed 2026-10-24 06:00 UTC).
+Google answered both `identitytoolkit…/accounts:signInWithPassword` and
+`securetoken…/v1/token` with **403 `API_KEY_HTTP_REFERRER_BLOCKED`** ("Requests from referer
+<empty> are blocked."), before checking credentials: Card Ladder had restricted the public
+Firebase web key to its own web app's referrers. Not caused by any deploy — the untouched
+`cardladder-price` (v14, deployed 10-02) failed identically.
+
+**Evidence.** Hourly `cardladder-price` replies flipped from 42 ok / 0 fail to 91 fail / 1 ok
+in the 02:00 UTC hour; `cardladder_credentials.last_ok_at` stopped for everyone; a direct
+sign-in from this machine reproduced the 403. A fake-account sign-in with
+`Referer: https://app.cardladder.com/` got the normal `400 INVALID_LOGIN_CREDENTIALS`, so
+the referrer was the only gate.
+
+**Fix (owner decision 2026-10-23).** `_shared/cardladder.ts` sends
+`referer: CL_WEB_REFERER` (`https://app.cardladder.com/`) on those two auth calls only; the
+Cloud Functions data calls take a Bearer token and are unchanged
+(`worker/test/cardladder-referer.test.ts`). Shipped as `cl-referer-fix` (81b9dd7), now part of
+`release/0.9.1`.
+
+**Watch for.** This is Card Ladder's decision and can tighten again (App Check, or a block
+aimed at us). The signature is ALL users failing at once while Courtyard is fine, with
+`failure_count` climbing on every credential row. Sign-in's 403 is classified `network`
+(→ `source_error`, "Card Ladder unreachable"), so nobody is told a wrong password and no
+stored login is deleted — but users DO try reconnecting/disconnecting. Diagnose with the
+probe in this section before blaming a release.
+
 ## 2. Courtyard (no account needed; curl already 403s — bot wall confirmed)
 
 ```sh

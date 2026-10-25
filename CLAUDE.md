@@ -64,7 +64,7 @@ path) and assert only that the file exists — layout bugs shipped green three t
 **look at them**.
 
 **Shipping.** Version + build live ONLY in `ios/project.yml` (`MARKETING_VERSION` /
-`CURRENT_PROJECT_VERSION`, currently 0.8 / 10, on `release/0.5`). Bump BOTH targets —
+`CURRENT_PROJECT_VERSION`, currently 0.9 / 11, on `release/0.9.1` = what is live). Bump BOTH targets —
 `Slab3` and `SlabsDev`, a side-by-side build with its own bundle id and SwiftData store
 that talks to the SAME live Supabase. Signing is MANUAL on purpose; the archive/export
 commands and the API-key role trap that broke the ship twice are in the header of
@@ -121,7 +121,8 @@ Full per-source detail (endpoints, headers, error semantics, traps): **`docs/sou
     key comps off the title. Sale dates are UTC midnight; render in local time.
   - A 403 on `/index/*` or `/users/*` from this machine is inconclusive (IP walls) —
     run `npm run courtyard:probe` before recording it.
-  - Acceptance bar, live: cert 96679812 = $50.80, confidence 2.
+  - Acceptance bar, live: cert 96679812 answers `ok` (the price moves: $50.80 / conf 2 on
+    2026-08-31, $91.30 / conf 5 on 2026-10-22).
 - **Card Ladder — live, server-side, bring-your-own-account.** Firebase callables with
   a Bearer ID token: `httpbuildcollectioncard` (cert → profileId + grade) →
   `httpcardestimate` (`estimatedValue` = CL Value; `condition` must be the grade CODE
@@ -129,7 +130,9 @@ Full per-source detail (endpoints, headers, error semantics, traps): **`docs/sou
   per-user budget). `cl_resolve_cache` (no TTL — a cert never changes) +
   `price_cache`/`card_sales_cache` (24h, by `clSourceKey`). **`resolveCert` is the only
   authoritative grade in the pipeline** — it must reach the app. Logic lives in
-  `_shared/cardladder.ts`; the worker adapter only re-exports it.
+  `_shared/cardladder.ts`; the worker adapter only re-exports it. **Sign-in and token
+  refresh must send `Referer: https://app.cardladder.com/`** — without it Google 403s
+  every user (`API_KEY_HTTP_REFERRER_BLOCKED`, a ~28h outage 2026-10-23, `spike/README.md` §1c).
 - **PSA — CLOSED** (API unapproved, cert page Cloudflare-walled even to Browser
   Rendering, 2026-08-28, §4a). The parser and the `slab3-psa-cert` Worker are correct
   and waiting; don't "fix" them.
@@ -271,8 +274,8 @@ Read the relevant one before changing that area:
   access-model findings go in the adapter header and `spike/README.md`.
 - `worker/.env`, `spike/.env` and `spike/.state/` hold real credentials and live
   sessions — gitignored; never commit or echo them.
-- Commit messages record test counts — currently 131 worker (8 files), 313 iOS (34
-  files), 83 pgTAP (`plan()`s in `supabase/tests/*.sql`; the claim race is a separate
+- Commit messages record test counts — currently 159 worker (11 files), 387 iOS (43
+  files), 200 pgTAP (`plan()`s in `supabase/tests/*.sql`; the claim race is a separate
   `supabase/tests/concurrency/claim_race.sh`). Re-count rather than copying the last
   commit (`grep -cE '^\s*(it|test)\(' worker/test/*.test.ts`,
   `grep -c '@Test' ios/Tests/*.swift`); tests green before committing.

@@ -123,7 +123,7 @@ Moved out of CLAUDE.md (2026-10-01) verbatim; CLAUDE.md keeps the summary rules.
   (`cardladder-price`, cache-first, per-user daily budget) and shown only to
   connected users. Comps go through a SEPARATE `cardladder-sales`, fetched
   **lazily when a card's detail screen opens** — never on a scan or bulk refresh,
-  or a 200-slab stack spends its daily budget (400 since 2026-10-19) on comps nobody opened.
+  or a 200-slab stack spends its daily budget (400 since 2026-10-24; was 200) on comps nobody opened.
   **Two caches, split along what actually goes stale** (2026-08-31): `cl_resolve_cache`
   maps cert → profileId + grade + identity and has NO TTL, because a cert is one
   physical slab and that mapping cannot change — so a rescan costs nothing;
@@ -133,6 +133,10 @@ Moved out of CLAUDE.md (2026-10-01) verbatim; CLAUDE.md keeps the summary rules.
   **`resolveCert` is the only authoritative grade in the whole pipeline** — the
   barcode carries a cert number and nothing else — so its `grade`/`gradeLabel`
   must reach the app; dropping it is what caused the V2 grade bug.
+  **Since 2026-10-23 the two Google auth calls (sign-in, token refresh) must carry
+  `Referer: https://app.cardladder.com/`** — Card Ladder restricted its API key to its own
+  web app, and without it Google returns 403 `API_KEY_HTTP_REFERRER_BLOCKED` for every user
+  (`spike/README.md` §1c). The Cloud Functions calls don't need it.
   `search.cardladder.com` is never used, but note the SPA bundle is served
   un-walled from `cardladder-71d53.web.app` — that is how the callable list and
   field labels were recovered.

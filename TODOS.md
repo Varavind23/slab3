@@ -1,5 +1,21 @@
 # TODOS
 
+## Card Ladder: the app half of the limit fix (planned for 0.9 build 12, 2026-10-25)
+
+**What:** The server half is live since 2026-10-24/25 (`release/0.9.1`): cap 400,
+`rate_limited` + `resetsAt`, and a `dated` last value for builds that send
+`acceptsDated`. No shipped build sends it. The app still shows a bare dash when a user is
+over the limit, and the same dash during a Card Ladder outage.
+
+**Plan:** send `acceptsDated`, show the dated value with its date, say "limit reached ·
+back at 5:00 PM" vs "Card Ladder unavailable", never prompt to reconnect unless the server
+said `auth_expired`/`not_connected`, re-price limit-dashed cards once after the reset
+(paced through `PricePacer`), and stop `LotClaims.retryPending` re-pricing while CL is
+over the limit or failing (the 2026-10-10 loop, 1,599 lookups in a day).
+
+**Why:** on 2026-10-23/24 users disconnected and reconnected Card Ladder during an
+outage they couldn't tell apart from the limit.
+
 ## Offline scan queue (deferred 3A, approved D11 — 2026-08-21)
 
 **What:** Full offline scanning with pending-op queue + bidirectional sync.
@@ -51,7 +67,7 @@ bugs shipped green three times because nothing asserted on layout.
   prices until its detail screen's "Refresh prices now" is tapped; nothing re-fetches
   it automatically. Predates Teams.
 - **Team Card Ladder budget.** Every lot claim may refresh CL on a cold cache, against
-  the per-user budget (400/day since 2026-10-19, `_shared/cl-limit.ts` `CL_DAILY_CAP`).
+  the per-user budget (400/day since 2026-10-24, `_shared/cl-limit.ts` `CL_DAILY_CAP`).
 - **`lot_bands` is unread** since `20260928000000_bucket_band.sql` (bands are a label on
   the bucket). Drop the table once nothing needs its history.
 - **Closed-lot claims load with every refresh** (`LotStore.load` fetches all lots'
