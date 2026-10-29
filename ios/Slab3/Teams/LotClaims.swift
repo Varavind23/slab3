@@ -112,6 +112,7 @@ enum LotVerdictText {
         case .pending:
             switch verdict?.reason {
             case "cl_not_connected": return ("Lot · connect Card Ladder to claim", .warn)
+            case "cy_not_connected": return ("Lot · connect Courtyard to claim", .warn)
             // Scanned with no signal: the card is in inventory and in the lot group
             // here, but nothing on the server has seen it — never a green light.
             case "network": return ("Unverified · syncs when online", .warn)
@@ -391,6 +392,8 @@ enum LotClaims {
             // something the buyer can fix, so it waits rather than blocks.
             case "not_member": return LotVerdict(outcome: "blocked", reason: "not_member")
             case "cl_not_connected": return LotVerdict(outcome: "pending", reason: "cl_not_connected")
+            // A CY lot needs the buyer's own Courtyard account (2026-10-29): fixable too.
+            case "cy_not_connected": return LotVerdict(outcome: "pending", reason: "cy_not_connected")
             default: return LotVerdict(outcome: "pending", reason: "error")
             }
         } catch is DecodingError {

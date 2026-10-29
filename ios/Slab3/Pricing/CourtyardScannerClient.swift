@@ -11,10 +11,13 @@ import Foundation
 /// the cert is the key. Confirmed against Courtyard's app on device 2026-08-31 —
 /// cert 96679812 reads $50.80 / medium confidence in both. See spike/README.md §2b.
 ///
-/// It goes through our server rather than straight from the phone even though the
-/// upstream needs no auth: one global `cy_scan_cache` row per cert serves every
-/// user, so a 200-slab refresh is not 200 requests per device. Courtyard 403s an
-/// IP that hammers it.
+/// Since 2026-10-29 it needs the user's OWN Courtyard account: Courtyard put the
+/// scanner behind login (spike/README.md §2g), so the server answers
+/// `not_connected` / `auth_expired` until the user connects one
+/// (CourtyardConnectView), even for a cert already in the cache (owner decision
+/// C2). It goes through our server so one global `cy_scan_cache` row per cert
+/// serves every connected user — a 200-slab refresh is not 200 requests per
+/// device, and Courtyard 403s an IP that hammers it.
 ///
 /// One call returns price, identity AND comps, which is why this client returns
 /// all three together — they arrive together and are true together.
@@ -73,43 +76,59 @@ struct CourtyardScannerClient {
         /// Transient: their GemRate upstream failing, or the network. MUST NOT
         /// clear a price the user already saw.
         case unavailable
+        /// No Courtyard account connected. Clears the column, as Card Ladder's does:
+        /// Courtyard data reaches only connected users (C2).
+        case notConnected
+        /// Connected, but Courtyard refused the session: only a new emailed code
+        /// fixes it. Treated like `notConnected`, plus a "sign-in expired" note.
+        case authExpired
+    }
+
+    struct Reply: Decodable {
+        let status: String
+        var priceCents: Int? = nil
+        var confidence: Int? = nil
+        var identity: Identity? = nil
+        var comps: [SaleGroup]? = nil
     }
 
     /// `force` skips the server's 24h cache read, for manual refresh.
     func lookup(cert: String, grader: Grader, force: Bool = false) async -> Outcome {
         struct Body: Encodable { let cert: String; let grader: String; let force: Bool }
-        struct Reply: Decodable {
-            let status: String
-            let priceCents: Int?
-            let confidence: Int?
-            let identity: Identity?
-            let comps: [SaleGroup]?
-        }
         do {
             let reply: Reply = try await Backend.client.functions.invoke(
                 "courtyard-price",
                 options: .init(body: Body(cert: cert, grader: grader.rawValue, force: force))
             )
-            let comps = reply.comps ?? []
-            switch reply.status {
-            case "ok":
-                // priceCents nil = Courtyard knows the card but has no model price.
-                // Never coerce that to 0 — a $0 in the UI is a fabricated price.
-                guard let cents = reply.priceCents, cents > 0 else {
-                    return .noPrice(reply.identity, comps)
-                }
-                return .ok(Price(valueCents: cents, confidence: reply.confidence),
-                           reply.identity ?? Identity(grade: nil, title: nil, subject: nil, set: nil,
-                                                      year: nil, cardNumber: nil, category: nil,
-                                                      population: nil, imageUrl: nil),
-                           comps)
-            case "not_found":
-                return .noPrice(reply.identity, comps)
-            default:
-                return .unavailable // source_error / unauthorized / bad_request
-            }
+            return Self.outcome(reply)
         } catch {
             return .unavailable
+        }
+    }
+
+    /// PURE: the server's reply → what the app does with it. Tested.
+    static func outcome(_ reply: Reply) -> Outcome {
+        let comps = reply.comps ?? []
+        switch reply.status {
+        case "ok":
+            // priceCents nil = Courtyard knows the card but has no model price.
+            // Never coerce that to 0 — a $0 in the UI is a fabricated price.
+            guard let cents = reply.priceCents, cents > 0 else {
+                return .noPrice(reply.identity, comps)
+            }
+            return .ok(Price(valueCents: cents, confidence: reply.confidence),
+                       reply.identity ?? Identity(grade: nil, title: nil, subject: nil, set: nil,
+                                                  year: nil, cardNumber: nil, category: nil,
+                                                  population: nil, imageUrl: nil),
+                       comps)
+        case "not_found":
+            return .noPrice(reply.identity, comps)
+        case "not_connected":
+            return .notConnected
+        case "auth_expired":
+            return .authExpired
+        default:
+            return .unavailable // source_error / unauthorized / bad_request
         }
     }
 

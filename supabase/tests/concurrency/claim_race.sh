@@ -54,6 +54,8 @@ trap cleanup EXIT
     u=${USERS[$((i-1))]}
     echo "insert into auth.users (id, email) values ('$u', 'b$i@$TAG.test');"
     echo "insert into cardladder_credentials (user_id, encrypted_blob) values ('$u', 'x');"
+    # Race 3 is a CY lot, which needs a Courtyard connection since 2026-10-29.
+    echo "insert into courtyard_credentials (user_id, session) values ('$u', '{}');"
     # Race 1: slab i of the SAME card. Race 2: card i, a different identity each.
     echo "insert into cl_resolve_cache (grader, cert, profile_id, grade, grade_label, card_year)
           values ('psa', '${CERT}1$i', '$TAG-same', 'g9', '9', '1999'),

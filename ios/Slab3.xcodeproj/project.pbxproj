@@ -29,6 +29,7 @@
 		11B153849EAF424603F9C6C2 /* CardsScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = F18B844D54873207894A1174 /* CardsScreen.swift */; };
 		12BFFDBAB35E8064F5974DA4 /* MaxBuyValue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1237A886121FBC6F3D2F80BE /* MaxBuyValue.swift */; };
 		13936697A91BBAA9E45019A9 /* CardLadderConnectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E974E834AC7594551F22DA70 /* CardLadderConnectView.swift */; };
+		15B6ADD69BF6F185A3874B11 /* CourtyardAccountClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1375634F7DFAAC93482B49F /* CourtyardAccountClient.swift */; };
 		15BD1870DF7ECABA02F934CE /* LotDashboardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A496F52823317EE812E7EFCA /* LotDashboardTests.swift */; };
 		1733F402AD8282FE9D018E5E /* CSVExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 235A7285F6988D3EB121AC61 /* CSVExport.swift */; };
 		175EBA9AA59AF5413619250D /* PsaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 933BABB01A8C65F807AB1F10 /* PsaClient.swift */; };
@@ -130,6 +131,7 @@
 		95660DF693518DD57EBAEB69 /* LotDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14309A798E718A96941E9F3D /* LotDashboardView.swift */; };
 		957ED9AB9B5972ADCEF8A7CA /* CertListParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68728E94DB011FEB8E497488 /* CertListParser.swift */; };
 		959FD80E00EF70AF74BD119C /* CardDetailScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5184E5BA5F561D2570BEED /* CardDetailScreen.swift */; };
+		9653053A33DE2483D1389FA1 /* CourtyardConnectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D717477479705497D3B060F3 /* CourtyardConnectView.swift */; };
 		976C308C3D965AF88B4F2751 /* PsaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 933BABB01A8C65F807AB1F10 /* PsaClient.swift */; };
 		98407B922A088892094E8075 /* DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = F663C262CDD9A3E33B4E4E35 /* DesignTokens.swift */; };
 		990F91483EFB5CC775F6CADE /* CardLadderClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A691D4B5EEE0D804781EE4C /* CardLadderClient.swift */; };
@@ -162,6 +164,7 @@
 		AF0753DB08A97D2C3FEFC283 /* LotScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7A1A35140F5510C68C1D2F5 /* LotScreen.swift */; };
 		AF5EEF9719930EAFCFA5C756 /* CaliperType.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75F77283EDEF3B7FE0479EB6 /* CaliperType.swift */; };
 		B1F835950730DD2E82B80889 /* PendingDeletionStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B398FF8208F2BC53ADD7A17A /* PendingDeletionStoreTests.swift */; };
+		B2E117F344CBF16E98C3CF52 /* CourtyardAccountClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1375634F7DFAAC93482B49F /* CourtyardAccountClient.swift */; };
 		B39B945C2463C7738DE63CA7 /* LotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22A2A7D8520D9552D46E0DAA /* LotStore.swift */; };
 		B4009FB5407F2DBC81512A49 /* CertParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33D546D686F37521C73D534B /* CertParserTests.swift */; };
 		B5602291E8BC2D2FA7A3FAB2 /* LotText.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32B5C1B66A937D3B5FC2ED78 /* LotText.swift */; };
@@ -176,6 +179,7 @@
 		C0494DFC18D318D40C0D8D72 /* CardDetailScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5184E5BA5F561D2570BEED /* CardDetailScreen.swift */; };
 		C12BF90BD7CDE6BFD4D10272 /* LotText.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32B5C1B66A937D3B5FC2ED78 /* LotText.swift */; };
 		C1E73C119C628EC8D81092AD /* TeamActivityScreens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 320B7DF5D77FB5C866D3D760 /* TeamActivityScreens.swift */; };
+		C2CB645A5D259E762B32B45F /* CourtyardConnectTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21CBE4E3A33AEEF6FE3B7CB8 /* CourtyardConnectTests.swift */; };
 		C404CDBC326659A5BC8B8449 /* BuyRangeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EF6CAA925E4B639E52ACD32 /* BuyRangeTests.swift */; };
 		C7EB6E180836F77D4CB67C04 /* LotDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14309A798E718A96941E9F3D /* LotDashboardView.swift */; };
 		C7F187790AFF1779AA05D629 /* MaxBuyPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20C29C1B04CDC42B79780458 /* MaxBuyPanel.swift */; };
@@ -213,6 +217,7 @@
 		EE5607DDDD659F919E4D11B5 /* PendingDeletionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 906DD3B72249362DB5F6FDDE /* PendingDeletionStore.swift */; };
 		EE6858D5534F4F4EE2B1D06D /* Folder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D3E06953729E4455A27532E /* Folder.swift */; };
 		EF6A8128F0F2713D54756FA0 /* CourtyardClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A46048FD3741C53E6D12137 /* CourtyardClient.swift */; };
+		F13383377127A51009A655E2 /* CourtyardConnectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D717477479705497D3B060F3 /* CourtyardConnectView.swift */; };
 		F2558025F5FDB3AA6947484E /* CertParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E2C40C8D4A435A4B624F686 /* CertParser.swift */; };
 		F366130A40C6CCBAF0397CC6 /* LotGroupRepairTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8919138E6B494863C2B9EEA2 /* LotGroupRepairTests.swift */; };
 		F3CBFD0C878BD59445CF4EF7 /* TeamPeople.swift in Sources */ = {isa = PBXBuildFile; fileRef = E77D6D4AD7CDECE7A595068D /* TeamPeople.swift */; };
@@ -252,6 +257,7 @@
 		1D0ED565BA10269D99CFEB33 /* CameraPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraPreview.swift; sourceTree = "<group>"; };
 		1E023B4F58B5AD8C503B1C04 /* BarcodeDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarcodeDetector.swift; sourceTree = "<group>"; };
 		20C29C1B04CDC42B79780458 /* MaxBuyPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaxBuyPanel.swift; sourceTree = "<group>"; };
+		21CBE4E3A33AEEF6FE3B7CB8 /* CourtyardConnectTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CourtyardConnectTests.swift; sourceTree = "<group>"; };
 		2242732587086E373F855A2E /* TeamStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamStore.swift; sourceTree = "<group>"; };
 		22A2A7D8520D9552D46E0DAA /* LotStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LotStore.swift; sourceTree = "<group>"; };
 		235A7285F6988D3EB121AC61 /* CSVExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CSVExport.swift; sourceTree = "<group>"; };
@@ -340,6 +346,7 @@
 		ABA30EF253C161AE47FDDB51 /* TeamScreens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamScreens.swift; sourceTree = "<group>"; };
 		ABAF245B08CBFD995E3DE090 /* RecentCertWindowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentCertWindowTests.swift; sourceTree = "<group>"; };
 		AFB157E7142FB2D0B5FBBFAD /* ExportColumnsRenderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportColumnsRenderTests.swift; sourceTree = "<group>"; };
+		B1375634F7DFAAC93482B49F /* CourtyardAccountClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CourtyardAccountClient.swift; sourceTree = "<group>"; };
 		B171864AED262D0B57A9CD52 /* DetailScreenRenderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailScreenRenderTests.swift; sourceTree = "<group>"; };
 		B1A670860D9BF4947217C4F5 /* MaxBuyValueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaxBuyValueTests.swift; sourceTree = "<group>"; };
 		B335CF12556D631CEEF0CEB7 /* SplashView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplashView.swift; sourceTree = "<group>"; };
@@ -351,6 +358,7 @@
 		BABDD46EF85219AC0DE619AC /* VirtualMembersTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VirtualMembersTests.swift; sourceTree = "<group>"; };
 		C0E4BDD4D0B756A456955ABC /* ValueBlock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ValueBlock.swift; sourceTree = "<group>"; };
 		C167D5B3B7AF79C3AF256445 /* SlabFrameCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SlabFrameCapture.swift; sourceTree = "<group>"; };
+		D717477479705497D3B060F3 /* CourtyardConnectView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CourtyardConnectView.swift; sourceTree = "<group>"; };
 		DE3219D3FD5B2F981A52E7C9 /* PricePaidTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PricePaidTests.swift; sourceTree = "<group>"; };
 		DE37174001772495786A18F0 /* SalesPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SalesPanel.swift; sourceTree = "<group>"; };
 		E125D7810ADB3DF66E309E8A /* ScanTargetRule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanTargetRule.swift; sourceTree = "<group>"; };
@@ -399,6 +407,7 @@
 			children = (
 				E974E834AC7594551F22DA70 /* CardLadderConnectView.swift */,
 				F18B844D54873207894A1174 /* CardsScreen.swift */,
+				D717477479705497D3B060F3 /* CourtyardConnectView.swift */,
 				B786DDE4DC3E91F713F96B1A /* ExportScreen.swift */,
 				B7415FBF64C2042D4B9848E5 /* FiltersSheet.swift */,
 				31A0C9ABB1DC6AAB45EF4FA9 /* MaxBuySettings.swift */,
@@ -439,6 +448,7 @@
 				33D546D686F37521C73D534B /* CertParserTests.swift */,
 				A58023C3D5114B36D172C816 /* ConfidenceMeterTests.swift */,
 				5582A25EEBE1AEFFA653BC8B /* CourtyardClientTests.swift */,
+				21CBE4E3A33AEEF6FE3B7CB8 /* CourtyardConnectTests.swift */,
 				487D4BDA0DA1CEE3D318A32A /* CSVExportTests.swift */,
 				B171864AED262D0B57A9CD52 /* DetailScreenRenderTests.swift */,
 				AFB157E7142FB2D0B5FBBFAD /* ExportColumnsRenderTests.swift */,
@@ -481,6 +491,7 @@
 			isa = PBXGroup;
 			children = (
 				4A691D4B5EEE0D804781EE4C /* CardLadderClient.swift */,
+				B1375634F7DFAAC93482B49F /* CourtyardAccountClient.swift */,
 				4A46048FD3741C53E6D12137 /* CourtyardClient.swift */,
 				75F94F2CED6113EC0C7ECBAC /* CourtyardScannerClient.swift */,
 				08F2AACD368399E264416A44 /* LensTotal.swift */,
@@ -783,6 +794,7 @@
 				B4009FB5407F2DBC81512A49 /* CertParserTests.swift in Sources */,
 				09EC5D4E52C508142F0DB53C /* ConfidenceMeterTests.swift in Sources */,
 				D0A00B5EEA8E28652E724F2B /* CourtyardClientTests.swift in Sources */,
+				C2CB645A5D259E762B32B45F /* CourtyardConnectTests.swift in Sources */,
 				E47F4F0C4DB1D36CD6686805 /* DetailScreenRenderTests.swift in Sources */,
 				7180FFCA2618E69132AC5750 /* ExportColumnsRenderTests.swift in Sources */,
 				4B545CCE8EAEB9477E7EC301 /* GroupDeletionTests.swift in Sources */,
@@ -850,7 +862,9 @@
 				F2558025F5FDB3AA6947484E /* CertParser.swift in Sources */,
 				E6C39052EBA5FC4E4C3F404F /* Connectivity.swift in Sources */,
 				2EB985639AA8D298351195A2 /* ConsignorScreens.swift in Sources */,
+				15B6ADD69BF6F185A3874B11 /* CourtyardAccountClient.swift in Sources */,
 				103079BE575D9B2818185563 /* CourtyardClient.swift in Sources */,
+				F13383377127A51009A655E2 /* CourtyardConnectView.swift in Sources */,
 				7EA04D290D4A0AF366609AB3 /* CourtyardScannerClient.swift in Sources */,
 				98407B922A088892094E8075 /* DesignTokens.swift in Sources */,
 				A9D2D47ECCBA161EAE5CF2F2 /* ExportScreen.swift in Sources */,
@@ -943,7 +957,9 @@
 				08C8CFA06669110E501C29F5 /* CertParser.swift in Sources */,
 				8559605252D9CBF39D2A270F /* Connectivity.swift in Sources */,
 				A879D31C3F5B442F1ED258A2 /* ConsignorScreens.swift in Sources */,
+				B2E117F344CBF16E98C3CF52 /* CourtyardAccountClient.swift in Sources */,
 				EF6A8128F0F2713D54756FA0 /* CourtyardClient.swift in Sources */,
+				9653053A33DE2483D1389FA1 /* CourtyardConnectView.swift in Sources */,
 				DBB75C66CEEDD5CF8D7702A3 /* CourtyardScannerClient.swift in Sources */,
 				8752A0C8711B1C13ADCFC4A4 /* DesignTokens.swift in Sources */,
 				CD5E758CF636BD6BDAF1A4E8 /* ExportScreen.swift in Sources */,

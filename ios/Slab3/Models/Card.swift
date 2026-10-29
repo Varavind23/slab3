@@ -72,7 +72,8 @@ enum PriceStatus: String, Codable {
     case ok // fetched, price present and current
     case notListed // the source answered: it has no value for this card
     case unavailable // transient failure — any price shown is the last known one
-    case notConnected // Card Ladder only: user hasn't connected their own account
+    case notConnected // user hasn't connected their own account for this source
+                      // (Card Ladder always; Courtyard since 2026-10-29)
 }
 
 /// One real completed sale of this card at this grade — a comp.

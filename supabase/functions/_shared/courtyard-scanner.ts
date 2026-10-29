@@ -1,9 +1,13 @@
 // Courtyard's SCANNER API — the number their own app shows when it scans a slab.
 //
 // GET https://api.courtyard.io/scanner/card-details?cert={cert}&grader={PSA|CGC}
-// No auth. No account. No browser. Verified 2026-08-31; see spike/README.md §2b.
-// It IS User-Agent-walled as of 2026-09-03 — see SCANNER_UA below. That is the one
-// header this request cannot go out without.
+// No browser. Anonymous from 2026-08-31 (spike/README.md §2b) until ~03:25 UTC
+// 2026-10-29, when card-details started answering 401 {"message":"authentication
+// required"} to every anonymous request (§2g). It now needs the USER'S OWN
+// Courtyard bearer — a Privy access token from courtyard-connect, passed in as
+// `deps.bearer` (owner decision C1: bring-your-own-account, like Card Ladder).
+// card-grader-image still answers anonymously and is called without one.
+// It is also User-Agent-walled as of 2026-09-03 — see SCANNER_UA below.
 //
 // Why this exists, when courtyard-algolia.ts already prices Courtyard: Algolia
 // indexes the MARKETPLACE — the slabs Courtyard has vaulted — and cards age out
@@ -76,8 +80,10 @@ export const SCANNER_UA = "Slabs/1.0 (graded-card inventory)";
  *  truthful: we already read and surface `acquisition.accepted`.
  *
  *  NOT the gate, though the app sends it too: `cy-client-id` (a Statsig anonymous
- *  id). Sending that alone still 404s. Neither is auth — a fresh Privy bearer makes
- *  no difference — nor the User-Agent, nor the grader, nor the URL. See
+ *  id). Sending that alone still 404s. Neither is auth — in 2026-09 a fresh Privy
+ *  bearer made no difference to WHICH certs resolve (since 2026-10-29 one is
+ *  required to get any answer at all, §2g) — nor the User-Agent, nor the grader,
+ *  nor the URL. See
  *  spike/README.md §2f for the full elimination table. */
 export const SCANNER_ACQ_HEADER = "cy-supports-acquisition-status";
 
@@ -86,6 +92,9 @@ export type CyGrader = "psa" | "cgc";
 export type FetchLike = typeof fetch;
 interface Deps {
   fetch?: FetchLike;
+  /** The user's Courtyard (Privy) access token. Required by card-details since
+   *  2026-10-29; never sent to card-grader-image, which is still anonymous. */
+  bearer?: string;
 }
 /** Every outbound call gives up after this long (review 2026-10-02): a hung
  *  upstream used to hold the Edge Function — up to 8 sequential calls on the
@@ -100,6 +109,7 @@ export type CyErrorKind =
   | "not_found" // 404: Courtyard's catalog has no such cert. AUTHORITATIVE.
   | "unresolvable" // 400: no (cert, grader) pairing we can form is valid. AUTHORITATIVE.
   | "source_error" // 5xx, incl. 502 "invalid response from gemrate". TRANSIENT.
+  | "auth_expired" // 401: no bearer, or Courtyard no longer accepts it. The USER must reconnect.
   | "network"; // transport/parse failure
 
 export class CyError extends Error {
@@ -360,6 +370,7 @@ async function attempt(cert: string, grader: CyGrader, deps?: Deps): Promise<CyS
         Accept: "application/json",
         "User-Agent": SCANNER_UA,
         [SCANNER_ACQ_HEADER]: "1",
+        ...(deps?.bearer ? { Authorization: `Bearer ${deps.bearer}` } : {}),
       },
     });
   } catch (e) {
@@ -367,6 +378,10 @@ async function attempt(cert: string, grader: CyGrader, deps?: Deps): Promise<CyS
   }
 
   if (res.status === 404) throw new CyError("not_found");
+  // 401 ONLY. It is a JSON answer from their stack about the CREDENTIAL — never
+  // cached, never a statement about the card. A 403 stays source_error: that is
+  // the WAF's bare-HTML wall (SCANNER_UA), an IP/agent problem, not the user's.
+  if (res.status === 401) throw new CyError("auth_expired", "HTTP 401");
   if (res.status === 400) throw new CyError("unresolvable", `HTTP 400 for ${grader}/${cert}`);
   if (!res.ok) throw new CyError("source_error", `HTTP ${res.status}`);
 

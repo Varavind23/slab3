@@ -57,13 +57,16 @@ against live-captured fixtures (`worker/test/fixtures/cardladder-*.json`).
 ## Courtyard scanner price (`courtyard-price`)
 
 The number Courtyard's own app shows for a scanned slab: `GET
-api.courtyard.io/scanner/card-details?cert=…&grader=…`. **Public and
-unauthenticated upstream** — no account, no secret, no per-user budget — so
-unlike Card Ladder there is no ToS gate and a cache hit is served to any
-signed-in Slabs user. Found by tearing down the Android app; see
-`spike/README.md` §2b.
+api.courtyard.io/scanner/card-details?cert=…&grader=…`. Found by tearing down the
+Android app; see `spike/README.md` §2b. Anonymous until ~03:25 UTC 2026-10-29,
+when it started answering 401 "authentication required" (§2g). It is now
+**bring-your-own-account, like Card Ladder**: the caller needs a row in
+`courtyard_credentials` (made by `courtyard-connect`, below), each cache miss is
+fetched with that user's own Privy bearer, and an unconnected caller gets
+`not_connected` **even on a cache hit** (owner decision C2). A refused session is
+`auth_expired`; neither is cached.
 
-**Why it is server-side despite having no secret:** a global cache. A 200-slab
+**Why it is server-side:** a global cache. A 200-slab
 bulk refresh from a phone would be 200 requests per device for cards other users
 have already fetched, and Courtyard 403s an IP that hammers it (observed on
 `/index/*` during the 2026-08-29 spike). One row per cert in `cy_scan_cache`,
@@ -81,11 +84,13 @@ supabase functions deploy courtyard-price
 ### Local smoke test
 
 ```sh
+# $JWT must belong to a user with a courtyard_credentials row; anyone else gets
+# {"status":"not_connected"}. Run the stack with `--env-file` holding CL_ENC_KEY.
 curl -s localhost:54321/functions/v1/courtyard-price -H "Authorization: Bearer $JWT" \
   -H 'content-type: application/json' -d '{"cert":"96679812","grader":"psa"}'
-# -> status ok, priceCents 5080, confidence 2, identity.grade "10", 5 comp groups.
-#    That is THE acceptance bar: Courtyard's own app shows $50.80 / medium
-#    confidence for this slab (confirmed on device 2026-08-31).
+# -> status ok, identity.grade "10", comp groups. THE acceptance bar is that this
+#    cert answers `ok`; the number moves ($50.80 / conf 2 on 2026-08-31, Courtyard's
+#    own app agreeing on device; $91.30 / conf 3 on 2026-10-29).
 curl -s ... -d '{"cert":"154334127","grader":"psa"}'   # priceCents NULL — their app
                                                        # says "not applicable". Never $0.
 # NOTE: there is currently NO verified not_found cert. 133653550 was this case
@@ -103,11 +108,40 @@ Three response states that must stay distinct, and are asserted in
 | `price: 0` / confidence `"0"` | `fetch_status ok`, `price_cents` NULL | `ok`, `priceCents: null` → em dash |
 | `404 card details not found` | `fetch_status not_found` | `not_found` |
 | `502 invalid response from gemrate` | **nothing** — transient | last good row as `stale: true`, else `source_error` |
+| `401 authentication required` | **nothing** — about the credential | `auth_expired` (the user must reconnect) |
+| — (caller has no Courtyard connection) | nothing read | `not_connected`, before the cache |
 
 The `worker/` vitest suite covers the shared client offline against live-captured
 fixtures (`worker/test/fixtures/courtyard-scanner-*.json`). The function's own
 cache/stale branching is DB-coupled and is not in that suite — same as
 `cardladder-price`.
+
+## Courtyard connect (`courtyard-connect`)
+
+Connects the caller's OWN Courtyard account (2026-10-29, `spike/README.md` §2g).
+Courtyard has no password — it signs in with an emailed code through Privy — so:
+
+```sh
+F=localhost:54321/functions/v1/courtyard-connect; H=(-H "Authorization: Bearer $JWT" -H 'content-type: application/json')
+curl -s "${H[@]}" $F                                         # {"ok":true,"connected":false}
+curl -s "${H[@]}" $F -d '{"step":"start","email":"you@…"}'    # {"ok":true,"sent":true} — Courtyard emails a code
+curl -s "${H[@]}" $F -d '{"step":"verify","email":"you@…","code":"123456"}'
+# -> {"ok":true,"connected":true,"emailHint":"y•••@…"}, after proving the token on
+#    cert 96679812. Errors (200, ok:false): invalid_email | invalid_code |
+#    no_account (never signs anyone up) | courtyard_rejected | rate_limited |
+#    courtyard_unreachable.
+curl -s -X DELETE "${H[@]}" $F                               # forget the session
+```
+
+The session — Privy access token plus its `privy-*` cookies (the refresh token is
+the `privy-refresh-token` COOKIE: Courtyard's Privy app runs in cookie mode) — is
+sealed with `CL_ENC_KEY` into the deny-all `courtyard_credentials` table. No new
+secret. Refresh is serialized per user by `refresh_lease_until`
+(`_shared/courtyard-session.ts`).
+
+```sh
+supabase functions deploy courtyard-connect
+```
 
 ## PSA cert identity
 

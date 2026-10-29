@@ -18,7 +18,9 @@ struct CardDetailScreen: View {
     @Query(sort: \Folder.createdAt, order: .reverse) private var groups: [Folder]
 
     @AppStorage(PriceService.connectedKey) private var cardLadderConnected = false
-    @State private var showConnect = false
+    @AppStorage(PriceService.courtyardConnectedKey) private var courtyardConnected = false
+    /// Which source's connect sheet is open, if any.
+    @State private var connecting: PriceSource?
 
     /// The max-buy knobs for THIS card. Owned here rather than inside `MaxBuyPanel`
     /// because the hero shows the same figure and has to move with the panel's
@@ -50,7 +52,7 @@ struct CardDetailScreen: View {
                     // The first box, above the evidence it is built from.
                     MaxBuyPanel(card: card, knobs: $maxBuyKnobs)
                     SalesPanel(card: card, source: $app.activeSource,
-                               connected: cardLadderConnected) { showConnect = true }
+                               connected: isConnected) { connecting = $0 }
                     pricePanel
                     if app.tracksPaid { paidPanel }
                     identityPanel
@@ -82,7 +84,12 @@ struct CardDetailScreen: View {
             }
         }
         .background(Caliper.bg)
-        .sheet(isPresented: $showConnect) { CardLadderConnectView() }
+        .sheet(item: $connecting) { source in
+            switch source {
+            case .cl: CardLadderConnectView()
+            case .cy: CourtyardConnectView()
+            }
+        }
         // Comps are fetched here and ONLY here — never on a scan or a bulk
         // refresh, which would spend the 200/day Card Ladder budget on cards
         // nobody opened. Server-side cache makes re-opening a card free.
@@ -173,8 +180,8 @@ struct CardDetailScreen: View {
                     HStack {
                         Text(note).caliperMeta(Caliper.textTertiary)
                         Spacer(minLength: 0)
-                        if source == .cl && !cardLadderConnected {
-                            Button("Connect") { showConnect = true }
+                        if !isConnected(source) {
+                            Button("Connect") { connecting = source }
                                 .font(.mono(9, .medium))
                                 .foregroundStyle(Caliper.cyan)
                         }
@@ -188,6 +195,12 @@ struct CardDetailScreen: View {
         .caliperPanel()
     }
 
+    /// Has THIS user connected the source? Both are bring-your-own-account since
+    /// 2026-10-29 (Courtyard joined Card Ladder; spike/README.md §2g).
+    private func isConnected(_ source: PriceSource) -> Bool {
+        source == .cl ? cardLadderConnected : courtyardConnected
+    }
+
     /// One quiet line per source saying WHICH kind of missing this is.
     private func note(for source: PriceSource) -> String? {
         let (status, cents) = switch source {
@@ -197,7 +210,7 @@ struct CardDetailScreen: View {
         switch status {
         case .ok, .unknown: return nil
         case .notListed: return "Not listed on \(source.accessibilityName) right now."
-        case .notConnected: return "Connect your own Card Ladder account to see this price."
+        case .notConnected: return "Connect your own \(source.accessibilityName) account to see this price."
         case .unavailable:
             return cents == nil
                 ? "\(source.accessibilityName) couldn't be reached. Try again."

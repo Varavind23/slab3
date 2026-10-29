@@ -28,6 +28,9 @@ export async function callerId(req: Request): Promise<string | null> {
   return data.user?.id ?? null;
 }
 
+/** The one sealing key for stored third-party sessions: Card Ladder credentials
+ *  and, since 2026-10-29, Courtyard sessions (courtyard_credentials). Named for
+ *  Card Ladder only because it came first; rotating it disconnects both. */
 export function encKey(): string {
   const k = Deno.env.get("CL_ENC_KEY");
   if (!k) throw new Error("CL_ENC_KEY secret not set");

@@ -104,14 +104,24 @@ Every source is behind bot protection. `spike/README.md` is authoritative on wha
 works — **read it before touching any adapter**; don't re-litigate a ruled-out path.
 Full per-source detail (endpoints, headers, error semantics, traps): **`docs/sources.md`**.
 
-- **Courtyard — the price source**, browserless and cert-keyed:
-  `api.courtyard.io/scanner/card-details` (logic in `_shared/courtyard-scanner.ts`,
-  served by `courtyard-price` over `cy_scan_cache`, 24h). Slab photo from
+- **Courtyard — the price source**, browserless and cert-keyed, and since 2026-10-29
+  **bring-your-own-account** (Courtyard put the scanner behind login — `spike/README.md`
+  §2g, owner decisions C1–C4): `api.courtyard.io/scanner/card-details` with the user's
+  own Privy bearer (logic in `_shared/courtyard-scanner.ts`, served by `courtyard-price`
+  over `cy_scan_cache`, 24h; connected through `courtyard-connect`). Slab photo from
   `/scanner/card-grader-image`; `courtyard-algolia.ts` is only an image fallback on an
   exact hit; `courtyard.ts`/`courtyard-sales.ts` are off the price path. Rules that
   broke prod before:
   - Every `/scanner/*` request sets **both** `User-Agent: SCANNER_UA` and
-    `cy-supports-acquisition-status: 1`. Never impersonate a browser or their app.
+    `cy-supports-acquisition-status: 1`. Never impersonate a browser or their app. The
+    one exception is Privy's login calls, which 403 `missing_origin` without
+    `Origin: https://courtyard.io` (C4: sent because required, nothing more).
+  - No Courtyard connection → `not_connected` **before the cache read**, even on a hit
+    (C2). A 401 is `auth_expired` — the credential, never the card: not cached.
+  - Privy refresh tokens are single-use **cookies** (`privy-refresh-token`; the body's
+    `refresh_token` is the literal `"deprecated"`). Exactly one call refreshes, under
+    `courtyard_credentials.refresh_lease_until`; a network error is never a dead
+    session (there is no password to fall back on — only a new emailed code).
   - The grader is a **guess** (`CertParser`: 10 digits → CGC, 7–9 → PSA). A wrong one
     is a **400**; `fetchCardDetails` walks `attemptsFor()` only past a 400. All-400 =
     `unresolvable`, authoritative. Never reclassify 400 as transient.
@@ -164,10 +174,12 @@ or the `CertLookupResult` contract, take a transport, add fixtures.
   production: the app persists locally in SwiftData and calls only auth + functions
   (+ the Teams tables/RPCs).
 - **Worker tables** (`price_cache`, `card_sales_cache`, `cl_resolve_cache`,
-  `cy_scan_cache`, `psa_cert_cache`, `scrape_budget`, `cardladder_credentials`, …) — RLS
+  `cy_scan_cache`, `psa_cert_cache`, `scrape_budget`, `cardladder_credentials`,
+  `courtyard_credentials`, …) — RLS
   with **zero policies** = deny-all; service role only. Caches are global; budget is
   per-user.
-- The client never holds a server secret (`CL_ENC_KEY`, `PSA_SCRAPER_TOKEN`,
+- The client never holds a server secret (`CL_ENC_KEY` — which seals Courtyard sessions
+  too, so rotating it disconnects both sources — `PSA_SCRAPER_TOKEN`,
   `PSA_SCRAPER_URL` are Supabase secrets); the anon key in `Backend.swift` is public by
   design.
 
@@ -274,8 +286,8 @@ Read the relevant one before changing that area:
   access-model findings go in the adapter header and `spike/README.md`.
 - `worker/.env`, `spike/.env` and `spike/.state/` hold real credentials and live
   sessions — gitignored; never commit or echo them.
-- Commit messages record test counts — currently 159 worker (11 files), 387 iOS (43
-  files), 200 pgTAP (`plan()`s in `supabase/tests/*.sql`; the claim race is a separate
+- Commit messages record test counts — currently 182 worker (12 files), 395 iOS (44
+  files), 204 pgTAP (`plan()`s in `supabase/tests/*.sql`; the claim race is a separate
   `supabase/tests/concurrency/claim_race.sh`). Re-count rather than copying the last
   commit (`grep -cE '^\s*(it|test)\(' worker/test/*.test.ts`,
   `grep -c '@Test' ios/Tests/*.swift`); tests green before committing.

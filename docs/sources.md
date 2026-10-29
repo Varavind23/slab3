@@ -2,11 +2,36 @@
 
 Moved out of CLAUDE.md (2026-10-01) verbatim; CLAUDE.md keeps the summary rules. `spike/README.md` remains authoritative on access paths.
 
-- **Courtyard: SOLVED, browserless, and the price is cert-keyed.** Three adapters
-  are live and none is dead code — know which one you are in before editing:
+- **Courtyard: browserless and cert-keyed — and BRING-YOUR-OWN-ACCOUNT since
+  2026-10-29.** At ~03:25 UTC that day `card-details` started answering **401
+  `{"message":"authentication required"}`** to every anonymous request; the user's
+  own Courtyard login (Privy, emailed code) unlocks it (`spike/README.md` §2g,
+  owner decisions C1–C4). Three adapters are live and none is dead code — know
+  which one you are in before editing:
+  - **Connecting** (`courtyard-connect` Edge Function, `_shared/courtyard-auth.ts`,
+    `_shared/courtyard-session.ts`, `CourtyardConnectView.swift`). Two POSTs —
+    `start` (Privy emails a code) and `verify` (log in with `mode: "no-signup"`,
+    prove the token on cert 96679812, store it). Traps, all measured:
+    * Privy 403s `missing_origin` without `Origin: https://courtyard.io` — the one
+      header we send that is not our own (C4: allowed only because required).
+    * Courtyard's Privy app is in **HTTP-only cookie mode**: the body's
+      `refresh_token` is the literal `"deprecated"`; the real one is the
+      `privy-refresh-token` **Set-Cookie** (Domain `privy.courtyard.io`). The server
+      keeps the `privy-*` cookies sealed with the token in `courtyard_credentials`.
+    * Refresh = `POST privy.courtyard.io/api/v1/sessions` with bearer + cookies.
+      Inside the token's ~1h life it answers `session_update_action: "ignore"`.
+      Refresh tokens are single-use, so **exactly one call refreshes**, under the
+      row's `refresh_lease_until` lease; losers wait for its row. There is no
+      password fallback: a refused refresh is `auth_expired` and the user needs a
+      new code.
+    * `courtyard-price` returns `not_connected` **before the cache read** (C2:
+      Courtyard data only to connected users, even on a hit), and `auth_expired`
+      for a refused session. Old app builds read both as `.unavailable` and keep
+      their last prices. A CY-basis lot claim raises `cy_not_connected`.
   - `worker/src/sources/courtyard-scanner.ts` — **THE price source.**
-    `GET api.courtyard.io/scanner/card-details?cert=&grader=`, unauthenticated,
-    no browser, no account. One call returns price + identity + grade-split comps.
+    `GET api.courtyard.io/scanner/card-details?cert=&grader=`, needs the user's
+    `Authorization: Bearer` since 2026-10-29 (401 = `auth_expired`, never cached),
+    no browser. One call returns price + identity + grade-split comps.
     Cert-keyed, so it cannot answer with a different card and the whole
     `identify()` guessing problem does not apply here. Found by tearing down the
     Android app (`io.courtyard.app` 1.7.00; Expo/RN but **Hermes bytecode** —
@@ -94,12 +119,10 @@ Moved out of CLAUDE.md (2026-10-01) verbatim; CLAUDE.md keeps the summary rules.
   `npm run courtyard:probe` before recording one as a finding, and check what UA
   you sent before recording a `/scanner/*` one.
 
-  Retired, do not rebuild: **`courtyard-connect` is not needed for pricing.** The
-  scanner endpoint is public; anonymous and bearer responses are byte-identical.
-  The Privy OTP relay (`spike/README.md` §2a) still works and is still the right
-  design *if* a future feature needs a user session — nothing in the price path
-  does. `spike/courtyard-plan.md` is the plan that led here; §2b overturns its
-  premises, so read §2b first.
+  `courtyard-connect` was "retired, do not rebuild" from 2026-08-31 to 2026-10-29,
+  while the scanner was anonymous. Courtyard's login wall reversed that: it is the
+  Privy OTP relay §2a designed, built for real (§2g). `spike/courtyard-plan.md` is
+  the plan that led to §2b; read §2b and §2g first.
 - **Card Ladder: live (server-side, bring-your-own-account).** The web SPA and
   `search.cardladder.com` are Turnstile-walled, but the real data plane is Firebase
   Cloud Functions on Google hosts (not behind Cloudflare) that take a plain Bearer

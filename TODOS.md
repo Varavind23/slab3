@@ -76,6 +76,27 @@ bugs shipped green three times because nothing asserted on layout.
   and `lot_range_reports` are kept; bringing them back is only `LotDashboardView`.
 - **Screenshot import** of the lot buyer's allocation screen (teams.md §7) — not built.
 
+## Courtyard bring-your-own-account — follow-ups (2026-10-29)
+
+Courtyard became bring-your-own-account on 2026-10-29 (`spike/README.md` §2g).
+Deferred from that change, most-worth-doing first:
+
+1. **The legacy comps path in item 1 below now also skips the connection gate.**
+   `loadSales` → `courtyard.recentSales` calls `/index/*` straight from the phone,
+   unauthenticated, so an unconnected user can still get Courtyard comps that way
+   when `courtyardSales == nil` (owner decision C2 says they shouldn't). It is
+   dormant for the reason item 1 gives; deleting that branch fixes both.
+2. **Per-user Courtyard budget.** Each miss now spends the USER'S own Courtyard
+   session. Nothing caps it beyond PricePacer's 400 ms gap and the no-bulk-refresh
+   rule. `scrape_budget.source` already allows `'courtyard'`; add a
+   `spend_courtyard_budget` if Courtyard ever rate-limits an account.
+3. **A failed session write after a successful refresh.** Privy rotates the
+   refresh cookie (measured 2026-10-29), so if `courtyard-store.write` fails the
+   stored cookie is spent. Replaying a just-spent cookie answered `200 "ignore"`
+   rather than a revocation (§2g), so the likely cost is a stuck expired token
+   until the user reconnects — not verified past a few seconds after rotation.
+   Rare: the DB answered the lease a moment before.
+
 ## Courtyard cleanup — three known gaps (deferred 2026-09-03)
 
 Found while fixing the User-Agent wall (`spike/README.md` §2c). All three were

@@ -35,6 +35,7 @@ struct ScanScreen: View {
     @Query(sort: \Folder.createdAt, order: .reverse) private var groups: [Folder]
     @State private var showTargetSheet = false
     @AppStorage(PriceService.connectedKey) private var cardLadderConnected = false
+    @AppStorage(PriceService.courtyardConnectedKey) private var courtyardConnected = false
     // Held and prepared: building a generator per scan adds a perceptible lag to
     // the first buzz, which in burst mode is every buzz.
     @State private var captureHaptic = UIImpactFeedbackGenerator(style: .medium)
@@ -44,9 +45,10 @@ struct ScanScreen: View {
         VStack(spacing: 0) {
             header
             ScanFilingBar(target: scanTarget, lot: scanLot, filedToday: filedToday,
-                          // Only a CL lot needs the buyer's own Card Ladder account; a
-                          // CY lot takes members without one (M3, claim_lot_scan v3).
-                          needsCardLadder: scanLot?.valueBasis == .cl && !cardLadderConnected,
+                          // A lot needs the buyer's own account for ITS basis only: a
+                          // CY lot takes members without Card Ladder (M3), a CL lot
+                          // members without Courtyard (claim_lot_scan, 2026-10-29).
+                          needsSource: lotNeeds,
                           tap: {
                               // A lot's bar opens the lot on Teams — lots are chosen there.
                               if scanLot != nil {
@@ -236,6 +238,12 @@ struct ScanScreen: View {
     }
 
     private var scanLot: Lot? { scanTarget?.teamLotId.flatMap { openLots[$0] } }
+    /// The source the scan lot claims on, when this user hasn't connected it.
+    private var lotNeeds: PriceSource? {
+        guard let basis = scanLot?.valueBasis else { return nil }
+        let connected = basis == .cl ? cardLadderConnected : courtyardConnected
+        return connected ? nil : basis.source
+    }
 
     private var filedToday: Int {
         guard let id = scanTarget?.localId else { return 0 }

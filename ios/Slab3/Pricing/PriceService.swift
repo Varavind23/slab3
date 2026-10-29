@@ -4,9 +4,12 @@ import SwiftData
 /// Fetches a card's market prices and writes them back to the store. Two sources,
 /// fetched independently so one failing never blocks the other:
 ///   • Courtyard — the SCANNER endpoint (cert-keyed, via courtyard-price), which is
-///     the price, the identity and the comps. Algolia is kept for the cert-keyed
-///     render image only; it indexes the marketplace, so it blanked most scanned
-///     cards and could match a different one (spike/README.md §2b).
+///     the price, the identity and the comps. Since 2026-10-29 bring-your-own-
+///     account too: Courtyard put the scanner behind login (spike/README.md §2g),
+///     so it is only fetched once the user connects their own Courtyard account
+///     (CourtyardConnectView). Algolia is kept for the cert-keyed render image
+///     only; it indexes the marketplace, so it blanked most scanned cards and could
+///     match a different one (spike/README.md §2b).
 ///   • Card Ladder — server-side, bring-your-own-account: only fetched when the user
 ///     has connected their own CL account (see CardLadderConnectView).
 ///
@@ -24,10 +27,18 @@ enum PriceService {
     /// Courtyard's own scanner API: price + identity + comps in one call.
     private static let scanner = CourtyardScannerClient()
     private static let cardLadder = CardLadderClient()
+    private static let courtyardAccount = CourtyardAccountClient()
 
     /// Set true after a successful connect; cleared if the server reports the
     /// connection is gone. Drives whether we attempt Card Ladder at all + the UI CTA.
     static let connectedKey = "cardladder_connected"
+    /// The same for Courtyard (2026-10-29). Its own key, because the two
+    /// connections are independent: either can exist without the other.
+    static let courtyardConnectedKey = "courtyard_connected"
+    /// Set when the server said the Courtyard session was refused, so Settings can
+    /// say "sign-in expired" rather than a bare "not connected" — the user did
+    /// connect, and needs to know why it stopped. Cleared on connect.
+    static let courtyardExpiredKey = "courtyard_session_expired"
 
     /// What a refresh actually managed to do, so a bulk run can tell the user
     /// something specific instead of leaving them to guess at empty columns.
@@ -81,6 +92,15 @@ enum PriceService {
 
     @discardableResult
     private static func refreshCourtyard(_ card: Card, force: Bool = false) async -> PriceStatus {
+        // Only for users who connected their own Courtyard account (C1). Like Card
+        // Ladder's gate this DOES clear the column: Courtyard data reaches only
+        // connected users (C2), so a number left on screen would be one we may no
+        // longer show.
+        guard UserDefaults.standard.bool(forKey: courtyardConnectedKey) else {
+            applyCourtyard(.notConnected, to: card)
+            card.courtyardConfidence = 0
+            return .notConnected
+        }
         // Cert-keyed, so there is no matching to get wrong: the endpoint either
         // knows this cert or it does not. That retires the whole `identify()`
         // problem for this source — the Algolia path could only ever answer with
@@ -94,6 +114,15 @@ enum PriceService {
             // Their GemRate upstream, or ours. Keeps the last value, marks stale.
             applyCourtyard(.unreachable, to: card)
             return .unavailable
+
+        case .notConnected, .authExpired:
+            applyCourtyard(.notConnected, to: card)
+            card.courtyardConfidence = 0
+            UserDefaults.standard.set(false, forKey: courtyardConnectedKey)
+            if case .authExpired = answer {
+                UserDefaults.standard.set(true, forKey: courtyardExpiredKey)
+            }
+            return .notConnected
 
         case .noPrice(let identity, let groups):
             // Either Courtyard's catalog has no such cert, or it knows the card and
@@ -317,8 +346,16 @@ enum PriceService {
     /// ALONE — "couldn't ask" is not "not connected", the same distinction
     /// prices draw between unavailable and notListed.
     static func syncConnectionState() async {
-        guard let connected = await cardLadder.isConnected() else { return }
-        UserDefaults.standard.set(connected, forKey: connectedKey)
+        async let cl = cardLadder.isConnected()
+        async let cy = courtyardAccount.isConnected()
+        if let connected = await cl {
+            UserDefaults.standard.set(connected, forKey: connectedKey)
+        }
+        // Connected per the server says nothing about whether the session still
+        // works, so the expired note is left for a price call to clear or set.
+        if let connected = await cy {
+            UserDefaults.standard.set(connected, forKey: courtyardConnectedKey)
+        }
     }
 
     // MARK: Sales (comps)

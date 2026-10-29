@@ -413,6 +413,10 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 enabled = true
 verify_jwt = true
 
+[functions.courtyard-connect]
+enabled = true
+verify_jwt = true
+
 [functions.cardladder-price]
 enabled = true
 verify_jwt = true

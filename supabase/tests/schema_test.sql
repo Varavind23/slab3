@@ -3,7 +3,7 @@
 -- RLS isolation between users, and worker-table deny-all to clients.
 
 begin;
-select plan(19);
+select plan(21);
 
 -- Extensions used by the tests
 create extension if not exists pgtap with schema extensions;
@@ -158,6 +158,22 @@ select throws_ok(
   '42501',
   null,
   'authenticated client cannot write cy_scan_cache'
+);
+-- A user's own Courtyard session (2026-10-29). Standing access to their Courtyard
+-- account — which also holds their wallet — so it is readable by NO client, not
+-- even its owner: the sealed session only ever leaves through the service role.
+-- Grants are revoked as well, so reading it is a 42501, not an empty result.
+select throws_ok(
+  $$select count(*) from courtyard_credentials$$,
+  '42501',
+  null,
+  'courtyard_credentials is unreadable by authenticated clients'
+);
+select throws_ok(
+  $$insert into courtyard_credentials (user_id, session) values ('11111111-1111-1111-1111-111111111111', '{}')$$,
+  '42501',
+  null,
+  'authenticated client cannot write courtyard_credentials'
 );
 reset role;
 

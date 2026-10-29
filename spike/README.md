@@ -905,6 +905,67 @@ answering 200 throughout, so no wall was active):
 `cy-supports-acquisition-status: 1`. A 404 without the header says nothing about
 whether Courtyard knows the cert.
 
+### 2g. `/scanner/card-details` is behind LOGIN — and the user's own account opens it — 2026-10-29
+
+**The wall.** From ~03:25 UTC 2026-10-29 (the last `ok` write to `cy_scan_cache`;
+writes then stopped) every anonymous `card-details` request answers
+**`401 {"message":"authentication required"}`** — JSON, `server: Google Frontend`.
+That is their stack about the CREDENTIAL, not the §2c WAF (bare-HTML 403) and not
+an IP wall. Same with both §2c/§2f headers. `/scanner/card-grader-image` still
+answers anonymously. Courtyard app 1.7.90 shipped 2026-10-27, two days before.
+Our code degraded safely: 401 fell to `source_error`, never cached; prices went
+stale, new scans got nothing, CY-basis lot claims sat in `pending_price`.
+
+**A fresh bearer from the user's own Courtyard login unlocks it** —
+`spike/courtyard/wall-probe.ts`, owner's account, same minute:
+anonymous `401`; `Authorization: Bearer <token>` → `200`, cert 96679812 =
+**$91.30, confidence 3**. (The §2b bar was $50.80 in August; the market moved.) An
+expired or garbage bearer gets the same 401 as none, so only a live login proves
+anything. Owner decisions **C1** bring-your-own-account like Card Ladder, **C2**
+Courtyard data only to connected users even on a cache hit, **C3** no shared
+account, **C4** send Courtyard's Origin to Privy only if required.
+
+**The Privy relay (§2a) from a server, as measured:**
+* `passwordless/init` with honest headers → **`403 {"code":"missing_origin"}`**;
+  with `Origin: https://courtyard.io` → 200. Required, so sent (C4). Origin alone
+  suffices — no Referer, and our own User-Agent.
+* `passwordless/authenticate` with **`mode: "no-signup"`** → 200 for an existing
+  account (`is_new_user: false`). Connect never creates a Courtyard account.
+  Wrong code → `422 {"code":"invalid_credentials"}`; bad address →
+  `400 {"code":"invalid_data"}`.
+* The response's `token` (ES256 JWT, ~1h) is the bearer. `privy_access_token` is
+  `null`, and `refresh_token` is the literal string **`"deprecated"`**: Courtyard's
+  Privy app runs in **HTTP-only COOKIE mode** (`session_update_action: "set"`). The
+  real refresh token is the **`privy-refresh-token` Set-Cookie**, Domain
+  `privy.courtyard.io` (Courtyard's Privy custom domain, a CNAME to
+  `*.api.privy.systems`), alongside `privy-token`, `privy-access-token`,
+  `privy-session`. A server must keep those cookies — the first probe discarded
+  them and could not refresh (`401 missing_or_invalid_token`).
+* Refresh = `POST privy.courtyard.io/api/v1/sessions`, bearer + cookies, body
+  `{"refresh_token":"deprecated"}`. Inside the token's lifetime → 200,
+  `session_update_action: "ignore"`, same token, refreshed token prices fine.
+* **After expiry (19:13 UTC, through the real Deno `courtyard-price` on a scratch
+  stack):** the lease was taken, the refresh answered with a NEW token (exp +1h)
+  and a **rotated `privy-refresh-token` cookie**, the row was written with the
+  lease released, and the cert priced ($91.30 / 3). Origin-only headers suffice
+  on `/sessions` too.
+* **Replaying the SPENT cookie** (the race loser's view) → `200`,
+  `session_update_action: "ignore"`, no new token — Privy tolerates a just-rotated
+  cookie rather than revoking the session, and the winner's session kept pricing
+  afterwards. So a lost race is not the sign-out it could have been; the lease
+  stays anyway, because a loser holding only an expired token still cannot price.
+
+**Built** (branch `cy-connect`): `courtyard-connect` (start / verify / GET /
+DELETE), `_shared/courtyard-auth.ts` (Privy client), `_shared/courtyard-session.ts`
+(reuse until 5 min from expiry; exactly one refresh under
+`courtyard_credentials.refresh_lease_until`; a network error is never a dead
+session), `courtyard-price` gated per C2, `claim_lot_scan` raising
+`cy_not_connected` for a CY lot, and `CourtyardConnectView` in the app.
+
+**Standing rule:** a Courtyard `/scanner/card-details` 401 is about the session.
+Before recording one as a wall, check a FRESH login's token — and that the request
+carried both §2c/§2f headers.
+
 ## 3. Physical slab scanning (needs iPhone + real PSA and CGC slabs)
 
 Xcode → New iOS App **ScanHarness** (SwiftUI, iOS 17) → replace generated files

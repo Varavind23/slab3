@@ -84,6 +84,8 @@ export const CY_ERROR_STATUS: Record<CyErrorKind, "not_found" | "source_error"> 
   unresolvable: "not_found",
   source_error: "source_error",
   network: "source_error",
+  // A refused credential is never an answer about the card: never cached.
+  auth_expired: "source_error",
 };
 
 export type { CyErrorKind };

@@ -11,8 +11,10 @@ import SwiftUI
 struct SalesPanel: View {
     let card: Card
     @Binding var source: PriceSource
-    let connected: Bool
-    let onConnect: () -> Void
+    /// Whether THIS user has connected each source (both are bring-your-own-account
+    /// since 2026-10-29).
+    let connected: (PriceSource) -> Bool
+    let onConnect: (PriceSource) -> Void
 
     /// Empty is REAL CONTENT, never a hidden panel. "No recent sales" (the source
     /// answered and has none) and "not fetched" are different facts and say
@@ -45,10 +47,10 @@ struct SalesPanel: View {
             }
 
             let sales = card.sales(for: source)
-            if source == .cl && !connected {
-                emptyNote("Connect Card Ladder to see sales")
-                CaliperButton(title: "Connect Card Ladder", variant: .outline, fullWidth: true) {
-                    onConnect()
+            if !connected(source) {
+                emptyNote("Connect \(source.accessibilityName) to see sales")
+                CaliperButton(title: "Connect \(source.accessibilityName)", variant: .outline, fullWidth: true) {
+                    onConnect(source)
                 }
             } else if card.salesLoading && sales == nil {
                 emptyNote("Loading sales\u{2026}")

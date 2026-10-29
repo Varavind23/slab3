@@ -10,17 +10,22 @@
 -- previews its impact, then re-counts without moving anybody's buy.
 
 begin;
-select plan(35);
+select plan(37);
 
 -- ── Seed (as postgres) ──────────────────────────────────────────────────────
--- 1 Lead (CL)   2 Buyer (CL)   3 Member with no Card Ladder account
+-- 1 Lead (CL)   2 Buyer (CL + CY)   3 Member with no Card Ladder account (CY)
+-- 4 Member with no Courtyard account (2026-10-29: a CY lot needs one, C2)
 insert into auth.users (id, email) values
   ('20000000-0000-0000-0000-000000000001', 'lead@basis.dev'),
   ('20000000-0000-0000-0000-000000000002', 'buyer@basis.dev'),
-  ('20000000-0000-0000-0000-000000000003', 'nocl@basis.dev');
+  ('20000000-0000-0000-0000-000000000003', 'nocl@basis.dev'),
+  ('20000000-0000-0000-0000-000000000004', 'nocy@basis.dev');
 insert into cardladder_credentials (user_id, encrypted_blob) values
   ('20000000-0000-0000-0000-000000000001', 'x'),
   ('20000000-0000-0000-0000-000000000002', 'x');
+insert into courtyard_credentials (user_id, session) values
+  ('20000000-0000-0000-0000-000000000002', '{}'),
+  ('20000000-0000-0000-0000-000000000003', '{}');
 
 -- A: both sources know it — CL $50, CY $150. (The disagreement is the point: which
 --    bucket it lands in depends on the lot's basis.)
@@ -54,6 +59,8 @@ set local request.jwt.claims to '{"sub":"20000000-0000-0000-0000-000000000002","
 select lives_ok(format($$select join_team(%L, 'Buyer')$$, current_setting('t.code')), 'a buyer joins');
 set local request.jwt.claims to '{"sub":"20000000-0000-0000-0000-000000000003","role":"authenticated"}';
 select lives_ok(format($$select join_team(%L, 'NoCL')$$, current_setting('t.code')), 'a member with no CL joins');
+set local request.jwt.claims to '{"sub":"20000000-0000-0000-0000-000000000004","role":"authenticated"}';
+select lives_ok(format($$select join_team(%L, 'NoCY')$$, current_setting('t.code')), 'a member with no Courtyard joins');
 
 -- ── Team max-buy settings (M2) ──────────────────────────────────────────────
 select is((select max_buy_skew from teams), null, 'a new team has no max-buy settings: members keep their own');
@@ -88,6 +95,11 @@ select throws_ok($$update lots set value_basis = 'cy' where id = 'f9000000-0000-
   'P0001', 'use_set_lot_basis', 'a plain update cannot flip the basis (M4)');
 
 -- ── A CY lot ────────────────────────────────────────────────────────────────
+-- Courtyard data reaches only connected users (C2), and this claim is decided
+-- from it — same gate a CL lot has. Raised before anything is written.
+set local request.jwt.claims to '{"sub":"20000000-0000-0000-0000-000000000004","role":"authenticated"}';
+select throws_ok($$select claim_lot_scan('f9000000-0000-0000-0000-000000000001', '9201', 'psa')$$,
+  'P0001', 'cy_not_connected', 'a member with no Courtyard account cannot claim into a CY lot');
 set local request.jwt.claims to '{"sub":"20000000-0000-0000-0000-000000000003","role":"authenticated"}';
 select is(claim_lot_scan('f9000000-0000-0000-0000-000000000001', '9201', 'psa', p_max_buy_cents => 6100)->>'outcome',
   'confirmed', 'a member with NO Card Ladder account claims into a CY lot');

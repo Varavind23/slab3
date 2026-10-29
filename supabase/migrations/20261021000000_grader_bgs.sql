@@ -1,0 +1,22 @@
+-- BGS (Beckett) as a third grader (owner, 2026-10-21;
+-- ~/.claude/plans/caaution-in-terms-of-crystalline-treasure.md).
+--
+-- WHY THIS IS ALL IT TAKES. The `grader` type is the only thing in the schema that
+-- names graders. Every table (cards, cl_resolve_cache, cy_scan_cache, lot_claims)
+-- and every function (make_card_key, cy_card_key, claim_lot_scan, release_lot_claim)
+-- takes it by type, so they all accept 'bgs' without being touched — and none of
+-- them changes for 'psa' or 'cgc'. Keys stay per grader: cy_card_key starts
+-- `bgs:`, and lot_claims_cert_uniq includes the grader, so a BGS slab never
+-- collides with a PSA slab that shares its number.
+--
+-- SAFE FOR SHIPPED PHONES. Every grader the 0.8 and 0.9 apps decode from the
+-- server (lot claims, credited cards, pending releases) is a plain String, not an
+-- enum (checked at 7f2a60f and ca30bbe), so a teammate's BGS claim cannot fail
+-- their lot load. Their only gap is a badge: `Grader(rawValue:) ?? .psa` shows it
+-- as PSA until they update.
+--
+-- ITS OWN FILE: Postgres refuses to USE an enum value inside the transaction that
+-- added it. Nothing below does, but keeping this alone means nothing ever can.
+-- An added enum value cannot be dropped; left unused it is inert.
+
+alter type grader add value if not exists 'bgs';

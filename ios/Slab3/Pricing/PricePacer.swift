@@ -24,7 +24,10 @@ final class PricePacer {
     static let shared = PricePacer()
 
     static let cardLadderGap = Duration.milliseconds(1100)   // ≤1 req/sec (Card Ladder)
-    static let courtyardGap = Duration.milliseconds(120)     // Courtyard-only run
+    /// Courtyard-only run. 400 ms, up from 120, since 2026-10-29: each Courtyard
+    /// miss now goes out on the USER'S OWN Courtyard login (spike/README.md §2g),
+    /// and a burst of 30 at 8/sec is not how a person uses their account.
+    static let courtyardGap = Duration.milliseconds(400)
 
     private var queue: [UUID] = []
     private var worker: Task<Void, Never>?

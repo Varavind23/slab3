@@ -17,10 +17,11 @@ struct ScanFilingBar: View {
     var lot: Lot? = nil
     /// Cards scanned today that are in the target group.
     let filedToday: Int
-    /// A CL lot claims on Card Ladder's value — without a connection nothing can be
-    /// claimed, and the bar must say so rather than let scans quietly go nowhere.
-    /// A CY lot never sets it: members without Card Ladder buy into one (M3).
-    var needsCardLadder = false
+    /// The source a lot claims on, when this user has not connected it. A CL lot
+    /// needs Card Ladder; since 2026-10-29 a CY lot needs Courtyard (C2). Without
+    /// the connection nothing can be claimed, and the bar must say so rather than
+    /// let scans quietly go nowhere.
+    var needsSource: PriceSource? = nil
     let tap: () -> Void
     /// Filing into a lot: the ⇄ at the bar's end opens the plain-group picker, the
     /// way out of a lot without closing it (D29). Tapping the rest goes to Teams.
@@ -44,18 +45,18 @@ struct ScanFilingBar: View {
             }
         }
         .frame(height: Caliper.hitMin)
-        .overlay(Rectangle().strokeBorder(needsCardLadder ? Caliper.confMid.opacity(0.6) : Caliper.lineStrong,
+        .overlay(Rectangle().strokeBorder(needsSource != nil ? Caliper.confMid.opacity(0.6) : Caliper.lineStrong,
                                           lineWidth: Caliper.borderWidth))
     }
 
     private var main: some View {
         Button(action: tap) {
             HStack(spacing: Caliper.space4) {
-                if let target, needsCardLadder {
+                if let target, let needsSource {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 11))
                         .foregroundStyle(Caliper.confMid)
-                    Text("Connect Card Ladder to buy into \(target.name)")
+                    Text("Connect \(needsSource.accessibilityName) to buy into \(target.name)")
                         .font(.calBody)
                         .foregroundStyle(Caliper.confMid)
                         .lineLimit(1)

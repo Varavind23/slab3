@@ -1,19 +1,24 @@
 // Courtyard price + identity + comps for one scanned slab, from Courtyard's own
-// scanner API. One unauthenticated upstream call answers all three.
+// scanner API. One upstream call answers all three.
 //
-// NO ToS GATE, unlike cardladder-price. Card Ladder data is withheld from users
-// without their own subscription — even on a cache hit — because it is a paid
-// product. Courtyard's scanner endpoint is public and unauthenticated: there is
-// no account to hold, nothing to withhold, and no per-user budget to spend. The
-// caller must still be a signed-in Slabs user, so this function is not an open
-// proxy for anyone on the internet.
+// BRING-YOUR-OWN-ACCOUNT since 2026-10-29. Until then the scanner was anonymous
+// and this function had no ToS gate. At ~03:25 UTC 2026-10-29 Courtyard put it
+// behind login (401 "authentication required", spike/README.md §2g); the user's
+// own Courtyard session, connected through courtyard-connect, unlocks it. So,
+// exactly like cardladder-price:
+//   * No connected Courtyard account → `not_connected`, EVEN ON A CACHE HIT
+//     (owner decision C2): data Courtyard now gates behind a login is not handed
+//     to users who never logged in.
+//   * A session Courtyard refuses → `auth_expired`. Nothing cached, the row is
+//     kept; only a new emailed code fixes it (there is no password fallback).
+// The caller must be a signed-in Slabs user as before.
 //
-// WHY IT IS SERVER-SIDE AT ALL, given there is no secret to protect: a global
-// cache. A 200-slab bulk refresh from a phone would otherwise be 200 requests per
-// device, re-fetching cards every other user has already fetched. Courtyard 403s
-// an IP that hammers it — observed on /index/* during the 2026-08-29 spike — so
-// one cached row per cert, shared by everyone, is the difference between polite
-// and blocked.
+// WHY IT IS SERVER-SIDE: a global cache. A 200-slab bulk refresh from a phone
+// would otherwise be 200 requests per device, re-fetching cards every other user
+// has already fetched. Courtyard 403s an IP that hammers it — observed on /index/*
+// during the 2026-08-29 spike — so one cached row per cert, shared by every
+// CONNECTED user, is the difference between polite and blocked. Each miss is
+// fetched with the asking user's own token.
 //
 // See spike/README.md §2b for the endpoint, and the migration
 // 20260831120000_courtyard_scanner_cache.sql for why the cache is one table.
@@ -26,7 +31,10 @@ import {
   type CyScanResult,
   type CyGraderImages,
 } from "../_shared/courtyard-scanner.ts";
-import { admin, callerId, isSlab, json, logWrite } from "../_shared/http.ts";
+import { admin, callerId, encKey, isSlab, json, logWrite } from "../_shared/http.ts";
+import { acquireCyToken } from "../_shared/courtyard-session.ts";
+import { CyAuthError } from "../_shared/courtyard-auth.ts";
+import { cyCredStore, noteCyFailure } from "../_shared/courtyard-store.ts";
 
 /** Same 24h TTL as the Card Ladder price cache. The identity half barely changes,
  *  but it rides the same response, so one expiry for the whole document is both
@@ -127,6 +135,17 @@ Deno.serve(async (req) => {
 
   const db = admin();
 
+  // 0) The ToS gate (C2), BEFORE the cache: no Courtyard account, no Courtyard data.
+  //    Could-not-ask is transient, never "not connected" — that would clear the
+  //    user's Courtyard column on a database blip.
+  const { data: cred, error: credError } = await db
+    .from("courtyard_credentials")
+    .select("user_id")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (credError) return json({ status: "source_error" });
+  if (!cred) return json({ status: "not_connected" });
+
   // 1) Cache-first. The key is (grader, cert) — derivable from the scan itself,
   //    so this costs no network and no upstream call for a card anyone has
   //    already looked up.
@@ -153,12 +172,34 @@ Deno.serve(async (req) => {
     return json(okReply(cached, true));
   }
 
-  // 2) Fetch. One call returns price, identity and comps together.
+  // 2) The user's own bearer. Reused until near expiry; refreshed under a lease
+  //    (_shared/courtyard-session.ts). A transient failure here is a 5xx-alike:
+  //    serve what we hold, clear nothing.
+  let bearer: string;
+  try {
+    bearer = await acquireCyToken(cyCredStore(db, userId), encKey());
+  } catch (e) {
+    if (e instanceof CyAuthError && e.kind === "auth_expired") {
+      await noteCyFailure(db, userId);
+      return json({ status: "auth_expired" });
+    }
+    if (cached && cached.fetch_status === "ok") return json(okReply(cached, true, true));
+    return json({ status: "source_error" });
+  }
+
+  // 3) Fetch. One call returns price, identity and comps together.
   let result: CyScanResult;
   try {
-    result = await fetchCardDetails(cert, grader);
+    result = await fetchCardDetails(cert, grader, { bearer });
   } catch (e) {
     const kind = e instanceof CyError ? e.kind : "network";
+
+    // Courtyard refused a token we believed good: the session is dead or revoked.
+    // About the CREDENTIAL, not the card — never cached, nothing served (C2).
+    if (kind === "auth_expired") {
+      await noteCyFailure(db, userId);
+      return json({ status: "auth_expired" });
+    }
 
     // An `unresolvable` 400 NEVER overwrites a price we already hold.
     //
@@ -224,7 +265,7 @@ Deno.serve(async (req) => {
     return json({ status: "source_error" });
   }
 
-  // 3) Store and answer. A no-model-price card (price 0 / confidence 0 upstream)
+  // 4) Store and answer. A no-model-price card (price 0 / confidence 0 upstream)
   //    is cached as fetch_status 'ok' with price_cents NULL — Courtyard knows the
   //    card, it simply has no number for it, which the UI renders as an em dash.
   const row = rowOf(grader, cert, result);

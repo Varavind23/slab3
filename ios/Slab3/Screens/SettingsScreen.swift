@@ -15,7 +15,10 @@ struct SettingsScreen: View {
     @Query private var cards: [Card]
 
     @AppStorage(PriceService.connectedKey) private var cardLadderConnected = false
+    @AppStorage(PriceService.courtyardConnectedKey) private var courtyardConnected = false
+    @AppStorage(PriceService.courtyardExpiredKey) private var courtyardExpired = false
     @State private var showConnect = false
+    @State private var showCourtyardConnect = false
     @State private var showPayout = false
     @State private var showOnboarding = false
     @State private var showMaxBuy = false
@@ -35,7 +38,10 @@ struct SettingsScreen: View {
                     row("Card Ladder", value: cardLadderConnected ? "Connected" : "Not connected",
                         dot: Caliper.srcCL) { showConnect = true }
                     Hairline()
-                    row("Courtyard", value: "Public search", dot: Caliper.srcCY)
+                    // Bring-your-own-account since 2026-10-29 (spike/README.md §2g).
+                    row("Courtyard", value: courtyardConnected ? "Connected"
+                                            : courtyardExpired ? "Sign-in expired" : "Not connected",
+                        dot: Caliper.srcCY) { showCourtyardConnect = true }
                     Hairline()
                     row("Default emphasis", value: app.activeSource.accessibilityName) {
                         app.activeSource = PriceSource.allCases[
@@ -119,6 +125,7 @@ struct SettingsScreen: View {
         }
         .background(Caliper.bg)
         .sheet(isPresented: $showConnect) { CardLadderConnectView() }
+        .sheet(isPresented: $showCourtyardConnect) { CourtyardConnectView() }
         .sheet(isPresented: $showPayout) { PayoutSheet(app: app).presentationDetents([.height(260)]) }
         .sheet(isPresented: $showMaxBuy, onDismiss: { maxBuySummary = MaxBuyDefaults.summary }) {
             MaxBuySettingsSheet(isLead: app.team.isLead)

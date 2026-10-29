@@ -79,12 +79,45 @@ struct DetailScreenRenderTests {
 
     enum RenderError: Error { case failed }
 
+    /// Courtyard selected by a user who hasn't connected it (2026-10-29: Courtyard
+    /// is bring-your-own-account). The CTA must name Courtyard, not Card Ladder.
+    @Test func rendersCourtyardConnectCTA() throws {
+        let card = card(in: store.mainContext)
+        var source = PriceSource.cy
+        let url = try render(
+            SalesPanel(card: card, source: .init(get: { source }, set: { source = $0 }),
+                       connected: { $0 == .cl }, onConnect: { _ in })
+                .padding(Caliper.gutter)
+                .background(Caliper.bg),
+            named: "comps-cy-connect", height: 160
+        )
+        #expect(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    /// The Courtyard connect sheet's code step, with an error showing: the
+    /// tallest state, and the one with two secondary actions beside one primary.
+    @Test func rendersCourtyardConnectCodeStep() throws {
+        let view = CourtyardConnectView(step: .code, email: "someone@example.com",
+                                        error: "That code didn't work. Check it, or send a new one.")
+        // The shell (title, confirm), then the form drawn OUTSIDE its ScrollView.
+        let url = try render(
+            VStack(spacing: 0) {
+                view.frame(height: 200)
+                view.form
+                Spacer(minLength: 0)
+            }
+            .background(Caliper.bg),
+            named: "courtyard-connect-code", height: 520
+        )
+        #expect(FileManager.default.fileExists(atPath: url.path))
+    }
+
     @Test func rendersCompsList() throws {
         let card = card(in: store.mainContext)
         var source = PriceSource.cl
         let url = try render(
             SalesPanel(card: card, source: .init(get: { source }, set: { source = $0 }),
-                       connected: true, onConnect: {})
+                       connected: { _ in true }, onConnect: { _ in })
                 .padding(Caliper.gutter)
                 .background(Caliper.bg),
             named: "comps-cl", height: 300
@@ -137,7 +170,7 @@ struct DetailScreenRenderTests {
         var source = PriceSource.cy
         let url = try render(
             SalesPanel(card: card, source: .init(get: { source }, set: { source = $0 }),
-                       connected: true, onConnect: {})
+                       connected: { _ in true }, onConnect: { _ in })
                 .padding(Caliper.gutter)
                 .background(Caliper.bg),
             named: "comps-cy-empty", height: 160
