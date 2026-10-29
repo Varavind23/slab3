@@ -144,7 +144,7 @@ export function sessionFrom(body: any, cookies: Record<string, string>): CySessi
  *  recognise is "network": never tell a user their code was wrong on a guess. */
 function loginError(status: number, body: any): CyAuthError {
   const code = String(body?.code ?? "");
-  const msg = String(body?.error ?? "");
+  const msg = `HTTP ${status} ${code}: ${String(body?.error ?? "")}`;
   if (status === 429) return new CyAuthError("rate_limited");
   if (status === 400 && code === "invalid_data") return new CyAuthError("invalid_email", msg);
   if (/sign.?up|not (been )?found|does not exist|no (such )?(user|account)/i.test(`${code} ${msg}`)) {

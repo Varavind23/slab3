@@ -21,8 +21,12 @@ const TABLE = "courtyard_credentials";
 /** spike/README.md §2b's acceptance cert: a slab the scanner always prices. */
 const PROOF_CERT = "96679812";
 
-const authError = (e: unknown) => {
+const authError = (e: unknown, step: string) => {
   const kind = e instanceof CyAuthError ? e.kind : "network";
+  // Privy's own status + error text (never the email, code or a token): without
+  // it a refused login reads only as "200, invalid_code" in the edge logs, which
+  // cannot tell a mistyped code from a Privy-side rule (2026-10-29).
+  console.error(`courtyard-connect ${step}: ${kind} — ${e instanceof Error ? e.message : String(e)}`);
   // invalid_email | invalid_code | no_account | rate_limited pass through as-is;
   // anything else is "we couldn't reach Courtyard", never "your code was wrong".
   const passthrough = ["invalid_email", "invalid_code", "no_account", "rate_limited"];
@@ -65,7 +69,7 @@ Deno.serve(async (req) => {
     try {
       await startLogin(email);
     } catch (e) {
-      return authError(e);
+      return authError(e, "start");
     }
     return json({ ok: true, sent: true });
   }
@@ -78,7 +82,7 @@ Deno.serve(async (req) => {
   try {
     session = await verifyLogin(email, code);
   } catch (e) {
-    return authError(e);
+    return authError(e, "verify");
   }
 
   // Prove it before storing it: a session that does not unlock the scanner is
